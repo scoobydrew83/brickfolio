@@ -1,0 +1,10 @@
+# Copy to .dev.vars for `npm run cf:preview` (local Workers runtime with a local D1).
+AUTH_MODE=none
+CRON_SECRET=dev-secret
+BRICKLINK_CONSUMER_KEY=
+BRICKLINK_CONSUMER_SECRET=
+BRICKLINK_TOKEN=
+BRICKLINK_TOKEN_SECRET=
+REBRICKABLE_API_KEY=
+ALERT_WEBHOOK_URL=
+LDRAW_LIBRARY_URL=

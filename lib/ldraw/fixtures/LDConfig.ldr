@@ -1,0 +1,6 @@
+0 LDraw colour definitions (test fixture: a few colours from the official LDConfig.ldr)
+0 !COLOUR Black CODE 0 VALUE #1B2A34 EDGE #808080
+0 !COLOUR Blue CODE 1 VALUE #1E5AA8 EDGE #333333
+0 !COLOUR Red CODE 4 VALUE #B40000 EDGE #333333
+0 !COLOUR Yellow CODE 14 VALUE #FAC80A EDGE #333333
+0 !COLOUR Light_Bluish_Grey CODE 71 VALUE #A0A5A9 EDGE #333333

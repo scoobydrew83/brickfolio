@@ -1,0 +1,67 @@
+# Single-file version of docker-compose.yml + compose.tailscale.yml, for tools that take one compose
+# file (Coolify). Keep it in sync with those two files when they change.
+# Set TS_AUTHKEY, ALLOWED_USERS and the four BRICKLINK_* variables in Coolify's Environment Variables tab.
+# Don't assign a domain in Coolify: the app is only reachable at https://<TS_HOSTNAME>.<tailnet>.ts.net
+services:
+  tailscale:
+    image: tailscale/tailscale:stable
+    hostname: ${TS_HOSTNAME:-brickfolio}
+    environment:
+      - TS_AUTHKEY=${TS_AUTHKEY}
+      - TS_HOSTNAME=${TS_HOSTNAME:-brickfolio}
+      - TS_EXTRA_ARGS=--advertise-tags=${TS_TAG:-tag:brickfolio}
+      - TS_STATE_DIR=/var/lib/tailscale
+      - TS_SERVE_CONFIG=/config/serve.json
+      - TS_USERSPACE=true
+    volumes:
+      - tailscale-state:/var/lib/tailscale
+    configs:
+      - source: serve
+        target: /config/serve.json
+    restart: unless-stopped
+
+  app:
+    # Builds from this repo's Dockerfile at the branch Coolify deploys. To run the published image
+    # instead, replace these two lines with: image: ghcr.io/scoobydrew83/brickfolio:latest
+    build: .
+    pull_policy: build
+    network_mode: service:tailscale
+    depends_on: [tailscale]
+    environment:
+      - DATABASE_PATH=/data/app.db
+      - HOSTNAME=127.0.0.1
+      - AUTH_MODE=tailscale
+      - ALLOWED_USERS
+      - BRICKLINK_CONSUMER_KEY
+      - BRICKLINK_CONSUMER_SECRET
+      - BRICKLINK_TOKEN
+      - BRICKLINK_TOKEN_SECRET
+      - REBRICKABLE_API_KEY
+      - ALERT_WEBHOOK_URL
+      - ALERT_WEBHOOK_FORMAT
+      - APP_URL
+      # The LDraw parts library for the 3D view lives in the data volume; download it from Settings.
+      - LDRAW_LIBRARY_DIR=${LDRAW_LIBRARY_DIR:-/data/ldraw}
+      - LDRAW_LIBRARY_URL
+      - TZ
+      - SYNC_HOUR
+      - BACKUP_KEEP
+      - CRON_SECRET
+    volumes:
+      - data:/data
+      - image-cache:/app/.next/cache/images
+    restart: unless-stopped
+
+volumes:
+  data:
+  image-cache:
+  tailscale-state:
+
+configs:
+  serve:
+    content: |
+      {
+        "TCP": { "443": { "HTTPS": true } },
+        "Web": { "$${TS_CERT_DOMAIN}:443": { "Handlers": { "/": { "Proxy": "http://127.0.0.1:3000" } } } },
+        "AllowFunnel": { "$${TS_CERT_DOMAIN}:443": false }
+      }

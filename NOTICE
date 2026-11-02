@@ -1,0 +1,12 @@
+Brickfolio
+Copyright 2026 The Brickfolio Authors
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+LEGO® is a trademark of the LEGO Group of companies, which does not sponsor, authorize or endorse this project.
+BrickLink® is a trademark of BrickLink Corporation (part of the LEGO Group). Set data, images and prices are
+fetched from the BrickLink API under each user's own API keys and BrickLink's API terms of use.
+Theme and minifigure data, when enabled, comes from the Rebrickable API (https://rebrickable.com) under each
+user's own API key and Rebrickable's terms of use.
+The 3D view uses parts from the LDraw Parts Library (https://library.ldraw.org), licensed CC BY 2.0 by the
+LDraw.org contributors, and three.js (MIT). The test fixtures in lib/ldraw/fixtures are simplified stand-ins.

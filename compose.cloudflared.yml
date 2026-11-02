@@ -1,0 +1,16 @@
+# Overlay: publish through a Cloudflare Tunnel. Put a Cloudflare Access application in front of the
+# hostname (see docs/install.md) and use AUTH_MODE=cloudflare-access so the app checks Access's signed JWT.
+# In the tunnel's public hostname settings, point the service at http://app:3000.
+services:
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    command: tunnel --no-autoupdate run
+    environment:
+      - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN}
+    depends_on: [app]
+    restart: unless-stopped
+
+  app:
+    ports: !reset []
+    environment:
+      - AUTH_MODE=cloudflare-access

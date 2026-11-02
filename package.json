@@ -1,0 +1,48 @@
+{
+  "name": "brickfolio",
+  "version": "0.2.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "test": "vitest run",
+    "seed": "node scripts/seed.mjs",
+    "ldraw:download": "node scripts/ldraw-download.mjs",
+    "db:generate": "drizzle-kit generate",
+    "cf:build": "opennextjs-cloudflare build",
+    "cf:preview": "opennextjs-cloudflare build && wrangler d1 migrations apply DB --local && wrangler dev",
+    "cf:deploy": "opennextjs-cloudflare build && wrangler d1 migrations apply DB --remote && wrangler deploy",
+    "cf:typegen": "wrangler types --env-interface CloudflareEnv cloudflare-env.d.ts"
+  },
+  "dependencies": {
+    "@opennextjs/cloudflare": "^1.20.14",
+    "better-sqlite3": "^13.0.3",
+    "drizzle-orm": "^0.45.4",
+    "jose": "^6.2.14",
+    "lucide-react": "^1.66.0",
+    "next": "16.4.3",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "server-only": "^0.0.1",
+    "three": "0.186.1"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261030.1",
+    "@tailwindcss/turbopack": "^4",
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/node": "^26.6.6",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@types/three": "0.186.0",
+    "drizzle-kit": "^0.31.11",
+    "eslint": "^10",
+    "eslint-config-next": "16.4.3",
+    "tailwindcss": "^4",
+    "typescript": "^5",
+    "vitest": "^5.0.5",
+    "wrangler": "^4.156.0"
+  },
+  "license": "Apache-2.0"
+}

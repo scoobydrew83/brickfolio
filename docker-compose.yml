@@ -1,0 +1,45 @@
+# Self-hosted Brickfolio. By default the app is only reachable from this machine (http://127.0.0.1:3000).
+# To reach it from elsewhere, add one of the overlays (set COMPOSE_FILE in .env, see docs/install.md):
+#   compose.tailscale.yml   – private HTTPS on your tailnet via a Tailscale sidecar
+#   compose.cloudflared.yml – Cloudflare Tunnel, protected by Cloudflare Access
+# Coolify takes one file only: use compose.coolify-tailscale.yml (base + Tailscale, already merged).
+services:
+  app:
+    image: ${BRICKFOLIO_IMAGE:-ghcr.io/scoobydrew83/brickfolio:latest}
+    build: .
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      - DATABASE_PATH=/data/app.db
+      # Passed through from .env or from the variables you enter in Portainer, Coolify, Dockge, etc.
+      # (those tools don't always write a .env file, so env_file alone would miss them).
+      - BRICKLINK_CONSUMER_KEY
+      - BRICKLINK_CONSUMER_SECRET
+      - BRICKLINK_TOKEN
+      - BRICKLINK_TOKEN_SECRET
+      - REBRICKABLE_API_KEY
+      - ALERT_WEBHOOK_URL
+      - ALERT_WEBHOOK_FORMAT
+      - APP_URL
+      # The LDraw parts library for the 3D view lives in the data volume; download it from Settings.
+      - LDRAW_LIBRARY_DIR=${LDRAW_LIBRARY_DIR:-/data/ldraw}
+      - LDRAW_LIBRARY_URL
+      - AUTH_MODE
+      - ALLOWED_USERS
+      - CF_ACCESS_TEAM_DOMAIN
+      - CF_ACCESS_AUD
+      - TZ
+      - SYNC_HOUR
+      - BACKUP_KEEP
+      - CRON_SECRET
+    ports:
+      - "127.0.0.1:${PORT:-3000}:3000"
+    volumes:
+      - data:/data                           # SQLite database and daily backups
+      - image-cache:/app/.next/cache/images  # optimized BrickLink photos
+    restart: unless-stopped
+
+volumes:
+  data:
+  image-cache:

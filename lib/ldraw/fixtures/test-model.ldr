@@ -1,0 +1,7 @@
+0 Test model: three bricks in two steps
+0 Name: test-model.ldr
+1 4 0 0 0 1 0 0 0 1 0 0 0 1 testbrick.dat
+1 1 40 0 0 1 0 0 0 1 0 0 0 1 testbrick.dat
+0 STEP
+1 14 20 -24 0 1 0 0 0 1 0 0 0 1 testbrick.dat
+0 STEP

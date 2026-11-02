@@ -1,0 +1,1 @@
+ALTER TABLE `sets` ADD `omr_checked_at` text;

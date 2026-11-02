@@ -1,0 +1,42 @@
+# Overlay: serve the app at https://${TS_HOSTNAME}.<your-tailnet>.ts.net and nowhere else.
+# The app joins the sidecar's network and listens on 127.0.0.1 only, so the Tailscale-User-Login header
+# that `tailscale serve` adds can't be forged by another device on the tailnet. Use with AUTH_MODE=tailscale.
+services:
+  tailscale:
+    image: tailscale/tailscale:stable
+    hostname: ${TS_HOSTNAME:-brickfolio}
+    environment:
+      - TS_AUTHKEY=${TS_AUTHKEY}                         # reusable, not ephemeral, tagged (see docs/install.md)
+      - TS_HOSTNAME=${TS_HOSTNAME:-brickfolio}
+      - TS_EXTRA_ARGS=--advertise-tags=${TS_TAG:-tag:brickfolio}
+      - TS_STATE_DIR=/var/lib/tailscale                  # keeps the node's identity across redeploys
+      - TS_SERVE_CONFIG=/config/serve.json
+      - TS_USERSPACE=true                                # no /dev/net/tun needed: the app makes no tailnet calls
+    volumes:
+      - tailscale-state:/var/lib/tailscale
+    configs:
+      - source: serve
+        target: /config/serve.json
+    restart: unless-stopped
+
+  app:
+    network_mode: service:tailscale
+    depends_on: [tailscale]
+    ports: !reset []
+    environment:
+      - HOSTNAME=127.0.0.1
+      - AUTH_MODE=tailscale
+
+volumes:
+  tailscale-state:
+
+# Inline so nothing depends on repo files being on the server (e.g. Coolify). Tailscale fills in
+# ${TS_CERT_DOMAIN} itself; $$ keeps compose from substituting it.
+configs:
+  serve:
+    content: |
+      {
+        "TCP": { "443": { "HTTPS": true } },
+        "Web": { "$${TS_CERT_DOMAIN}:443": { "Handlers": { "/": { "Proxy": "http://127.0.0.1:3000" } } } },
+        "AllowFunnel": { "$${TS_CERT_DOMAIN}:443": false }
+      }

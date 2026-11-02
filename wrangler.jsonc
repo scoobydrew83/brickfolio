@@ -1,0 +1,29 @@
+// Cloudflare Workers + D1 deployment. See docs/cloudflare.md for the full walkthrough.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "brickfolio",
+  "main": "cloudflare/worker.ts",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "assets": { "directory": ".open-next/assets", "binding": "ASSETS" },
+  "images": { "binding": "IMAGES" }, // next/image optimization
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "brickfolio",
+      "database_id": "REPLACE_WITH_YOUR_D1_DATABASE_ID", // from `npx wrangler d1 create brickfolio`
+      "migrations_dir": "drizzle"
+    }
+  ],
+  "vars": {
+    "DB_DRIVER": "d1",
+    "AUTH_MODE": "cloudflare-access",
+    "TZ": "UTC"
+    // Set as secrets (npx wrangler secret put NAME): CF_ACCESS_TEAM_DOMAIN, CF_ACCESS_AUD, CRON_SECRET,
+    // BRICKLINK_CONSUMER_KEY, BRICKLINK_CONSUMER_SECRET, BRICKLINK_TOKEN, BRICKLINK_TOKEN_SECRET,
+    // and optionally REBRICKABLE_API_KEY, ALERT_WEBHOOK_URL (plus ALERT_WEBHOOK_FORMAT, APP_URL, LDRAW_LIBRARY_URL as vars)
+  },
+  // Daily BrickLink sync (UTC). Calls POST /api/v1/sync with CRON_SECRET.
+  "triggers": { "crons": ["17 4 * * *"] },
+  "observability": { "enabled": true }
+}

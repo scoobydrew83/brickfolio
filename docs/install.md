@@ -1,0 +1,300 @@
+# Install Brickfolio
+
+Step-by-step instructions for each setup. Pick one:
+
+| Setup | Good for | Files you need on the server | Login |
+|---|---|---|---|
+| [Local only](#local-only) | Trying it out on your own computer | `docker-compose.yml`, `.env` | None |
+| [Docker + Tailscale](#docker--tailscale) | A home server or NAS, used from your own devices | `docker-compose.yml`, `compose.tailscale.yml`, `.env` | Your Tailscale account |
+| [Docker + Cloudflare Tunnel](#docker--cloudflare-tunnel) | A home server, reachable from anywhere | `docker-compose.yml`, `compose.cloudflared.yml`, `.env` | Cloudflare Access (email code, Google, …) |
+| [Cloudflare Workers + D1](cloudflare.md) | No server at all (free plan works) | The whole repo (you deploy from it) | Cloudflare Access |
+
+Using Portainer, Dockge, Synology or similar? Read [Before you start](#before-you-start), pick a setup above, then see [Docker GUIs](#portainer-dockge-synology-and-other-docker-guis).
+
+- [Before you start](#before-you-start)
+- [Local only](#local-only)
+- [Docker + Tailscale](#docker--tailscale)
+- [Docker + Cloudflare Tunnel](#docker--cloudflare-tunnel)
+- [Portainer, Dockge, Synology and other Docker GUIs](#portainer-dockge-synology-and-other-docker-guis)
+- [Run a public demo](#run-a-public-demo)
+- [Updating](#updating)
+- [Troubleshooting](#troubleshooting)
+
+## Before you start
+
+### What you need
+
+- **For the Docker setups:** a machine with Docker Engine and Docker Compose **v2.24 or newer** (check with `docker compose version`). The image runs on 64-bit Intel/AMD (`amd64`) and ARM (`arm64`, e.g. Raspberry Pi 4/5 and most recent NAS boxes).
+- **For Cloudflare Workers:** a Cloudflare account and Node.js 22 on your computer. See [cloudflare.md](cloudflare.md).
+- **BrickLink API keys** (optional, but without them there are no prices, photos or parts lists).
+
+### Get your BrickLink API keys
+
+1. Sign in to BrickLink and open <https://www.bricklink.com/v2/api/register_consumer.page>.
+2. Register a consumer (accept the terms). You get a **Consumer Key** and **Consumer Secret**.
+3. On the same page, under **Access Tokens**, register a token with **IP address `0.0.0.0`** and **IP mask `0.0.0.0`**. This allows calls from any IP, which you need unless your server has a fixed public IP (Cloudflare Workers never does). You get a **Token Value** and **Token Secret**.
+4. These four values go into Brickfolio as:
+
+   | BrickLink calls it | Variable |
+   |---|---|
+   | Consumer Key | `BRICKLINK_CONSUMER_KEY` |
+   | Consumer Secret | `BRICKLINK_CONSUMER_SECRET` |
+   | Token Value | `BRICKLINK_TOKEN` |
+   | Token Secret | `BRICKLINK_TOKEN_SECRET` |
+
+The API allows 5,000 calls a day. Each set uses 2 per sync, plus 1 the first time to fetch its parts list, so a daily sync covers a couple of thousand sets.
+
+### Optional: Rebrickable key (themes and minifigures)
+
+Brickfolio can add each set's theme (for example *Icons › Botanical Collection*) and minifigure count from [Rebrickable](https://rebrickable.com). Prices still come only from BrickLink.
+
+1. Sign in to Rebrickable, open your profile **Settings → API**, and generate a key.
+2. Set it as `REBRICKABLE_API_KEY`.
+
+The Rebrickable part runs at the end of each BrickLink sync. It matches every set once (about two seconds per set, to stay under Rebrickable's rate limit) and then only new sets; sets Rebrickable doesn't know are asked again after 30 days. Once sets have themes, the Sets page shows a Theme filter.
+
+**Settings → Rebrickable** shows how many sets have a theme and how many builds were found. **Test key** makes one call with your key and shows what Rebrickable said. **Sync Rebrickable now** runs just the Rebrickable part, without BrickLink, and asks again about sets it didn't know. Without BrickLink keys, the daily job still runs the Rebrickable part.
+
+If nothing fills in, use **Test key** first. "Invalid token" means the key is wrong. "Couldn't reach rebrickable.com" means the container has no internet access or DNS. "Key not set" means the variable isn't reaching the container: in Coolify, add `REBRICKABLE_API_KEY` in the Environment Variables tab and redeploy.
+
+With the same key, each sync also looks up alternate builds of your sets and their parts (at most 40 Rebrickable calls per sync), and **Parts → What can I build?** ranks them by how many of their parts you already own. Each build can export its missing parts as a BrickLink Wanted List (Wanted → Upload on BrickLink).
+
+### Optional: wishlist alerts
+
+After each sync Brickfolio can send one message listing wishlist sets whose average sold price dropped under your target. It alerts once per drop; a set that goes back above target alerts again the next time it drops.
+
+- **Phone push with [ntfy](https://ntfy.sh):** install the ntfy app, subscribe to a long random topic name, and set `ALERT_WEBHOOK_URL=https://ntfy.sh/<that-topic>` (or your own ntfy server).
+- **Discord:** create a webhook in a channel's settings and use its URL.
+- **Anything else:** any URL that accepts a JSON POST (`{title, message, url, items}`); Home Assistant, n8n and Zapier all do.
+
+Set `APP_URL` to your Brickfolio address so alerts link back to the wishlist. Settings → About this server shows whether alerts are on.
+
+### Optional: 3D models of your sets
+
+A set's page can show its LDraw model in 3D and step through how it's built. Brickfolio needs two things:
+
+1. **The LDraw parts library** on the server. With Docker or Coolify it lives in the data volume at `/data/ldraw`: open **Settings → 3D models** and click **Download the LDraw library** (about 90 MB; it unzips in the background, and **Update the library** fetches a newer one later). From a terminal instead: `npm run ldraw:download`, or in the container `node scripts/ldraw-download.mjs`.
+
+   To use a copy you already have, unzip `complete.zip` from [library.ldraw.org](https://library.ldraw.org) anywhere and set `LDRAW_LIBRARY_DIR` to that folder (the one with `parts/`, `p/` and `LDConfig.ldr`). On Cloudflare, put the same files in a public bucket and set `LDRAW_LIBRARY_URL` to its address instead. When `LDRAW_LIBRARY_URL` is set it takes precedence over `LDRAW_LIBRARY_DIR`.
+2. **A model for each set you want to see.** Many older official sets have one in the [LDraw Official Model Repository](https://library.ldraw.org/omr) (OMR). Brickfolio fetches them for you:
+   - On a set's page, open **3D model** and click **Find model on LDraw**.
+   - The daily sync also asks the OMR about up to 10 sets that have no model yet, about one a second. Sets the OMR doesn't have are asked again after 30 days. Set `LDRAW_OMR_SYNC=off` to stop this.
+
+   The OMR covers mostly older sets. For anything it doesn't have, upload an `.ldr` or `.mpd` you have on the set's page (3D model → Upload), or `PUT` it to `/api/v1/sets/<number>/model`. Files up to 2 MB.
+
+The library and OMR models are shared under CC BY 2.0 by the LDraw project; a model's author is shown under the 3D view.
+
+### Get the files (Docker setups)
+
+You don't need to build anything. Compose pulls the ready-made image `ghcr.io/scoobydrew83/brickfolio`. You only need the compose files and a `.env`. Either clone the repo:
+
+```bash
+git clone https://github.com/scoobydrew83/brickfolio.git brickfolio
+cd brickfolio
+cp .env.example .env
+```
+
+or download just the files:
+
+```bash
+mkdir brickfolio && cd brickfolio
+base=https://raw.githubusercontent.com/scoobydrew83/brickfolio/main
+curl -fsSLO $base/docker-compose.yml
+curl -fsSLO $base/compose.tailscale.yml      # only for the Tailscale setup
+curl -fsSLO $base/compose.cloudflared.yml    # only for the Cloudflare Tunnel setup
+curl -fsSL $base/.env.example -o .env
+```
+
+Then open `.env` in an editor and fill in your BrickLink keys. Everything else in it has a sensible default or is covered in the setup steps below.
+
+**Image tags:** `:latest` is the newest release, `:1.2.3` / `:1.2` pin a release, and `:main` follows the main branch. To choose one, set `BRICKFOLIO_IMAGE=ghcr.io/scoobydrew83/brickfolio:main` in `.env`. To build from source instead, clone the repo and run `docker compose up -d --build`.
+
+## Local only
+
+The app runs on your computer at <http://127.0.0.1:3000> with no login. It is only reachable from that computer.
+
+1. [Get the files](#get-the-files-docker-setups) and add your BrickLink keys to `.env`. Leave `AUTH_MODE=none`.
+2. Start it:
+
+   ```bash
+   docker compose up -d
+   ```
+
+3. Open <http://127.0.0.1:3000>.
+
+To use a different port, set `PORT=8080` (for example) in `.env` and run `docker compose up -d` again.
+
+> Don't change the port binding to reach the app from other devices. `AUTH_MODE=none` means anyone who can reach the port has full access. To use it from your phone or other computers, use the Tailscale or Cloudflare Tunnel setup. You keep your data when you switch.
+
+## Docker + Tailscale
+
+The app gets a private HTTPS address on your tailnet, e.g. `https://brickfolio.tail1234.ts.net`. Only devices signed in to your Tailscale account can reach it, and nothing is published to the internet. A Tailscale container runs next to the app, so the host doesn't need Tailscale installed.
+
+### 1. Prepare your tailnet
+
+In the [Tailscale admin console](https://login.tailscale.com/admin):
+
+1. **Access controls:** add a tag owner to your policy file, so you can create keys for the tag:
+
+   ```json
+   "tagOwners": {
+     "tag:brickfolio": ["autogroup:admin"]
+   }
+   ```
+
+   If your policy doesn't use the default "allow all" rule, also let your devices reach the app:
+
+   ```json
+   "grants": [
+     { "src": ["autogroup:member"], "dst": ["tag:brickfolio"], "ip": ["443"] }
+   ]
+   ```
+
+2. **DNS:** turn on **MagicDNS** and **HTTPS Certificates**. Note your **tailnet name** (e.g. `tail1234.ts.net`) shown on this page.
+3. **Settings → Keys → Generate auth key:**
+   - **Reusable:** on
+   - **Ephemeral:** off
+   - **Tags:** `tag:brickfolio`
+
+   Copy the key (`tskey-auth-…`). It is only used the first time the container signs in. After that the node's identity lives in the `tailscale-state` volume, and tagged nodes don't expire.
+
+### 2. Configure
+
+[Get the files](#get-the-files-docker-setups) including `compose.tailscale.yml`, then set these in `.env`:
+
+```bash
+BRICKLINK_CONSUMER_KEY=...           # and the other three BrickLink values
+TS_AUTHKEY=tskey-auth-...
+COMPOSE_FILE=docker-compose.yml:compose.tailscale.yml    # uncomment this line
+# Optional:
+TS_HOSTNAME=brickfolio               # the address becomes https://<TS_HOSTNAME>.<tailnet>.ts.net
+ALLOWED_USERS=you@example.com        # only these Tailscale logins get in (empty = anyone on the tailnet)
+TZ=Europe/London                     # time zone for history dates and the sync hour
+```
+
+`AUTH_MODE` is set to `tailscale` by the overlay, so you don't need to change it.
+
+### 3. Start
+
+```bash
+docker compose up -d
+docker compose logs -f tailscale     # wait for it to sign in, then Ctrl+C
+```
+
+Open `https://brickfolio.<your-tailnet>.ts.net` from any device signed in to your tailnet. The first visit can take a few seconds while Tailscale gets the HTTPS certificate.
+
+The app sees who you are from the `Tailscale-User-Login` header that `tailscale serve` adds. Funnel is off, and the app only listens inside the Tailscale container, so the header can't be faked by another device.
+
+## Docker + Cloudflare Tunnel
+
+The app is published at a hostname on your domain, e.g. `https://bricks.example.com`, through an outbound tunnel. No ports are opened on your router. Cloudflare Access asks for a login before anyone reaches the app.
+
+You need a domain whose DNS is on Cloudflare, and a Zero Trust organization (free; the dashboard walks you through creating one the first time you open **Zero Trust**).
+
+### 1. Create the tunnel
+
+1. In the Cloudflare dashboard, open **Zero Trust → Networks → Tunnels → Create a tunnel**. Choose **Cloudflared** and give it a name, e.g. `brickfolio`.
+2. On the install screen choose **Docker**. Copy only the token: the long string after `--token` in the command shown. Don't run that command; the compose file runs `cloudflared` for you.
+3. Add a **public hostname** (newer dashboards call this a *published application route*):
+   - **Subdomain / domain:** e.g. `bricks` . `example.com`
+   - **Service type:** `HTTP`
+   - **URL:** `app:3000`
+
+### 2. Put Cloudflare Access in front of it
+
+1. **Zero Trust → Access → Applications → Add an application → Self-hosted.**
+2. Name it, and add the same hostname as the tunnel (`bricks.example.com`).
+3. Add a policy: **Action** Allow, **Include** Emails, and your email address(es).
+4. Save. Open the application again and copy the **Application Audience (AUD) Tag**.
+5. Note your **team domain**: `<team-name>.cloudflareaccess.com`. The team name is under **Zero Trust → Settings**.
+
+By default Access emails a one-time code to sign in. You can add Google, GitHub and others under **Settings → Authentication**.
+
+### 3. Configure
+
+[Get the files](#get-the-files-docker-setups) including `compose.cloudflared.yml`, then set these in `.env`:
+
+```bash
+BRICKLINK_CONSUMER_KEY=...           # and the other three BrickLink values
+CLOUDFLARE_TUNNEL_TOKEN=eyJh...
+CF_ACCESS_TEAM_DOMAIN=myteam.cloudflareaccess.com
+CF_ACCESS_AUD=...                    # the AUD tag from step 2
+COMPOSE_FILE=docker-compose.yml:compose.cloudflared.yml  # uncomment this line
+# Optional:
+ALLOWED_USERS=you@example.com        # a second check on top of the Access policy
+TZ=Europe/London
+```
+
+`AUTH_MODE` is set to `cloudflare-access` by the overlay.
+
+### 4. Start
+
+```bash
+docker compose up -d
+docker compose logs -f cloudflared   # look for "Registered tunnel connection", then Ctrl+C
+```
+
+Open `https://bricks.example.com` and sign in through Access.
+
+The app checks Access's signed JWT on every request, so knowing the hostname or the tunnel isn't enough to get in.
+
+## Portainer, Dockge, Synology and other Docker GUIs
+
+The setups above work in Docker GUIs too. Enter the variables from the setup's **Configure** step in the tool's environment-variable screen instead of a `.env` file. `docker-compose.yml` passes them to the app. Skip `COMPOSE_FILE`; these tools choose the compose files themselves.
+
+**Portainer** (Stacks → Add stack → **Repository**):
+
+| Field | Value |
+|---|---|
+| Repository URL | `https://github.com/scoobydrew83/brickfolio` |
+| Repository reference | `refs/heads/main` |
+| Compose path | `docker-compose.yml` |
+| Additional paths | `compose.tailscale.yml` *or* `compose.cloudflared.yml` (leave empty for local only) |
+| Environment variables | Your BrickLink keys plus the setup's variables (`TS_AUTHKEY`, or `CLOUDFLARE_TUNNEL_TOKEN`, `CF_ACCESS_TEAM_DOMAIN` and `CF_ACCESS_AUD`) |
+
+Turn on **GitOps updates** if you want Portainer to redeploy when the repo changes.
+
+**Coolify with Tailscale**: Coolify takes a single compose file, so the repo ships a ready-merged one, `compose.coolify-tailscale.yml`. Create a Git-based Docker Compose resource and set its compose location to `/compose.coolify-tailscale.yml`. Coolify builds the app from the branch you pick. (To skip the build and run the published image, replace `build:` and `pull_policy:` under `app` with `image: ghcr.io/scoobydrew83/brickfolio:latest`; that version can also be pasted into a **Docker Compose Empty** resource.) Add `TS_AUTHKEY`, `ALLOWED_USERS` and the four `BRICKLINK_*` values under Environment Variables. Don't assign a domain in Coolify: the app is only served at `https://brickfolio.<your-tailnet>.ts.net`.
+
+**Other tools that take a single compose file** (Dockge, Synology Container Manager, Coolify with Cloudflare, …): on any machine with Docker, merge the base file and the overlay into one file:
+
+```bash
+docker compose -f docker-compose.yml -f compose.tailscale.yml config --no-interpolate > brickfolio.yml
+```
+
+Open `brickfolio.yml`, delete the `build:` and `env_file:` blocks under `app` (they hold paths from the machine you ran this on), then paste it into the tool and add the variables in its environment screen.
+
+## Run a public demo
+
+`DEMO_MODE=on` turns an install into a read-only demo anyone can browse:
+- An empty database is filled with the demo data from `npm run seed` on first start.
+- Adding, editing, importing, syncing and API writes are refused with a short message.
+- BrickLink, Rebrickable and alerts are switched off, even if keys are set.
+- A strip under the header says it's a demo and links to this guide.
+
+Run it with no login and a public address, for example on its own Docker host or a Coolify resource with a domain:
+
+```bash
+docker run -d -p 3000:3000 -e DEMO_MODE=on -e AUTH_MODE=none -v brickfolio-demo:/data ghcr.io/scoobydrew83/brickfolio:latest
+```
+
+Don't turn demo mode on for your own collection: it stops all changes and syncs. On Cloudflare Workers, demo mode works the same, but D1 isn't seeded automatically; load it from a local `npm run seed` database instead.
+
+## Updating
+
+```bash
+docker compose pull
+docker compose up -d
+```
+
+Database changes are applied automatically when the app starts. Your data lives in the `data` volume and is kept. The app also backs it up daily to `/data/backups`, so you can roll back. See [Data and backups](../README.md#data-and-backups).
+
+For Cloudflare Workers, pull the latest code and run `npm run cf:deploy` again.
+
+## Troubleshooting
+
+- **"Not signed in. This app only accepts requests through Tailscale or Cloudflare Access."** The request didn't come through the expected proxy. With Tailscale, open the `https://….ts.net` address from a device signed in as a user; a tagged device or the server's own IP won't send the login header. With Cloudflare, check that `CF_ACCESS_AUD` and `CF_ACCESS_TEAM_DOMAIN` match the Access application, and that the Access application covers the exact hostname.
+- **`manifest unknown` or `not found` when pulling the image.** The tag doesn't exist yet. Set `BRICKFOLIO_IMAGE=ghcr.io/scoobydrew83/brickfolio:main` in `.env`, or build from a clone with `docker compose up -d --build`.
+- **`!reset` or `env_file` errors from Compose.** Your Compose is older than v2.24. Update Docker.
+- **No prices or photos.** Check the four `BRICKLINK_*` values and that the BrickLink access token was registered for IP `0.0.0.0`. Run **Sync BrickLink** and check `docker compose logs app`.
+- **Is it running?** `curl http://127.0.0.1:3000/api/health` returns `{"ok":true}` (local setup). In every setup, `docker compose ps` shows the container as `healthy`.
