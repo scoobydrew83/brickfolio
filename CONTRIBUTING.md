@@ -6,7 +6,6 @@ Thanks for helping! Bug reports, fixes and small features are all welcome.
 
 - For anything bigger than a bug fix, open an issue first so we can agree on the approach.
 - Keep pull requests focused: one change per PR.
-- This repository is published from the maintainer's working copy. Accepted pull requests are applied there and arrive back here with the next sync, so your commit may show up as part of a larger sync commit. You're credited in the changelog.
 
 ## Setup
 
