@@ -4,6 +4,12 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-11-02
+
+### Changed
+- The Coolify compose file (`compose.coolify-tailscale.yml`) runs the published image instead of building on the server, so deploys take seconds. `BRICKFOLIO_IMAGE` pins a release.
+- GitHub Actions updated (checkout v7, login-action v4), plus minor and patch dependency updates.
+
 ## [0.2.0] - 2026-11-02
 
 ### Added

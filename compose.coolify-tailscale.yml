@@ -1,6 +1,7 @@
 # Single-file version of docker-compose.yml + compose.tailscale.yml, for tools that take one compose
 # file (Coolify). Keep it in sync with those two files when they change.
 # Set TS_AUTHKEY, ALLOWED_USERS and the four BRICKLINK_* variables in Coolify's Environment Variables tab.
+# Optional: REBRICKABLE_API_KEY, ALERT_WEBHOOK_URL, APP_URL, TZ, SYNC_HOUR (see .env.example).
 # Don't assign a domain in Coolify: the app is only reachable at https://<TS_HOSTNAME>.<tailnet>.ts.net
 services:
   tailscale:
@@ -21,10 +22,12 @@ services:
     restart: unless-stopped
 
   app:
-    # Builds from this repo's Dockerfile at the branch Coolify deploys. To run the published image
-    # instead, replace these two lines with: image: ghcr.io/scoobydrew83/brickfolio:latest
-    build: .
-    pull_policy: build
+    # The published image (amd64 and arm64). Pin a release with BRICKFOLIO_IMAGE, e.g.
+    # ghcr.io/scoobydrew83/brickfolio:0.2. To build from source instead, replace these two lines with
+    #   build: .
+    #   pull_policy: build
+    image: ${BRICKFOLIO_IMAGE:-ghcr.io/scoobydrew83/brickfolio:latest}
+    pull_policy: always
     network_mode: service:tailscale
     depends_on: [tailscale]
     environment:
