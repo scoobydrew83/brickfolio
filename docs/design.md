@@ -227,15 +227,15 @@ All shared UI lives in `components/ui` (`import { Button, Callout, … } from '@
 ### P0: before the public launch
 1. ~~Set detail page~~ Shipped: `/sets/[setNo]` with photo, value callout and price history, parts list with counts, notes, edit and remove. Cards and table rows link to it. The 3D and step views shipped too (upload an LDraw model; parts from `LDRAW_LIBRARY_DIR` / `LDRAW_LIBRARY_URL`).
 2. ~~First-run checklist~~ Shipped: the empty Sets page walks through keys → first set → sync.
-3. **Demo data**: `npm run seed` with about 20 well-known sets, used for screenshots, the README GIF and a public demo.
+3. ~~Demo data~~ Shipped: `npm run seed`, used for the screenshots, the README tour GIF and demo mode (`DEMO_MODE=on`).
 4. ~~Loading skeletons~~ Shipped. Still to do: friendlier error states (database, BrickLink rate limit at 5,000 calls/day).
 
 ### P1: what collectors ask for
 - ~~Wishlist~~ Shipped: `/wishlist` and `/api/v1/wishlist`, target prices, an "under target" alert, priced in the daily sync, and "Got it" moves a set into the collection. Alerts shipped too: webhook (ntfy, Discord, JSON) after each sync, and a count on the Wishlist tab.
 - **Minifigures** as owned items, not only as parts inside a set.
 - ~~Themes and subthemes~~ Shipped (Rebrickable phase 1): theme filter on the Sets page, theme and minifig count on cards.
-- **Value vs. retail**: original MSRP (Brickset) next to today's value, with gain % per set and for the whole collection.
-- **Retirement watch**: sets you own or want that are retiring soon.
+- ~~Value vs. retail~~ Shipped (Brickset): retail price and gain % per set and for the collection.
+- ~~Retirement watch~~ Shipped (Brickset): Retiring/Retired chips on sets and wishlist items, and an Availability filter.
 - **Quick add**: paste a list of set numbers, or scan a barcode or box photo on a phone.
 - **Read-only share link** for showing a collection without giving out access.
 
@@ -271,8 +271,8 @@ All shared UI lives in `components/ui` (`import { Button, Callout, … } from '@
 Integration rules: each one is optional and turned on by env vars (like the BrickLink keys today), sits behind its own client in `lib/<service>/`, respects rate limits in the daily sync, and shows its source next to any number it supplies.
 
 ## Open-source launch checklist
-- ~~README~~ Done: screenshots in both themes and on a phone, feature list, demo data. Still to do: a short GIF and screenshots with real photos.
+- ~~README~~ Done: tour GIF, screenshots in both themes and on a phone, feature list, demo data. Still to do: screenshots with real photos.
 - ~~`CODE_OF_CONDUCT.md`, `CHANGELOG.md` and a PR template~~ Done.
 - ~~Configurable image name~~ Done: `BRICKFOLIO_IMAGE` (defaults to the project's published image).
 - ~~Rename the repo~~ The public repo is `brickfolio`, which keeps the LEGO trademark out of the project name (see `NOTICE`).
-- `npm run seed` demo data is done. Still to do: a public demo deploy (Cloudflare with `AUTH_MODE=none`).
+- Demo mode (`DEMO_MODE=on`) is done. Still to do: host a public demo.

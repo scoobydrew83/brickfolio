@@ -17,15 +17,15 @@ export async function generateMetadata({ params }: PageProps<'/sets/[setNo]'>) {
   return { title: displayNo(setNo(decodeURIComponent((await params).setNo))) };
 }
 
-export default function Page({ params }: PageProps<'/sets/[setNo]'>) {
+export default function Page({ params, searchParams }: PageProps<'/sets/[setNo]'>) {
   return (
     <Suspense fallback={<PageSkeleton tiles={2} />}>
-      <Content params={params} />
+      <Content params={params} searchParams={searchParams} />
     </Suspense>
   );
 }
 
-async function Content({ params }: { params: PageProps<'/sets/[setNo]'>['params'] }) {
+async function Content({ params, searchParams }: Pick<PageProps<'/sets/[setNo]'>, 'params' | 'searchParams'>) {
   await connection();
   if (!(await currentUser())) return <p className="py-24 text-center text-fg-3">Not signed in.</p>;
   const no = setNo(decodeURIComponent((await params).setNo));
@@ -45,6 +45,7 @@ async function Content({ params }: { params: PageProps<'/sets/[setNo]'>['params'
       model={model ? { fileName: model.fileName, author: modelAuthor(model.content) } : null}
       library={!!librarySource()}
       builds={alternates.filter((b) => b.partsKnown).slice(0, 3)}
+      view={(await searchParams).view === '3d' ? '3d' : undefined}
     />
   );
 }

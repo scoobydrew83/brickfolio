@@ -27,7 +27,7 @@ const spec = {
           estValue: { ...nullable('number'), description: 'Per copy: avg sold for the condition, less Missing % on Partial sets' },
           blError: nullable('string'), lastUpdated: nullable('string'),
           theme: { ...nullable('string'), description: 'Top-level Rebrickable theme (needs REBRICKABLE_API_KEY)' },
-          subtheme: nullable('string'), minifigs: nullable('integer'),
+          subtheme: nullable('string'), minifigs: nullable('integer'), hasModel: { type: 'boolean' },
         },
       },
       SetInput: {

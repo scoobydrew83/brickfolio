@@ -21,7 +21,7 @@
     "TZ": "UTC"
     // Set as secrets (npx wrangler secret put NAME): CF_ACCESS_TEAM_DOMAIN, CF_ACCESS_AUD, CRON_SECRET,
     // BRICKLINK_CONSUMER_KEY, BRICKLINK_CONSUMER_SECRET, BRICKLINK_TOKEN, BRICKLINK_TOKEN_SECRET,
-    // and optionally REBRICKABLE_API_KEY, ALERT_WEBHOOK_URL (plus ALERT_WEBHOOK_FORMAT, APP_URL, LDRAW_LIBRARY_URL as vars)
+    // and optionally REBRICKABLE_API_KEY, BRICKSET_API_KEY, ALERT_WEBHOOK_URL (plus ALERT_WEBHOOK_FORMAT, APP_URL, LDRAW_LIBRARY_URL as vars)
   },
   // Daily BrickLink sync (UTC). Calls POST /api/v1/sync with CRON_SECRET.
   "triggers": { "crons": ["17 4 * * *"] },

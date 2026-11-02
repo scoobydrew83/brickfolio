@@ -6,6 +6,7 @@ import { useEffect, useMemo, useRef, useState, useSyncExternalStore, useTransiti
 import { addSet, editSet, relookupSet, reload, removeSet, runSync, type Result } from '@/app/actions';
 import type { SyncStatus } from '@/lib/service/sets';
 import { dailyHistory, filterSets, groupTotals, totals, type Filters, type HistoryRow, type SetRow } from '@/lib/sets';
+import { availability, collectionGain } from '@/lib/retail';
 import { SetCard } from './board/SetCard';
 import { PartsDialog } from './board/PartsDialog';
 import { SetForm } from './board/SetForm';
@@ -16,7 +17,7 @@ import { Banner, Button, EmptyState, FilterChip, SearchInput, Segmented, Select 
 import { PageHeader } from './shell/PageHeader';
 
 // Filters and view live in the URL, so a reload or a shared link keeps them. Defaults are left out of the URL.
-const DEFAULTS = { q: '', location: '', condition: '', theme: '', sort: 'setNo', view: 'cards' } as const;
+const DEFAULTS = { q: '', location: '', condition: '', theme: '', availability: '', sort: 'setNo', view: 'cards' } as const;
 const SORTS: Filters['sort'][] = ['setNo', 'value', 'name', 'year'];
 type View = 'cards' | 'table';
 const noop = () => () => {};
@@ -27,7 +28,7 @@ export default function Board({ sets, history, sync, locations, currency, readAt
   const params = useSearchParams();
   const [filters, setFilters] = useState<Filters>(() => {
     const sort = params.get('sort') as Filters['sort'];
-    return { q: params.get('q') ?? '', location: params.get('location') ?? '', condition: params.get('condition') ?? '', theme: params.get('theme') ?? '', sort: SORTS.includes(sort) ? sort : 'setNo' };
+    return { q: params.get('q') ?? '', location: params.get('location') ?? '', condition: params.get('condition') ?? '', theme: params.get('theme') ?? '', availability: params.get('availability') ?? '', sort: SORTS.includes(sort) ? sort : 'setNo' };
   });
   const [view, setView] = useState<View>(() => (params.get('view') === 'table' ? 'table' : 'cards'));
   const [editing, setEditing] = useState<SetRow | 'new' | null>(null);
@@ -74,11 +75,13 @@ export default function Board({ sets, history, sync, locations, currency, readAt
     });
 
   const set = (k: keyof Filters) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setFilters({ ...filters, [k]: e.target.value });
-  const toggle = (k: 'location' | 'condition' | 'theme', v: string) => setFilters({ ...filters, [k]: filters[k] === v ? '' : v });
+  const toggle = (k: 'location' | 'condition' | 'theme' | 'availability', v: string) => setFilters({ ...filters, [k]: filters[k] === v ? '' : v });
   const themed = sets.some((s) => s.theme);
+  const dated = sets.some((s) => availability(s));
+  const gain = useMemo(() => collectionGain(sets, currency), [sets, currency]);
   const remove = (s: SetRow) => act(() => removeSet(s.setNo), s.qty > 1 ? `Removed one ${s.name}. ${s.qty - 1} left.` : `Removed ${s.name}.`);
   const retry = (s: SetRow) => act(() => relookupSet(s.setNo), `Lookup worked for ${s.name}.`);
-  const rowProps = { onEdit: setEditing, onParts: setPartsOf, onRemove: remove, onRetry: retry, pending, money };
+  const rowProps = { onEdit: setEditing, onParts: setPartsOf, onRemove: remove, onRetry: retry, pending, money, currency };
 
   return (
     <div className="space-y-6">
@@ -99,6 +102,7 @@ export default function Board({ sets, history, sync, locations, currency, readAt
         <p>
           {priced ? 'Prices from BrickLink sold history. ' : ''}
           {themed && 'Themes and minifigs from Rebrickable. '}
+          {dated && 'Retail prices and retirement dates from Brickset. '}
           Read {inBrowser ? new Date(readAt).toLocaleTimeString() : '…'}
           {sync && !syncing && sync.finishedAt && inBrowser && <> · Last sync {new Date(sync.finishedAt).toLocaleString()}{sync.errors ? ` (${sync.errors} errors)` : ''}</>}.
         </p>
@@ -117,6 +121,7 @@ export default function Board({ sets, history, sync, locations, currency, readAt
             <b className={trend.change >= 0 ? 'text-ok' : 'text-danger'}>{trend.change >= 0 ? '+' : '−'}{money(Math.abs(trend.change))}</b> since {trend.since}
           </span>
         )}
+        {gain && <RetailGainLine gain={gain} money={money} className="basis-full text-sm" />}
       </p>
       <section aria-label="Collection value" className="hidden gap-8 sm:grid md:grid-cols-[minmax(0,1fr)_minmax(0,1.6fr)]">
         <div>
@@ -127,6 +132,7 @@ export default function Board({ sets, history, sync, locations, currency, readAt
               ? 'BrickLink average sold price for each set’s condition, less missing pieces.'
               : 'From the BrickLink sold prices stored at the last sync, less missing pieces. Add BrickLink keys to keep them current.'}
           </p>
+          {gain && <RetailGainLine gain={gain} money={money} className="mt-2 max-w-sm text-sm" />}
         </div>
         <ValueChart history={history} money={money} />
       </section>
@@ -138,10 +144,10 @@ export default function Board({ sets, history, sync, locations, currency, readAt
       </div>
 
       <section aria-label="Filters" className="space-y-2 text-sm">
-        {(themed ? (['location', 'condition', 'theme'] as const) : (['location', 'condition'] as const)).map((k) => (
+        {(['location', 'condition', ...(themed ? ['theme'] as const : []), ...(dated ? ['availability'] as const : [])] as const).map((k) => (
           <div key={k} className="-mx-4 flex items-center gap-2 overflow-x-auto px-4 pb-1 [mask-image:linear-gradient(to_right,black_85%,transparent)] sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0 sm:pb-0 sm:[mask-image:none]">
             <span className="w-20 shrink-0 text-sm capitalize text-fg-3">{k}</span>
-            {groupTotals(sets, k).map((g) => (
+            {groupTotals(sets, k).filter((g) => k !== 'availability' || g.label !== '(none)').map((g) => (
               <FilterChip key={g.label} active={filters[k] === g.label} onClick={() => toggle(k, g.label)}>
                 {g.label} · {g.count} · <span className="tabular-nums">{money(g.estValue)}</span>
               </FilterChip>
@@ -151,7 +157,7 @@ export default function Board({ sets, history, sync, locations, currency, readAt
         {shown.length < all.count && (
           <p className="text-fg-3">
             Showing <b className="text-fg">{shown.length}</b> of {all.count} sets · <b className="text-fg tabular-nums">{money(view_.estValue)}</b>
-            {' '}<Button variant="link" onClick={() => setFilters({ q: '', location: '', condition: '', theme: '', sort: filters.sort })}>Clear filters</Button>
+            {' '}<Button variant="link" onClick={() => setFilters({ q: '', location: '', condition: '', theme: '', availability: '', sort: filters.sort })}>Clear filters</Button>
           </p>
         )}
       </section>
@@ -206,5 +212,16 @@ export default function Board({ sets, history, sync, locations, currency, readAt
         />
       )}
     </div>
+  );
+}
+
+/** "Up 23% on retail across 18 sets": the collection against original retail prices from Brickset. */
+function RetailGainLine({ gain, money, className }: { gain: { sets: number; retail: number; value: number; gainPct: number }; money: (v: unknown) => string; className?: string }) {
+  const up = gain.gainPct >= 0;
+  return (
+    <span className={className} title={`Retail ${money(gain.retail)} → now ${money(gain.value)} (Brickset retail prices, BrickLink values)`}>
+      <b className={up ? 'text-ok' : 'text-danger'}>{up ? 'Up' : 'Down'} {Math.abs(gain.gainPct)}%</b>
+      <span className="text-fg-3"> on retail across {gain.sets} set{gain.sets === 1 ? '' : 's'} with a known retail price</span>
+    </span>
   );
 }

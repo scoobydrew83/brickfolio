@@ -59,6 +59,18 @@ If nothing fills in, use **Test key** first. "Invalid token" means the key is wr
 
 With the same key, each sync also looks up alternate builds of your sets and their parts (at most 40 Rebrickable calls per sync), and **Parts → What can I build?** ranks them by how many of their parts you already own. Each build can export its missing parts as a BrickLink Wanted List (Wanted → Upload on BrickLink).
 
+### Optional: Brickset key (retail prices and retirement)
+
+[Brickset](https://brickset.com) knows each set's original retail price and when it launched and retires. With a key, Brickfolio shows:
+- each set's retail price and how much it has gained (or lost) since, and the whole collection's gain over retail;
+- a **Retiring** chip on sets and wishlist items expected to retire within about six months, and **Retired** once they have;
+- an **Availability** filter on the Sets page (Available, Retiring soon, Retired).
+
+1. Sign in to Brickset, open your account's **API** page, and request a key (free for personal use).
+2. Set it as `BRICKSET_API_KEY` and restart (in Coolify, add it under Environment Variables and redeploy).
+
+Each sync asks Brickset about sets it hasn't checked in 30 days, 50 sets per call and at most 10 calls, to stay well inside the key's daily limit. Retail prices are stored in your collection currency when Brickset has it (USD, GBP, CAD or EUR), otherwise in USD; the gain is only shown when the currencies match. **Settings → Brickset** shows the counts and has **Test key** and **Sync Brickset now**. Prices you could sell for still come only from BrickLink.
+
 ### Optional: wishlist alerts
 
 After each sync Brickfolio can send one message listing wishlist sets whose average sold price dropped under your target. It alerts once per drop; a set that goes back above target alerts again the next time it drops.

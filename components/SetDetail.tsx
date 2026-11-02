@@ -10,15 +10,16 @@ import type { PartRow } from '@/lib/service/parts';
 import { displayNo, num, type SetRow } from '@/lib/sets';
 import { ModelViewer } from './ModelViewer';
 import { PartList } from './board/PartsDialog';
-import { RemoveButton } from './board/SetCard';
+import { RemoveButton, RetireChip } from './board/SetCard';
+import { retailGain, retirement } from '@/lib/retail';
 import { SetForm } from './board/SetForm';
 import { blLink, moneyIn } from './board/ui';
-import { Banner, Button, Callout, CONDITION_TONE, Chip, EmptyState, buttonClass } from './ui';
+import { Banner, Button, Callout, CONDITION_TONE, Chip, EmptyState, buttonClass, cx } from './ui';
 
-type Props = { set: SetRow; parts: PartRow[]; prices: { date: string; avgSold: number | null }[]; currency: string; locations: string[]; priced: boolean; model: { fileName: string; author: string | null } | null; library: boolean; builds: BuildMatch[] };
+type Props = { set: SetRow; parts: PartRow[]; prices: { date: string; avgSold: number | null }[]; currency: string; locations: string[]; priced: boolean; model: { fileName: string; author: string | null } | null; library: boolean; builds: BuildMatch[]; view?: '3d' };
 
 /** One set: its photo, value and price history, parts list and copies. */
-export default function SetDetail({ set: s, parts, prices, currency, locations, priced, model, library, builds }: Props) {
+export default function SetDetail({ set: s, parts, prices, currency, locations, priced, model, library, builds, view }: Props) {
   const router = useRouter();
   const money = useMemo(() => moneyIn(currency), [currency]);
   const [editing, setEditing] = useState(false);
@@ -32,6 +33,8 @@ export default function SetDetail({ set: s, parts, prices, currency, locations, 
     });
 
   const theme = s.theme ? (s.subtheme ? `${s.theme} › ${s.subtheme}` : s.theme) : null;
+  const gain = retailGain(s, currency);
+  const ret = retirement(s);
   const regular = parts.filter((p) => !p.alternate);
   const alternates = parts.filter((p) => p.alternate);
   const remove = () => act(() => removeSet(s.setNo), s.qty > 1 ? `Removed one copy. ${s.qty - 1} left.` : `Removed ${s.name}.`, () => { if (s.qty <= 1) router.push('/'); });
@@ -53,6 +56,7 @@ export default function SetDetail({ set: s, parts, prices, currency, locations, 
       <div className="grid gap-8 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)] lg:gap-10">
         <ModelViewer
           setNo={s.setNo}
+          initialView={view}
           model={model}
           library={library}
           photo={
@@ -68,11 +72,14 @@ export default function SetDetail({ set: s, parts, prices, currency, locations, 
 
         <section className="space-y-6">
           <div>
-            <div className="flex items-baseline justify-between gap-3">
-              <p className="text-5xl font-extrabold leading-none tracking-tight tabular-nums [font-stretch:115%]">{displayNo(s.setNo)}</p>
-              {s.condition && <Chip tone={CONDITION_TONE[s.condition] ?? 'neutral'}>{s.condition}</Chip>}
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-lg font-bold tabular-nums text-fg-3">#{displayNo(s.setNo)}</p>
+              <span className="flex items-center gap-1">
+                {ret && <RetireChip ret={ret} />}
+                {s.condition && <Chip tone={CONDITION_TONE[s.condition] ?? 'neutral'}>{s.condition}</Chip>}
+              </span>
             </div>
-            <h1 className="mt-3 text-2xl font-bold">{s.name}</h1>
+            <h1 className="mt-1 text-4xl font-extrabold leading-tight tracking-tight [font-stretch:110%]">{s.name}</h1>
             <p className="mt-1 text-sm text-fg-3">
               {[theme, s.year, s.pieces ? `${num(s.pieces).toLocaleString()} pieces` : null, s.minifigs ? `${s.minifigs} minifig${s.minifigs === 1 ? '' : 's'}` : null, s.location ? `on ${s.location}` : 'no location'].filter(Boolean).join(' · ')}
             </p>
@@ -98,6 +105,26 @@ export default function SetDetail({ set: s, parts, prices, currency, locations, 
               {s.missingPct ? <span className="font-semibold text-warn"> · less {s.missingPct}% missing</span> : null}
               {s.qty > 1 && s.estValue != null ? <> · {money(num(s.estValue) * s.qty)} for all {s.qty}</> : null}
             </p>
+            {(s.retailPrice || s.launchDate || s.exitDate) && (
+              <dl className="mt-3 grid grid-cols-3 gap-2 border-t border-line pt-2 text-sm tabular-nums">
+                <div>
+                  <dt className="text-xs text-fg-3">Retail</dt>
+                  <dd className="font-semibold">{s.retailPrice ? moneyIn(s.retailCurrency ?? currency)(s.retailPrice) : '—'}</dd>
+                </div>
+                <div>
+                  <dt className="text-xs text-fg-3">vs. retail</dt>
+                  <dd className={cx('font-semibold', gain && (gain.gainPct >= 0 ? 'text-ok' : 'text-danger'))}>{gain ? `${gain.gainPct >= 0 ? '+' : '−'}${Math.abs(gain.gainPct)}%` : '—'}</dd>
+                </div>
+                <div>
+                  <dt className="text-xs text-fg-3">{ret?.kind === 'retired' ? 'Retired' : 'Retires'}</dt>
+                  <dd className="font-semibold">{s.exitDate ?? '—'}</dd>
+                </div>
+                <p className="col-span-3 text-xs text-fg-3">
+                  Retail price{s.launchDate ? `, released ${s.launchDate}` : ''} and retirement date from Brickset.
+                  {s.retailPrice && s.retailCurrency !== currency ? ` Retail is in ${s.retailCurrency}, so no gain is shown.` : ''}
+                </p>
+              </dl>
+            )}
           </Callout>
 
           <div className="flex flex-wrap items-center gap-2">

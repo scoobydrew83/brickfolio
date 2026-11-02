@@ -4,6 +4,7 @@ import { headers } from 'next/headers';
 import { identify, bearer, type Identity } from './auth';
 import { brickLinkFromEnv } from './bricklink/client';
 import { rebrickableFromEnv } from './rebrickable/client';
+import { bricksetFromEnv } from './brickset/client';
 import { getDb } from './db';
 import { checkToken, sha256Hex } from './service/tokens';
 import { isDemo } from './demo';
@@ -38,3 +39,7 @@ export const brickStore = () => blClient()?.store ?? null;
 let rb: ReturnType<typeof rebrickableFromEnv> | undefined;
 /** Rebrickable catalog client (themes, minifigs), or null when REBRICKABLE_API_KEY isn't set. One per process. */
 export const rebrickable = () => (isDemo() ? null : rb === undefined ? (rb = rebrickableFromEnv()) : rb);
+
+let bs: ReturnType<typeof bricksetFromEnv> | undefined;
+/** Brickset client (retail prices, retirement dates), or null when BRICKSET_API_KEY isn't set. One per process. */
+export const brickset = () => (isDemo() ? null : bs === undefined ? (bs = bricksetFromEnv()) : bs);

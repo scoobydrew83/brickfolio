@@ -9,6 +9,7 @@ A self-hosted tracker for your brick-set collection: what you own, where it is, 
 - **Set pages:** photo, value and price history, the full parts list with counts, notes, and the set's LDraw model in 3D with a step-by-step build view.
 - **Wishlist:** sets you want and the price you'd pay; Brickfolio tells you when one sells for less (in the app, or by ntfy, Discord or any webhook), and "Got it" moves it into your collection.
 - **Parts:** every set's parts from BrickLink, searchable across the whole collection.
+- **Value vs. retail and a retirement watch** from Brickset (optional, free API key): each set's original price and your gain since, plus which sets you own or want are retiring soon.
 - **Themes, minifigs and "What can I build?"** from Rebrickable (optional, with a free API key): alternate builds of your sets ranked by how many of their parts you own, with a BrickLink Wanted List for the rest.
 - **Your BrickLink store:** inventory lots with asking value, and orders sold and bought.
 - **Open and scriptable:** SQLite on your own server or Cloudflare D1, CSV import/export, and a REST API with tokens and an OpenAPI description.

@@ -1,6 +1,6 @@
 import Image from 'next/image';
 import Link from 'next/link';
-import { Pencil, Puzzle } from 'lucide-react';
+import { Box, Pencil, Puzzle } from 'lucide-react';
 import { displayNo, num, type SetRow } from '@/lib/sets';
 import { RemoveButton, type RowActions } from './SetCard';
 import { Button, CONDITION_TONE, Chip, IconButton } from '../ui';
@@ -43,6 +43,11 @@ export function SetTable({ sets, onEdit, onParts, onRemove, onRetry, pending, mo
               <td className={`${num_} font-bold`}>{s.qty}x</td>
               <td className="px-3 py-2">
                 <Link href={`/sets/${encodeURIComponent(displayNo(s.setNo))}`} className="font-medium hover:text-link hover:underline">{s.name}</Link>
+                {s.hasModel && (
+                  <Link href={`/sets/${encodeURIComponent(displayNo(s.setNo))}?view=3d`} title="Has a 3D model" aria-label="Has a 3D model: open it" className="ml-1.5 inline-flex align-[-2px] text-fg-3 hover:text-link">
+                    <Box aria-hidden className="size-4" />
+                  </Link>
+                )}
                 {s.blError && (
                   <span className="mt-0.5 flex items-center gap-2 text-xs text-danger">
                     Lookup failed

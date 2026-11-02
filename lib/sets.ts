@@ -1,5 +1,6 @@
 // Shared, framework-free logic: row shape, input validation, filtering and totals.
 // Used by the server (service layer, API) and the browser (Board). Tested in lib/sets.test.ts.
+import { availability } from './retail';
 
 export const CONDITIONS = ['New', 'Used', 'Partial'] as const;
 export type Condition = (typeof CONDITIONS)[number];
@@ -35,6 +36,13 @@ export type SetRow = {
   theme?: string | null; // top-level theme, e.g. Icons
   subtheme?: string | null; // e.g. Botanical Collection
   minifigs?: number | null;
+  hasModel?: boolean; // an LDraw model is saved for the 3D view
+  // From Brickset when BRICKSET_API_KEY is set; null until checked
+  retailPrice?: number | null; // original retail price, in retailCurrency
+  retailCurrency?: string | null;
+  launchDate?: string | null; // YYYY-MM-DD
+  exitDate?: string | null; // YYYY-MM-DD: past = retired, future = expected retirement
+  retired?: boolean | null;
 };
 
 /** Validated input for add/edit. `undefined` = leave alone, `null` = clear. */
@@ -130,7 +138,7 @@ export function parseLocation(raw: unknown): { ok: true; value: string } | { ok:
   return { ok: true, value: v };
 }
 
-export type Filters = { q: string; location: string; condition: string; theme?: string; sort: 'setNo' | 'value' | 'name' | 'year' };
+export type Filters = { q: string; location: string; condition: string; theme?: string; availability?: string; sort: 'setNo' | 'value' | 'name' | 'year' };
 
 export function filterSets(sets: SetRow[], f: Filters): SetRow[] {
   const q = f.q.trim().toLowerCase();
@@ -138,7 +146,8 @@ export function filterSets(sets: SetRow[], f: Filters): SetRow[] {
     (!q || [s.setNo, s.name, s.blName, s.location, s.year, s.theme, s.subtheme].some((v) => String(v ?? '').toLowerCase().includes(q))) &&
     (!f.theme || (f.theme === '(none)' ? !s.theme : s.theme === f.theme)) &&
     (!f.location || (f.location === '(none)' ? !s.location : s.location === f.location)) &&
-    (!f.condition || (f.condition === '(none)' ? !s.condition : s.condition === f.condition));
+    (!f.condition || (f.condition === '(none)' ? !s.condition : s.condition === f.condition)) &&
+    (!f.availability || (availability(s) ?? '(none)') === f.availability);
   const by: Record<Filters['sort'], (a: SetRow, b: SetRow) => number> = {
     setNo: (a, b) => a.setNo.localeCompare(b.setNo, undefined, { numeric: true }),
     value: (a, b) => num(b.estValue) - num(a.estValue),
@@ -161,11 +170,11 @@ export function totals(sets: SetRow[]) {
   };
 }
 
-/** Totals per location or condition, biggest Est. Value first. Blank = '(none)', the same value the filters use. */
-export function groupTotals(sets: SetRow[], key: 'location' | 'condition' | 'theme') {
+/** Totals per location, condition, theme or availability, biggest Est. Value first. Blank = '(none)', the same value the filters use. */
+export function groupTotals(sets: SetRow[], key: 'location' | 'condition' | 'theme' | 'availability') {
   const groups = new Map<string, SetRow[]>();
   for (const s of sets) {
-    const k = s[key] || '(none)';
+    const k = (key === 'availability' ? availability(s) : s[key]) || '(none)';
     groups.set(k, [...(groups.get(k) ?? []), s]);
   }
   return [...groups].map(([label, rows]) => ({ label, ...totals(rows) })).sort((a, b) => b.estValue - a.estValue);

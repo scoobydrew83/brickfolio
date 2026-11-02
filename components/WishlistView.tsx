@@ -6,6 +6,8 @@ import { acquireWish, addWish, editWish, removeWish, type Result } from '@/app/a
 import type { WishRow } from '@/lib/service/wishlist';
 import { displayNo } from '@/lib/sets';
 import { blLink, moneyIn, type Money } from './board/ui';
+import { RetireChip } from './board/SetCard';
+import { retirement } from '@/lib/retail';
 import { PageHeader } from './shell/PageHeader';
 import { Banner, Button, Chip, Dialog, EmptyState, IconButton, buttonClass, cx, field, type Tone } from './ui';
 
@@ -68,7 +70,9 @@ export default function WishlistView({ items, currency, priced }: { items: WishR
                 <span className="block text-xs text-fg-3">
                   <span className="font-semibold tabular-nums sm:hidden">{displayNo(w.setNo)} · </span>
                   Target {w.target === null ? 'not set' : money(w.target)} · {w.condition}{w.year ? ` · ${w.year}` : ''}
+                  {w.retailPrice ? ` · Retail ${moneyIn(w.retailCurrency ?? 'USD')(w.retailPrice)}` : ''}
                 </span>
+                {(() => { const ret = retirement(w); return ret && <span className="mt-1 block"><RetireChip ret={ret} /></span>; })()}
                 {w.blError && <span className="block text-xs text-danger">{w.blError}</span>}
               </span>
               <span className="flex flex-col items-end gap-1 text-right">

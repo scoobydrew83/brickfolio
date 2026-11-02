@@ -37,6 +37,13 @@ export const sets = sqliteTable(
     rbSyncedAt: text('rb_synced_at'),
     rbAlternatesAt: text('rb_alternates_at'), // when this set's alternate builds were fetched
     omrCheckedAt: text('omr_checked_at'), // when the LDraw OMR was last asked for this set's model
+    // Filled in by the optional Brickset sync: original retail price and availability
+    retailPrice: real('retail_price'),
+    retailCurrency: text('retail_currency'),
+    launchDate: text('launch_date'), // YYYY-MM-DD
+    exitDate: text('exit_date'), // YYYY-MM-DD; past = retired, future = expected retirement
+    retired: integer('retired', { mode: 'boolean' }),
+    bricksetAt: text('brickset_at'), // when Brickset was last asked about this set
     createdAt: text('created_at').notNull().default(now),
     updatedAt: text('updated_at').notNull().default(now),
   },
@@ -195,6 +202,13 @@ export const wishlist = sqliteTable(
     blError: text('bl_error'),
     lastUpdated: text('last_updated'),
     alertedAt: text('alerted_at'), // when an "under target" alert was sent; cleared when it goes back above
+    // Filled in by the optional Brickset sync: original retail price and availability
+    retailPrice: real('retail_price'),
+    retailCurrency: text('retail_currency'),
+    launchDate: text('launch_date'), // YYYY-MM-DD
+    exitDate: text('exit_date'), // YYYY-MM-DD; past = retired, future = expected retirement
+    retired: integer('retired', { mode: 'boolean' }),
+    bricksetAt: text('brickset_at'), // when Brickset was last asked about this set
     createdAt: text('created_at').notNull().default(now),
   },
   (t) => [uniqueIndex('wishlist_set_no').on(t.setNo)],

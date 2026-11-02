@@ -4,6 +4,8 @@ import { readdirSync, rmSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { brickLinkFromEnv } from './bricklink/client';
 import { rebrickableFromEnv } from './rebrickable/client';
+import { bricksetFromEnv } from './brickset/client';
+import { syncRetail } from './service/retail';
 import { dbPath, nodeDb } from './db/node';
 import { runSync, startSync, syncStatus, today } from './service/sets';
 import { startRebrickableSync } from './rebrickable/run';
@@ -19,19 +21,20 @@ async function maybeSync() {
   const bl = brickLinkFromEnv();
   if (setting === 'off' || hourNow() !== Number(setting)) return;
   if (!bl) {
-    // No BrickLink keys: still fill in Rebrickable data once a day.
+    // No BrickLink keys: still fill in Rebrickable and Brickset data once a day.
+    if (rbOnlyDay === today()) return;
+    rbOnlyDay = today();
     const rb = rebrickableFromEnv();
-    if (rb && rbOnlyDay !== today()) {
-      rbOnlyDay = today();
-      await startRebrickableSync(nodeDb().db, rb);
-    }
+    if (rb) await startRebrickableSync(nodeDb().db, rb);
+    const bs = bricksetFromEnv();
+    if (bs) await syncRetail(nodeDb().db, bs);
     return;
   }
   const { db } = nodeDb();
   const last = await syncStatus(db);
   if (last && new Date(last.startedAt).toLocaleDateString('en-CA', { timeZone: process.env.TZ || undefined }) === today()) return;
   const s = await startSync(db);
-  if (s.ok) await runSync(db, s.runId, bl.lookup, bl.store, rebrickableFromEnv() ?? undefined);
+  if (s.ok) await runSync(db, s.runId, bl.lookup, bl.store, rebrickableFromEnv() ?? undefined, bricksetFromEnv() ?? undefined);
 }
 
 /** Copies the database to BACKUP_DIR (default: backups/ next to the database) once a day and keeps BACKUP_KEEP (default 7). */

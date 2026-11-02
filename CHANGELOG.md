@@ -4,6 +4,15 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-02
+
+### Added
+- Brickset integration (`BRICKSET_API_KEY`): original retail price and gain over retail per set and for the collection, a Retiring/Retired chip on sets and wishlist items, an Availability filter, and Settings → Brickset with Test key and Sync now.
+- A 3D badge on set cards (and an icon in the table) for sets with an LDraw model; it opens the set page on the 3D tab.
+
+### Changed
+- Set cards lead with the set name; the number sits above it. Cards in a row are the same height, with their value boxes lined up.
+
 ## [0.2.1] - 2026-11-02
 
 ### Changed

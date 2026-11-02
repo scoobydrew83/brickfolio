@@ -1,7 +1,7 @@
 # Single-file version of docker-compose.yml + compose.tailscale.yml, for tools that take one compose
 # file (Coolify). Keep it in sync with those two files when they change.
 # Set TS_AUTHKEY, ALLOWED_USERS and the four BRICKLINK_* variables in Coolify's Environment Variables tab.
-# Optional: REBRICKABLE_API_KEY, ALERT_WEBHOOK_URL, APP_URL, TZ, SYNC_HOUR (see .env.example).
+# Optional: REBRICKABLE_API_KEY, BRICKSET_API_KEY, ALERT_WEBHOOK_URL, APP_URL, TZ, SYNC_HOUR (see .env.example).
 # Don't assign a domain in Coolify: the app is only reachable at https://<TS_HOSTNAME>.<tailnet>.ts.net
 services:
   tailscale:
@@ -40,6 +40,7 @@ services:
       - BRICKLINK_TOKEN
       - BRICKLINK_TOKEN_SECRET
       - REBRICKABLE_API_KEY
+      - BRICKSET_API_KEY
       - ALERT_WEBHOOK_URL
       - ALERT_WEBHOOK_FORMAT
       - APP_URL

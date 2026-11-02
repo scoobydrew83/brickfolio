@@ -7,13 +7,14 @@ import { parseSetInput } from '@/lib/sets';
 import * as svc from '@/lib/service/sets';
 import * as tokens from '@/lib/service/tokens';
 import { importCsv } from '@/lib/service/csv';
-import { brickColors, brickStore, bricklink, currentUser, rebrickable } from '@/lib/session';
+import { brickColors, brickStore, bricklink, brickset, currentUser, rebrickable } from '@/lib/session';
 import * as parts from '@/lib/service/parts';
 import * as wish from '@/lib/service/wishlist';
 import * as models from '@/lib/service/models';
 import * as ldraw from '@/lib/ldraw/download';
 import { DEMO_ERROR, isDemo } from '@/lib/demo';
 import { rebrickableStats, type RebrickableStats } from '@/lib/service/catalog';
+import { retailStats, syncRetail, type RetailStats } from '@/lib/service/retail';
 import { rebrickableRun, startRebrickableSync, type RebrickableRun } from '@/lib/rebrickable/run';
 
 export type Result = svc.Result<{ token?: string }>;
@@ -69,7 +70,7 @@ export async function runSync(): Promise<Result> {
     if (!lookup) return { ok: false, error: 'Set the BRICKLINK_* keys to sync prices.' };
     const db = await getDb();
     const s = await svc.startSync(db);
-    if (s.ok) after(() => svc.runSync(db, s.runId, lookup, brickStore() ?? undefined, rebrickable() ?? undefined));
+    if (s.ok) after(() => svc.runSync(db, s.runId, lookup, brickStore() ?? undefined, rebrickable() ?? undefined, brickset() ?? undefined));
     return s;
   });
 }
@@ -237,5 +238,39 @@ export async function syncRebrickableNow(): Promise<Result> {
   if (!rb) return { ok: false, error: 'REBRICKABLE_API_KEY isn\'t set on the server.' };
   const run = startRebrickableSync(await getDb(), rb, { recheck: true });
   if (run) after(() => run);
+  return { ok: true };
+}
+
+export type BricksetStatus = { key: boolean; stats: RetailStats };
+
+/** Settings → Brickset: whether the key is set and how many sets have retail prices and dates. */
+export async function bricksetStatus(): Promise<BricksetStatus | null> {
+  if (!(await currentUser())) return null;
+  return { key: !!brickset(), stats: await retailStats(await getDb()) };
+}
+
+/** Makes one call to Brickset with the key and reports what it said. */
+export async function testBricksetKey(): Promise<Result> {
+  if (!(await currentUser())) return { ok: false, error: 'Not signed in.' };
+  if (isDemo()) return { ok: false, error: DEMO_ERROR };
+  const bs = brickset();
+  if (!bs) return { ok: false, error: 'BRICKSET_API_KEY isn\'t set on the server.' };
+  try {
+    await bs.check();
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+/** Fetches retail prices and dates now, without waiting for the daily sync (at most 10 Brickset calls). */
+export async function syncBricksetNow(): Promise<Result> {
+  if (!(await currentUser())) return { ok: false, error: 'Not signed in.' };
+  if (isDemo()) return { ok: false, error: DEMO_ERROR };
+  const bs = brickset();
+  if (!bs) return { ok: false, error: 'BRICKSET_API_KEY isn\'t set on the server.' };
+  const errors = await syncRetail(await getDb(), bs);
+  if (errors.length) return { ok: false, error: errors.join('; ') };
+  refresh();
   return { ok: true };
 }

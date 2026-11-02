@@ -4,12 +4,14 @@ import { and, asc, desc, eq, gt, lt, lte, sql } from 'drizzle-orm';
 import type { Lookup, Store } from '../bricklink/client';
 import type { BuildSource, Catalog } from '../rebrickable/client';
 import type { DB } from '../db/types';
-import { history, locations, priceSnapshots, sets, settings, syncRuns } from '../db/schema';
+import { history, locations, priceSnapshots, setModels, sets, settings, syncRuns } from '../db/schema';
 import { hasParts, replaceParts } from './parts';
 import { syncStore } from './store';
 import { syncCatalog, themeMap, themeNames } from './catalog';
 import { syncWishlist } from './wishlist';
 import { syncBuilds } from './builds';
+import { syncRetail } from './retail';
+import type { RetailSource } from '../brickset/client';
 import { syncOmrModels } from './models';
 import { alertsFromEnv, notifyUnderTarget } from './alerts';
 import { estValue, parseLocation, priceGuide, totals, type HistoryRow, type SetInput, type SetRow } from '../sets';
@@ -33,12 +35,14 @@ const columns = {
   registered: sets.registered, missingPct: sets.missingPct, qty: sets.qty, avgSold: sets.avgSold, minSold: sets.minSold,
   maxSold: sets.maxSold, qtySold: sets.qtySold, estValue: sets.estValue, blError: sets.blError, lastUpdated: sets.lastUpdated, notes: sets.notes,
   themeId: sets.themeId, minifigs: sets.minifigs,
+  retailPrice: sets.retailPrice, retailCurrency: sets.retailCurrency, launchDate: sets.launchDate, exitDate: sets.exitDate, retired: sets.retired,
+  hasModel: sql<number>`exists (select 1 from ${setModels} where ${setModels.setId} = ${sets.id})`,
 };
 
 /** Swaps the Rebrickable theme id for readable theme and subtheme names. */
-async function withThemes(db: DB, rows: (Omit<SetRow, 'theme' | 'subtheme'> & { themeId: number | null })[]): Promise<SetRow[]> {
+async function withThemes(db: DB, rows: (Omit<SetRow, 'theme' | 'subtheme' | 'hasModel'> & { themeId: number | null; hasModel: number | boolean })[]): Promise<SetRow[]> {
   const map = rows.some((r) => r.themeId !== null) ? await themeMap(db) : new Map();
-  return rows.map(({ themeId, ...r }) => ({ ...r, ...themeNames(map, themeId) }));
+  return rows.map(({ themeId, hasModel, ...r }) => ({ ...r, hasModel: Boolean(hasModel), ...themeNames(map, themeId) }));
 }
 
 // ---- reads ----
@@ -193,7 +197,7 @@ export async function startSync(db: DB): Promise<Result<{ runId: number }>> {
  * Looks up every set, saves today's collection totals, then refreshes your store inventory and orders
  * (when `store` is given) and Rebrickable themes and minifigs (when `catalog` is given). Updates progress as it goes.
  */
-export async function runSync(db: DB, runId: number, lookup: Lookup, store?: Store, catalog?: Catalog & Partial<BuildSource>): Promise<void> {
+export async function runSync(db: DB, runId: number, lookup: Lookup, store?: Store, catalog?: Catalog & Partial<BuildSource>, retail?: RetailSource): Promise<void> {
   try {
     const currency = await getCurrency(db);
     const all = await db.select({ id: sets.id, setNo: sets.setNo, condition: sets.condition, missingPct: sets.missingPct }).from(sets).all();
@@ -209,6 +213,7 @@ export async function runSync(db: DB, runId: number, lookup: Lookup, store?: Sto
     const storeErrors = store ? await syncStore(db, store) : [];
     const catalogErrors = catalog ? await syncCatalog(db, catalog) : [];
     if (catalog?.alternates && catalog.buildParts) catalogErrors.push(...(await syncBuilds(db, { alternates: catalog.alternates, buildParts: catalog.buildParts })));
+    if (retail) catalogErrors.push(...(await syncRetail(db, retail)));
     // 3D models from LDraw's OMR, only when a parts library is set up (the 3D view needs it anyway).
     const hasLibrary = !!(process.env.LDRAW_LIBRARY_DIR || process.env.LDRAW_LIBRARY_URL);
     if (hasLibrary && process.env.LDRAW_OMR_SYNC !== 'off') catalogErrors.push(...(await syncOmrModels(db)));

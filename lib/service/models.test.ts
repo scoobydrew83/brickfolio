@@ -85,3 +85,12 @@ it('syncs OMR models for sets without one, a few at a time, and waits a month to
   await syncOmrModels(db, omr, { max: 10, gapMs: 0 });
   expect(asked).toEqual(['3-1.mpd']); // failures retry next time; 4 was missing, so not again for 30 days
 });
+
+it('marks sets that have a model in the collection list', async () => {
+  await sets.addSet(db, { setNo: '10497-1', name: 'Galaxy Explorer', condition: 'New' }, { lookup });
+  await sets.addSet(db, { setNo: '10280-1', name: 'Flower Bouquet', condition: 'New' }, { lookup });
+  await saveModel(db, '10497-1', 'galaxy.mpd', fixture);
+  const byNo = Object.fromEntries((await sets.listSets(db)).map((s) => [s.setNo, s.hasModel]));
+  expect(byNo).toEqual({ '10280-1': false, '10497-1': true });
+  expect((await sets.getSet(db, '10497-1'))?.hasModel).toBe(true);
+});

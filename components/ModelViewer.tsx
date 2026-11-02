@@ -10,11 +10,12 @@ type Props = {
   model: { fileName: string; author: string | null } | null;
   library: boolean; // an LDraw parts library is configured on the server
   photo: React.ReactNode;
+  initialView?: View; // e.g. from ?view=3d on the set page
 };
 
 /** A set's photo, its LDraw model in 3D, and the model's building steps. */
-export function ModelViewer({ setNo, model, library, photo }: Props) {
-  const [view, setView] = useState<View>('photo');
+export function ModelViewer({ setNo, model, library, photo, initialView }: Props) {
+  const [view, setView] = useState<View>(initialView ?? 'photo');
   return (
     <section aria-label="Photo and model" className="space-y-3">
       <Segmented

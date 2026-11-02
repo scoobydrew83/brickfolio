@@ -1,17 +1,17 @@
 'use client';
 import { useEffect, useState, useTransition } from 'react';
-import { downloadLdrawLibrary, ldrawLibraryStatus, rebrickableStatus, syncRebrickableNow, testRebrickableKey, type RebrickableStatus, addLocation, createToken, deleteLocation, importFile, renameLocation, revokeToken, setCurrency, type Result } from '@/app/actions';
+import { bricksetStatus, downloadLdrawLibrary, ldrawLibraryStatus, rebrickableStatus, syncBricksetNow, syncRebrickableNow, testBricksetKey, testRebrickableKey, type BricksetStatus, type RebrickableStatus, addLocation, createToken, deleteLocation, importFile, renameLocation, revokeToken, setCurrency, type Result } from '@/app/actions';
 import { Banner, Button, field } from './ui';
 import { PageHeader } from './shell/PageHeader';
 import type { LibraryStatus } from '@/lib/ldraw/download';
 
 type Token = { id: number; name: string; prefix: string; createdAt: string; lastUsedAt: string | null };
-type Props = { locations: string[]; currency: string; tokens: Token[]; user: string; authMode: string; priced: boolean; alerts: boolean; rebrickable: RebrickableStatus; ldraw: LibraryStatus };
+type Props = { locations: string[]; currency: string; tokens: Token[]; user: string; authMode: string; priced: boolean; alerts: boolean; rebrickable: RebrickableStatus; brickset: BricksetStatus; ldraw: LibraryStatus };
 
 const h2 = 'text-lg font-extrabold [font-stretch:110%]';
 const section = 'space-y-3 border-t border-line pt-6';
 
-export default function Settings({ locations, currency, tokens, user, authMode, priced, alerts, rebrickable, ldraw }: Props) {
+export default function Settings({ locations, currency, tokens, user, authMode, priced, alerts, rebrickable, brickset, ldraw }: Props) {
   const [pending, start] = useTransition();
   const [message, setMessage] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
   const [newToken, setNewToken] = useState<string | null>(null);
@@ -89,12 +89,13 @@ export default function Settings({ locations, currency, tokens, user, authMode, 
       </section>
 
       <RebrickableSection initial={rebrickable} />
+      <BricksetSection initial={brickset} />
 
       <LdrawSection initial={ldraw} />
 
       <section className={`${section} text-sm text-fg-2`}>
         <h2 className={`${h2} text-fg`}>About this server</h2>
-        <p>Signed in as <b>{user}</b> · Auth mode <b>{authMode}</b> · BrickLink keys <b>{priced ? 'set' : 'not set'}</b> · Rebrickable key <b>{rebrickable.key ? 'set' : 'not set'}</b> · Wishlist alerts <b>{alerts ? 'on' : 'off'}</b></p>
+        <p>Signed in as <b>{user}</b> · Auth mode <b>{authMode}</b> · BrickLink keys <b>{priced ? 'set' : 'not set'}</b> · Rebrickable key <b>{rebrickable.key ? 'set' : 'not set'}</b> · Brickset key <b>{brickset.key ? 'set' : 'not set'}</b> · Wishlist alerts <b>{alerts ? 'on' : 'off'}</b></p>
         {!alerts && <p>To get a message when a wishlist set drops under your target, set <code className="rounded-chip bg-muted px-1">ALERT_WEBHOOK_URL</code> to an ntfy topic, a Discord webhook or any URL that accepts JSON.</p>}
       </section>
     </div>
@@ -177,6 +178,48 @@ function RebrickableSection({ initial }: { initial: RebrickableStatus }) {
         })}>
           Test key
         </Button>
+      </div>
+    </section>
+  );
+}
+
+/** Brickset: original retail prices and retirement dates, with a key test and a sync button. */
+function BricksetSection({ initial }: { initial: BricksetStatus }) {
+  const [st, setSt] = useState(initial);
+  const [note, setNote] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
+  const [pending, start] = useTransition();
+  const s = st.stats;
+  if (!st.key) {
+    return (
+      <section className={section}>
+        <h2 className={h2}>Brickset</h2>
+        <p className="text-sm text-fg-3">
+          Add a free key from brickset.com (your account → API) as <code className="rounded-chip bg-muted px-1">BRICKSET_API_KEY</code>, then redeploy, to see each set&apos;s original retail price, your gain over retail, and which sets are retiring.
+        </p>
+      </section>
+    );
+  }
+  return (
+    <section className={section} aria-live="polite">
+      <h2 className={h2}>Brickset</h2>
+      <p className="text-sm text-fg-3">
+        {s.sets === 0 ? 'Add sets, then sync to fill in retail prices and retirement dates.' : (
+          <><b className="text-fg tabular-nums">{s.withRetail}</b> of {s.sets} sets have a retail price · <span className="tabular-nums">{s.retiring}</span> retiring soon · <span className="tabular-nums">{s.retired}</span> retired{s.notChecked ? <> · <span className="tabular-nums">{s.notChecked}</span> not checked yet</> : null}.</>
+        )}
+        {' '}Each sync checks sets Brickset hasn&apos;t been asked about in 30 days.
+      </p>
+      {note && <Banner kind={note.kind} onDismiss={() => setNote(null)}>{note.text}</Banner>}
+      <div className="flex flex-wrap gap-2">
+        <Button variant="primary" loading={pending} onClick={() => start(async () => {
+          const r = await syncBricksetNow();
+          setNote(r.ok ? { kind: 'ok', text: 'Brickset sync finished.' } : { kind: 'error', text: r.error });
+          const next = await bricksetStatus();
+          if (next) setSt(next);
+        })}>Sync Brickset now</Button>
+        <Button disabled={pending} onClick={() => start(async () => {
+          const r = await testBricksetKey();
+          setNote(r.ok ? { kind: 'ok', text: 'Brickset accepted the key.' } : { kind: 'error', text: r.error });
+        })}>Test key</Button>
       </div>
     </section>
   );
