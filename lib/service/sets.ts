@@ -19,6 +19,7 @@ import { alertsFromEnv, notifyUnderTarget } from './alerts';
 import { notifyRetiring } from './radar';
 import { notifyDesigner } from './designer';
 import { addMinifig, syncMinifigs } from './minifigs';
+import { syncCommunity } from '../barcode/community';
 import { estValue, parseLocation, placeholderName, priceGuide, totals, type Condition, type HistoryRow, type QuickList, type SetInput, type SetRow } from '../sets';
 
 /** `status` lets the REST API pick an HTTP code. `existing` = already in stock, so the UI asks before adding. */
@@ -272,6 +273,9 @@ export async function runSync(db: DB, runId: number, lookup: Lookup, store?: Sto
     const catalogErrors = catalog ? await syncCatalog(db, catalog) : [];
     if (catalog?.alternates && catalog.buildParts) catalogErrors.push(...(await syncBuilds(db, { alternates: catalog.alternates, buildParts: catalog.buildParts })));
     if (retail) catalogErrors.push(...(await syncRetail(db, retail)));
+    // The shared community barcode list (one small request; unchanged lists cost almost nothing).
+    const communityError = await syncCommunity(db);
+    if (communityError) catalogErrors.push(communityError);
     // After Brickset, so exit dates are fresh.
     const retireError = send ? await notifyRetiring(db, send) : null;
     if (retireError) catalogErrors.push(retireError);

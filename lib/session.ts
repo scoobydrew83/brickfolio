@@ -5,6 +5,7 @@ import { identify, bearer, type Identity } from './auth';
 import { brickLinkFromEnv } from './bricklink/client';
 import { rebrickableFromEnv } from './rebrickable/client';
 import { bricksetFromEnv } from './brickset/client';
+import { barcodeCapabilities, providersFromEnv, type BarcodeLookupProvider } from './barcode/providers';
 import { getDb } from './db';
 import { checkToken, sha256Hex } from './service/tokens';
 import { isDemo } from './demo';
@@ -47,3 +48,9 @@ export const rebrickable = () => (isDemo() ? null : rb === undefined ? (rb = reb
 let bs: ReturnType<typeof bricksetFromEnv> | undefined;
 /** Brickset client (retail prices, retirement dates), or null when BRICKSET_API_KEY isn't set. One per process. */
 export const brickset = () => (isDemo() ? null : bs === undefined ? (bs = bricksetFromEnv()) : bs);
+
+let bp: BarcodeLookupProvider[] | undefined;
+/** Barcode lookup providers with a key, in order (lib/barcode/providers.ts). None in demo mode. One set per process. */
+export const barcodeProviders = (): BarcodeLookupProvider[] => (isDemo() ? [] : (bp ??= providersFromEnv()));
+/** Which barcode lookups are on, for the scanner and Settings. No secrets. */
+export const barcodeCaps = () => (isDemo() ? { ...barcodeCapabilities({}), scanning: true } : barcodeCapabilities());

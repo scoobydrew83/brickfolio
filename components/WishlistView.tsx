@@ -1,7 +1,8 @@
 'use client';
 import Image from 'next/image';
 import { useMemo, useState, useTransition } from 'react';
-import { Check, ExternalLink, Pencil, Plus, Trash2 } from 'lucide-react';
+import { Check, ExternalLink, Pencil, Plus, ScanBarcode, Trash2 } from 'lucide-react';
+import Link from 'next/link';
 import { acquireWish, addWish, editWish, removeWish, type Result } from '@/app/actions';
 import type { WishRow } from '@/lib/service/wishlist';
 import { displayNo } from '@/lib/sets';
@@ -42,7 +43,7 @@ export default function WishlistView({ items, currency, priced }: { items: WishR
       <PageHeader
         title="Wishlist"
         badge={<span className="text-sm text-fg-3 tabular-nums">{items.length} {items.length === 1 ? 'set' : 'sets'}</span>}
-        actions={<Button variant="primary" icon={Plus} onClick={() => setEditing('new')}>Add to wishlist</Button>}
+        actions={<span className="flex flex-wrap gap-2"><Link href="/scan" className={buttonClass()}><ScanBarcode aria-hidden className="size-4" />Scan</Link><Button variant="primary" icon={Plus} onClick={() => setEditing('new')}>Add to wishlist</Button></span>}
       >
         <p>{priced ? 'Prices are BrickLink average sold prices for the condition you want, refreshed in the daily sync.' : 'Add BrickLink API keys to price your wishlist.'}</p>
       </PageHeader>

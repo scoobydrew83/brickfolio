@@ -11,13 +11,21 @@ BrickLink API but is not endorsed or certified by BrickLink.
 Data sources (each used with the user's own API key and under that service's terms of use)
 - BrickLink (https://www.bricklink.com): set details, images, parts lists and sold prices.
 - Rebrickable (https://rebrickable.com): themes, minifigure counts and alternate builds.
-- Brickset (https://brickset.com): original retail prices and launch and retirement dates.
+- Brickset (https://brickset.com): original retail prices and launch and retirement dates, and box barcodes.
+- CompareTheBricks (https://comparethebricks.com) and BrickEconomy (https://www.brickeconomy.com): optional barcode
+  lookups, each with the user's own key. Their answers are cached in the user's own database only.
+- L-Scan (https://github.com/le0pard/lego-scanner) by Oleksii Vasyliev: the Collectible Minifigures box code table in
+  lib/barcode/data/cmf-codes.json, MIT License (Copyright (c) 2026 Oleksii Vasyliev; the full text is in that project
+  and in THIRD_PARTY_NOTICES.md under "L-Scan data"). The codes were collected by fans and are not from the LEGO Group.
+- The community barcode list (lib/barcode/data/community.json) is contributed by Brickfolio users under CC0 1.0.
 - LDraw (https://www.ldraw.org): the LDraw Parts Library and models from the Official Model Repository,
   licensed CC BY 2.0 by the LDraw.org contributors. Each model's author is shown under the 3D view.
   The test fixtures in lib/ldraw/fixtures are simplified stand-ins.
 
 Bundled software
 - three.js (MIT) for the 3D view.
+- ZXing for JavaScript (@zxing/library, Apache-2.0; @zxing/browser, MIT) to read barcodes in the browser.
+- Tesseract.js and tesseract.js-core (Apache-2.0), and the Tesseract English model (tessdata, Apache-2.0, packaged as @tesseract.js-data/eng, MIT), to read set numbers.
 - Lucide icons (ISC), which include icons from Feather (MIT).
 - Archivo by Omnibus-Type (SIL Open Font License 1.1), self-hosted through next/font.
 - sharp and libvips (Apache-2.0 and LGPL-3.0-or-later), used by Next.js image optimization in the Docker image.

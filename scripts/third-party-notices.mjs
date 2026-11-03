@@ -1,6 +1,6 @@
 // Writes THIRD_PARTY_NOTICES.md: every runtime package Brickfolio ships (the production dependency tree from
 // `npm ls`, without the Cloudflare deploy tool, which only runs at build time) with its version, license and
-// license text, plus the Archivo font. Run after installing dependencies:
+// license text, plus the Archivo font and the L-Scan minifigure code table. Run after installing dependencies:
 //   npm run notices
 import { execFileSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -36,7 +36,12 @@ const font = {
   name: 'Archivo (font)', version: '', license: 'OFL-1.1', repo: 'https://github.com/Omnibus-Type/Archivo',
   text: 'Copyright 2016 The Archivo Project Authors (https://github.com/Omnibus-Type/Archivo).\nLicensed under the SIL Open Font License, Version 1.1 (https://openfontlicense.org). Self-hosted through next/font.',
 };
-const all = [font, ...list];
+// Bundled data, not a package: the Collectible Minifigures box code table (lib/barcode/data/cmf-codes.json).
+const lscan = {
+  name: 'L-Scan data', version: '', license: 'MIT', repo: 'https://github.com/le0pard/lego-scanner',
+  text: "MIT License\n\nCopyright (c) 2026 Oleksii Vasyliev\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the \"Software\"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\nSOFTWARE.",
+};
+const all = [font, lscan, ...list];
 const link = (p) => (/^https?:\/\//.test(p.repo) ? `[${p.name}](${p.repo})` : p.name);
 const md = [
   '# Third-party notices',

@@ -6,6 +6,7 @@ import { underTargetCount } from '@/lib/service/alerts';
 import { currentUser } from '@/lib/session';
 import { APP_NAME } from '@/lib/brand';
 import { INSTALL_URL, isDemo } from '@/lib/demo';
+import { ScanBarcode } from 'lucide-react';
 import { Logo } from '../ui';
 import { Nav } from '../Nav';
 import { ThemeToggle } from './ThemeToggle';
@@ -21,6 +22,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <span className="text-lg [font-stretch:110%]">{APP_NAME}</span>
           </Link>
           <div className="flex-1"><Suspense fallback={<Nav />}><NavWithAlerts /></Suspense></div>
+          <Link href="/scan" aria-label="Scan a barcode" title="Scan a barcode" className="-my-1 rounded-control p-2 text-on-header hover:bg-white/10 hover:text-white sm:hidden">
+            <ScanBarcode aria-hidden className="size-5" />
+          </Link>
           <ThemeToggle />
         </div>
       </header>

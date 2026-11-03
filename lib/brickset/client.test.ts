@@ -10,9 +10,11 @@ const reply = (sets: ApiSet[]) => Response.json({ status: 'success', matches: se
 const params = (url: string) => JSON.parse(new URL(url).searchParams.get('params') ?? '{}');
 
 it('maps retail prices by currency, dates, and retirement', () => {
-  expect(toBsSet(galaxy, '2026-11-02')).toEqual({ setNo: '10497-1', retail: { USD: 99.99, GBP: 89.99, EUR: 99.99 }, launchDate: '2022-08-01', exitDate: '2026-12-31', retired: false });
+  expect(toBsSet(galaxy, '2026-11-02')).toEqual({ setNo: '10497-1', retail: { USD: 99.99, GBP: 89.99, EUR: 99.99 }, launchDate: '2022-08-01', exitDate: '2026-12-31', retired: false, ean: null, upc: null });
   expect(toBsSet(galaxy, '2027-01-05').retired).toBe(true); // past its exit date
   expect(toBsSet(castle).retired).toBe(true);
+  expect(toBsSet({ ...castle, barcode: { EAN: '5702015869935', UPC: ' 673419264150 ' } })).toMatchObject({ ean: '5702015869935', upc: '673419264150' });
+  expect(toBsSet({ ...castle, barcode: { EAN: 'n/a', UPC: '' } })).toMatchObject({ ean: null, upc: null });
   expect(toBsSet({ number: '1', LEGOCom: { US: { retailPrice: 5, dateLastAvailable: '2020-06-30T00:00:00Z' } } }, '2026-01-01')).toMatchObject({ exitDate: '2020-06-30', retired: true });
 });
 

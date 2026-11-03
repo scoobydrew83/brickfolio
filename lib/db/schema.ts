@@ -370,3 +370,78 @@ export const designerProjects = sqliteTable('designer_projects', {
   createdAt: text('created_at').notNull().default(now),
   updatedAt: text('updated_at').notNull().default(now),
 });
+
+/**
+ * Which set a retail barcode (UPC/EAN) belongs to. One set can have several barcodes (regions, packaging), and in
+ * rare cases one barcode can point to more than one set, so `gtin` alone is not unique: (gtin, set, source) is.
+ * `source` keeps your own confirmations ('user') apart from barcodes copied from a provider: provider rows are a
+ * local cache for this installation and are never exported.
+ */
+export const setBarcodes = sqliteTable(
+  'set_barcodes',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    barcode: text('barcode').notNull(), // as scanned or typed, e.g. 673419264150
+    format: text('format', { enum: ['UPC_A', 'EAN_13', 'EAN_8', 'UPC_E'] }).notNull(),
+    gtin: text('gtin').notNull(), // lookup form: UPC-A with a leading 0, EAN-13 as is (lib/barcode/gtin.ts)
+    setNo: text('set_no').notNull(), // with suffix: 75192-1
+    source: text('source', { enum: ['user', 'community', 'brickset', 'comparethebricks', 'brickeconomy'] }).notNull(),
+    verified: integer('verified', { mode: 'boolean' }).notNull().default(false), // you confirmed it
+    region: text('region'),
+    sourceRef: text('source_ref'), // the provider's id for the record
+    name: text('name'), // what the provider called the set, until it's in the collection
+    year: integer('year'),
+    pieces: integer('pieces'),
+    imageUrl: text('image_url'),
+    firstSeenAt: text('first_seen_at').notNull().default(now),
+    lastSeenAt: text('last_seen_at').notNull().default(now),
+    verifiedAt: text('verified_at'),
+    createdAt: text('created_at').notNull().default(now),
+    updatedAt: text('updated_at').notNull().default(now),
+  },
+  (t) => [
+    uniqueIndex('set_barcodes_key').on(t.gtin, t.setNo, t.source),
+    index('set_barcodes_gtin').on(t.gtin),
+    index('set_barcodes_set').on(t.setNo),
+  ],
+);
+
+/**
+ * Codes on Collectible Minifigures boxes (the square Data Matrix): a 7-digit code, plus the factory letter and year digit
+ * from the production code, mapped to a figure. Holds yours ('user') and the shared list's ('community'); the fan-made
+ * L-Scan table ships with the app (lib/barcode/data/cmf-codes.json) and isn't copied here.
+ */
+export const minifigCodes = sqliteTable(
+  'minifig_codes',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    code: text('code').notNull(), // 6472866
+    factory: text('factory').notNull().default(''), // S (Czech Republic), R (Mexico); '' = any
+    year: text('year').notNull().default(''), // production year digit; '' = any
+    name: text('name').notNull(), // figure name, e.g. Film Noir Detective
+    series: text('series').notNull(), // e.g. Series 25
+    rbFigNo: text('rb_fig_no'), // Rebrickable number when known: fig-013525
+    source: text('source', { enum: ['user', 'community'] }).notNull(),
+    verified: integer('verified', { mode: 'boolean' }).notNull().default(false),
+    createdAt: text('created_at').notNull().default(now),
+    updatedAt: text('updated_at').notNull().default(now),
+  },
+  (t) => [uniqueIndex('minifig_codes_key').on(t.code, t.factory, t.year, t.source), index('minifig_codes_code').on(t.code)],
+);
+
+/** Barcodes no provider knew, so a box isn't looked up again on every scan. Kept 7 days (lib/barcode/resolve.ts). */
+export const barcodeMisses = sqliteTable('barcode_misses', {
+  gtin: text('gtin').primaryKey(),
+  checkedAt: text('checked_at').notNull(),
+});
+
+/** Answers to requests sent with an idempotency key (scan batches), so a retried submit doesn't add sets twice. */
+export const idempotencyKeys = sqliteTable(
+  'idempotency_keys',
+  {
+    key: text('key').primaryKey(),
+    result: text('result').notNull(), // JSON
+    createdAt: text('created_at').notNull().default(now),
+  },
+  (t) => [index('idempotency_keys_created').on(t.createdAt)],
+);

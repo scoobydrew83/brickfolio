@@ -35,6 +35,21 @@ npm run build
 - **Schema changes:** edit `lib/db/schema.ts`, run `npm run db:generate`, and commit the new file in `drizzle/`. Never edit a migration that has already been released.
 - **Next.js 16** has breaking changes from earlier versions. Check `node_modules/next/dist/docs/` rather than relying on older examples (see AGENTS.md).
 
+## Community barcodes
+
+`lib/barcode/data/community.json` in the [public repository](https://github.com/scoobydrew83/brickfolio) is the shared list of barcodes and Collectible Minifigures box codes every installation downloads (from its `main` branch). It's CC0, so anyone can use it. To add codes:
+
+1. Scan the boxes in Brickfolio and confirm them: type the set number for an unknown barcode, or pick the figure for an opened minifigure box.
+2. **Settings → Barcode scanning → Share my codes** opens a prefilled issue on [scoobydrew83/brickfolio](https://github.com/scoobydrew83/brickfolio/issues), or downloads a file. Add its entries to `community.json` in a pull request there.
+3. `npm test` checks the file: valid check digits, set numbers like `75192-1`, 7-digit box codes, and no barcode given to two different sets.
+
+Reviewers merge an entry when one of these holds:
+- two people sent it independently;
+- it matches the barcode on LEGO's or a retailer's product page;
+- it comes with a photo of the box showing both the code and the set number.
+
+Never add codes copied from a paid barcode service: those belong to their provider. `scripts/import-lscan.mjs` refreshes the bundled L-Scan table (`lib/barcode/data/cmf-codes.json`, MIT) from a checkout of that project.
+
 ## License
 
 By contributing, you agree that your contributions are licensed under the [Apache License 2.0](LICENSE).

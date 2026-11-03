@@ -4,6 +4,30 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-11-03
+
+### Added
+- **Minifigures** scan mode: the square Data Matrix code on Collectible Minifigures boxes tells you which figure is inside, from your own codes, the community list, then the bundled, fan-collected L-Scan table (MIT), preferring the box's factory and year. Figures are linked to the Rebrickable checklist and added to Minifigures. A figure picked by hand from an opened box is remembered as yours. `POST /api/v1/barcodes/minifig`, `POST /api/v1/barcodes/minifig/mappings` and an MCP `lookup_minifig_code` tool.
+- **Read the set number:** OCR (Tesseract.js, in the browser) reads the number printed on a box front, for boxes with an unknown or missing barcode. The model files are served by your own server (`/ocr/…`); on Cloudflare they load from jsDelivr, and `OCR_ASSETS_URL` overrides.
+- Offline scanning: the Scan page opens without a connection (service worker, scoped to `/scan`). Known boxes are recognised from saved barcodes kept on the device (`GET /api/v1/barcodes/offline`). Adds wait on the device, clearly marked, and are sent once with an idempotency key when you're back. A **Scan barcodes** home-screen shortcut.
+- Community barcode list: reviewed barcodes and minifigure codes in `lib/barcode/data/community.json` (CC0), published from the public repository (github.com/scoobydrew83/brickfolio) and downloaded in the daily sync (`COMMUNITY_LIST`, `COMMUNITY_LIST_URL`). **Settings → Barcode scanning → Share my codes** exports your confirmed codes as a prefilled GitHub issue or a file (`GET /api/v1/barcodes/export`). CONTRIBUTING.md explains the review rules.
+
+### Changed
+- `POST /api/v1/barcodes/batch` also takes `figs` (scanned minifigures by Rebrickable number), under the same idempotency key.
+- The full sync also refreshes the community list.
+
+## [0.7.0] - 2026-11-03
+
+### Added
+- Barcode scanner: **Scan** on the Sets page and Wishlist (and a header icon on phones) reads the UPC or EAN on a box with the camera and finds the set. Decoding runs in the browser (the built-in BarcodeDetector, or ZXing where there isn't one, e.g. iPhone Safari), and no picture is uploaded. **One at a time** shows the set and how many you own, then adds it to the collection or wishlist. **Many in a row** keeps the camera on; a box counts again only after it leaves the frame, and the reviewed list is added in one go.
+- Barcodes are saved per installation: ones you confirm, and the EAN/UPC the Brickset sync now keeps for sets you own or want. A box nobody knows asks for its set number once and is remembered.
+- Optional lookup services for new boxes: CompareTheBricks (`COMPARETHEBRICKS_API_KEY`, free key) and BrickEconomy (`BRICKECONOMY_API_KEY`, experimental), in the order set by `BARCODE_PROVIDERS`. Only the barcode is sent; misses aren't asked again for 7 days.
+- API: `POST /api/v1/barcodes/lookup`, `POST`/`DELETE /api/v1/barcodes/mappings`, `POST /api/v1/barcodes/batch` (with an `Idempotency-Key`, so a retry can't add twice) and `GET /api/v1/barcodes`. The MCP server gets a read-only `lookup_barcode` tool.
+- **Settings → Barcode scanning** shows which lookups are on and how many barcodes are saved.
+
+### Changed
+- The demo data includes three sample barcodes (made-up codes in the 200… in-store range).
+
 ## [0.6.0] - 2026-11-03
 
 ### Added

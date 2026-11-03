@@ -12,5 +12,7 @@ export default function manifest(): MetadataRoute.Manifest {
     background_color: '#fafafa', // zinc-50, the page background
     theme_color: '#fbbf24', // amber-400, the brick badge
     icons: [{ src: '/apple-icon', sizes: '180x180', type: 'image/png' }],
+    // Long-press the home-screen icon to open the scanner straight away (it also works offline once opened).
+    shortcuts: [{ name: 'Scan barcodes', short_name: 'Scan', url: '/scan', icons: [{ src: '/apple-icon', sizes: '180x180', type: 'image/png' }] }],
   };
 }

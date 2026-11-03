@@ -1,6 +1,6 @@
 'use client';
 import Link from 'next/link';
-import { ClipboardList, LayoutGrid, Plus, RefreshCw, Rows3 } from 'lucide-react';
+import { ClipboardList, LayoutGrid, Plus, RefreshCw, Rows3, ScanBarcode } from 'lucide-react';
 import { useSearchParams } from 'next/navigation';
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, useTransition } from 'react';
 import { addSet, editSet, quickAddList, relookupSet, reload, removeSet, runSync, type Result } from '@/app/actions';
@@ -14,7 +14,7 @@ import { QuickAdd } from './board/QuickAdd';
 import { SetTable } from './board/SetTable';
 import { ValueChart } from './board/ValueChart';
 import { moneyIn } from './board/ui';
-import { Banner, Button, EmptyState, FilterChip, SearchInput, Segmented, Select } from './ui';
+import { Banner, Button, EmptyState, FilterChip, SearchInput, Segmented, Select, buttonClass } from './ui';
 import { PageHeader } from './shell/PageHeader';
 import { CollectionTabs } from './shell/CollectionTabs';
 
@@ -100,6 +100,7 @@ export default function Board({ sets, history, sync, locations, currency, readAt
                 {syncing ? `Syncing… ${sync.processed}/${sync.total}` : 'Sync BrickLink'}
               </Button>
             )}
+            <Link href="/scan" className={buttonClass()}><ScanBarcode aria-hidden className="size-4" />Scan</Link>
             <Button icon={ClipboardList} onClick={() => setPasting(true)}>Paste a list</Button>
             <Button variant="primary" icon={Plus} onClick={() => setEditing('new')}>Add set</Button>
           </span>

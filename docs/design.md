@@ -236,7 +236,7 @@ All shared UI lives in `components/ui` (`import { Button, Callout, … } from '@
 - ~~Themes and subthemes~~ Shipped (Rebrickable phase 1): theme filter on the Sets page, theme and minifig count on cards.
 - ~~Value vs. retail~~ Shipped (Brickset): retail price and gain % per set and for the collection.
 - ~~Retirement watch~~ Shipped (Brickset): Retiring/Retired chips on sets and wishlist items, and an Availability filter.
-- ~~Quick add~~ Shipped (0.5.0): **Paste a list** and `POST /api/v1/sets/bulk`. Still to do: scan a barcode or box photo on a phone (Brickognize).
+- ~~Quick add~~ Shipped (0.5.0): **Paste a list** and `POST /api/v1/sets/bulk`. ~~Barcode scan~~ Shipped (0.7.0): `/scan`, one at a time or many in a row, saved barcodes, optional CompareTheBricks and BrickEconomy lookups. Shipped (0.8.0): offline scanning (service worker, saved barcodes on the device, an outbox), the community barcode list (CC0 file in the repo, reviewed by PR), minifigure box codes (Data Matrix, L-Scan table), and reading the set number from the box (OCR). Still to do: USB/Bluetooth barcode scanners, minifigure codes resolved offline, and automatic trust rules for community submissions.
 - **Read-only share link** for showing a collection without giving out access.
 
 ### P2: bigger bets
@@ -254,7 +254,7 @@ Trends behind them: the BrickLink Designer Program is the fastest-growing area o
 2. ~~Designer Program tracker~~ Shipped (0.6.0): on the Radar page, with pre-order alerts. Still to do: fill projects automatically if BrickLink ever offers a feed.
 3. **Sealed vs. built backlog** ("pile of shame"): built/unbuilt per copy, build dates, and the new-vs-used value gap.
 4. ~~MCP server~~ Shipped (0.6.0): `/api/mcp`, read-only tools. Still to do: OAuth so it can be added as a claude.ai connector, and opt-in write tools (add a set, edit the wishlist).
-5. **Brickognize photo scan** to add sets, minifigs and parts from a phone.
+5. **Brickognize photo scan** to add minifigs and loose parts from a phone (sets: barcode scan shipped in 0.7.0).
 6. ~~Insurance and valuation report~~ Shipped (0.6.0): **Settings → Valuation report**. Still to do: photos in the report.
 7. **Retailer deal alerts** for wishlist sets via the n8n flows in `docs/n8n/`.
 8. **Loose-parts bins:** storage locations for parts outside sets, feeding "What can I build?".

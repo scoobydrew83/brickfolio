@@ -7,6 +7,7 @@ import type { DB } from '../db/types';
 import { setNo as fullSetNo } from '../sets';
 import { SOON_DAYS } from '../retail';
 import { getCurrency } from './sets';
+import { saveBricksetBarcodes } from './barcodes';
 
 export { collectionGain, retailGain, retirement } from '../retail';
 
@@ -52,6 +53,8 @@ export async function syncRetail(db: DB, src: RetailSource, opts: { maxCalls?: n
     await db.update(sets).set(row).where(or(eq(sets.setNo, no), eq(sets.setNo, short)));
     await db.update(wishlist).set(row).where(or(eq(wishlist.setNo, no), eq(wishlist.setNo, short)));
   }
+  // Brickset's EAN and UPC for these sets, so scanning a box you own or want needs no outside lookup.
+  await saveBricksetBarcodes(db, result.found);
   return [];
 }
 

@@ -14,6 +14,8 @@ import { listMinifigs, minifigTotals } from '../service/minifigs';
 import { partout, unpricedLots } from '../service/partout';
 import { listMissing } from '../service/missing';
 import { searchParts } from '../service/parts';
+import { resolveBarcode } from '../barcode/resolve';
+import { resolveFigCode } from '../barcode/figcodes';
 
 export const PROTOCOL_VERSIONS = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'] as const;
 const VERSION = pkg.version;
@@ -163,6 +165,28 @@ export const TOOLS: Tool[] = [
     async run(db, a) {
       const d = dailyHistory(await listHistory(db));
       return { currency: await getCurrency(db), history: d.slice(-int(a.days, 90, 1, 3650)) };
+    },
+  },
+  {
+    name: 'lookup_barcode',
+    title: 'Look up a barcode',
+    description: 'Which set a box barcode (12-digit UPC or 13-digit EAN) belongs to, from barcodes saved by the scanner and the Brickset sync, and whether it is in the collection or on the wishlist. Never asks an outside service; an unknown barcode comes back as not_found.',
+    inputSchema: { type: 'object', properties: { barcode: { type: 'string', description: 'Digits under the barcode, e.g. 673419264150' } }, required: ['barcode'] },
+    async run(db, a) {
+      const r = await resolveBarcode(db, str(a.barcode, 40), { providers: [], readOnly: true });
+      if (r.status === 'invalid') throw new Error(r.error);
+      return { status: r.status, barcode: r.barcode, candidates: r.candidates.map((c) => ({ setNo: displayNo(c.setNo), name: c.name, year: c.year, source: c.source, confirmed: c.verified, ownedQty: c.owned?.qty ?? 0, onWishlist: c.wished })) };
+    },
+  },
+  {
+    name: 'lookup_minifig_code',
+    title: 'Look up a minifigure box code',
+    description: 'Which Collectible Minifigure is in a box, from the square code on its bottom (e.g. "6472866 444S3"): your confirmed codes, the community list, then a fan-collected table (L-Scan). Says whether you own the figure.',
+    inputSchema: { type: 'object', properties: { code: { type: 'string' } }, required: ['code'] },
+    async run(db, a) {
+      const r = await resolveFigCode(db, str(a.code, 64));
+      if (r.status === 'invalid') throw new Error(r.error);
+      return { status: r.status, code: r.code, candidates: r.candidates.map((c) => ({ name: c.name, series: c.series, source: c.source, exactFactory: c.exact, ownedQty: c.owned })) };
     },
   },
 ];

@@ -76,6 +76,7 @@ npx wrangler secret put BRICKLINK_TOKEN         # BrickLink's "Token Value"
 npx wrangler secret put BRICKLINK_TOKEN_SECRET
 npx wrangler secret put REBRICKABLE_API_KEY    # optional: themes and minifig counts
 npx wrangler secret put ALERT_WEBHOOK_URL      # optional: wishlist alerts (ntfy, Discord or JSON webhook)
+npx wrangler secret put COMPARETHEBRICKS_API_KEY  # optional: barcode lookups for the scanner
 ```
 
 Optional: `ALLOWED_USERS` (comma-separated emails) as a second check on top of the Access policy.

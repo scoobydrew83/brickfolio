@@ -71,6 +71,35 @@ With the same key, each sync also looks up alternate builds of your sets and the
 
 Each sync asks Brickset about sets it hasn't checked in 30 days, 50 sets per call and at most 10 calls, to stay well inside the key's daily limit. Retail prices are stored in your collection currency when Brickset has it (USD, GBP, CAD or EUR), otherwise in USD; the gain is only shown when the currencies match. **Settings → Brickset** shows the counts and has **Test key** and **Sync Brickset now**. Prices you could sell for still come only from BrickLink.
 
+### Optional: barcode scanning
+
+**Scan** (on the Sets page, the Wishlist, and the barcode icon in the header on phones) reads the UPC or EAN barcode on a LEGO box with your phone's camera and finds the set. The camera only works over HTTPS (or `localhost`), which the Tailscale and Cloudflare setups give you. Barcodes are read on the device; no picture leaves it.
+
+Brickfolio finds the set for a barcode, in this order:
+1. **Barcodes it already knows:** ones you've confirmed, and the EAN and UPC that the Brickset sync saves for sets you own or want (with `BRICKSET_API_KEY`). Brickset has no barcode search, so it can't identify a box you don't have yet.
+2. **A lookup service**, if you've set one up:
+   - **[CompareTheBricks](https://comparethebricks.com/en-us/api-access/):** free key (250 lookups a day). Set `COMPARETHEBRICKS_API_KEY`.
+   - **[BrickEconomy](https://www.brickeconomy.com/api-reference):** paid key. Set `BRICKECONOMY_API_KEY`. Its barcode search isn't in its public docs, so treat this one as experimental.
+   - `BARCODE_PROVIDERS` sets the order (default `comparethebricks,brickeconomy`). `BARCODE_PROVIDER_TIMEOUT_MS` caps each call (default 5000).
+3. **The community list:** barcodes other Brickfolio users confirmed and a maintainer reviewed, downloaded in the daily sync (see below).
+4. **You:** for a box nobody knows, type the set number (or use **Read the set number**) once and Brickfolio remembers the barcode.
+
+Only the barcode goes to a lookup service, never anything about your collection. A service's answer is kept in your own database so the same box doesn't cost another call, and a barcode none of them knew isn't asked about again for 7 days. These saved answers are a private cache for your installation. Check each service's terms before sharing or publishing them. Barcodes you confirm yourself are stored apart (source `user`).
+
+**One at a time** shows the set, whether you own it already, and adds it to the collection (more copies of a set you have) or the wishlist. **Many in a row** keeps the camera on. A box counts again only after it leaves the frame and comes back. You review the list and add it all at once. The list survives a reload, and a retried submit can't add twice. `BARCODE_SCANNING=off` hides the page.
+
+**Read the set number** reads the big number printed on the front of a box (OCR, with [Tesseract.js](https://github.com/naptha/tesseract.js) in the browser) and lets you pick it. It's handy for a box whose barcode nobody knows, or one with no barcode at all. The model files (about 7 MB, cached after the first use) come from your own server. On Cloudflare Workers, which can't serve them, they load from jsDelivr instead. `OCR_ASSETS_URL` points them somewhere else.
+
+**Minifigures** reads the square code on the bottom of Collectible Minifigures boxes (Series 25 and later, and recent themed series) and shows which figure is inside. The codes come from collectors, not LEGO: Brickfolio ships the [L-Scan](https://github.com/le0pard/lego-scanner) table (MIT), adds the community list and your own codes, and prefers a code from the same factory and year. Treat a match on a sealed box as a good guess. Adding a figure needs its series checklist from Rebrickable (`REBRICKABLE_API_KEY`). When you open a box and the figure differs, **Wrong figure? Pick it** saves the right one as your code.
+
+**Offline:** once you've opened the Scan page, it opens again without a connection (from your phone's home screen too, via the app's **Scan barcodes** shortcut). Boxes whose barcodes are saved are still recognised from a copy kept on the phone; others are looked up when you're back. Anything you add while offline waits on the phone, marked **waiting**, and is sent once you're online. It is never added twice. Minifigure codes are looked up once you're back online.
+
+#### The community list
+
+`lib/barcode/data/community.json` in the [public Brickfolio repository](https://github.com/scoobydrew83/brickfolio) holds barcodes and minifigure codes that users confirmed and a maintainer reviewed, under CC0. Each installation downloads it in the daily sync, or from **Settings → Barcode scanning → Update now**. Only an unchanged-or-not check is sent, nothing about you. Codes in dispute are skipped. Your own confirmations always win over the list. `COMMUNITY_LIST=off` turns it off, and `COMMUNITY_LIST_URL` points at a copy of your own.
+
+To contribute, use **Settings → Barcode scanning → Share my codes**. It exports only the codes you confirmed yourself (barcode and set number, box code and figure: nothing else from your collection) as a prefilled GitHub issue or a file for a pull request. See [CONTRIBUTING.md](../CONTRIBUTING.md#community-barcodes).
+
 ### Part-out value and BrickLink's daily limit
 
 A set's page shows what it would fetch sold as parts. Each part's price is one BrickLink call, kept for 30 days and shared by every set that uses the part. The daily sync prices parts with what's left of the 5,000 calls a day after sets, minifigs and the wishlist (2 calls each), keeping 500 spare and fetching at most `PARTOUT_DAILY_CALLS` (default 1,500; `0` turns it off). Most valuable sets go first. **Price parts now** on a set's page prices that set straight away.
@@ -91,7 +120,7 @@ Set `APP_URL` to your Brickfolio address so alerts link back to the wishlist. Se
 
 ### Optional: ask Claude about your collection (MCP)
 
-Brickfolio is also an MCP server, at `/api/mcp` on your own address, so Claude (or any assistant that speaks the Model Context Protocol) can answer questions like "what's my most valuable retired set?" or "which sets retire before March?". Its tools are read-only: collection summary, set search and details, wishlist, Retirement Radar, Designer Program, minifigures, parts search and value history.
+Brickfolio is also an MCP server, at `/api/mcp` on your own address, so Claude (or any assistant that speaks the Model Context Protocol) can answer questions like "what's my most valuable retired set?" or "which sets retire before March?". Its tools are read-only: collection summary, set search and details, wishlist, Retirement Radar, Designer Program, minifigures, parts search, value history and barcode lookup (saved barcodes only).
 
 1. Create a token in **Settings → API tokens**.
 2. In Claude Code: `claude mcp add --transport http brickfolio https://your-host/api/mcp --header "Authorization: Bearer <token>"`. Other clients take the same URL and header.

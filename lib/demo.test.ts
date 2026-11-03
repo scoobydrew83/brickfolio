@@ -43,7 +43,7 @@ it('switches off BrickLink, Rebrickable and alerts in demo mode', () => {
   expect(alertsFromEnv()).toBeNull();
 });
 
-it('seeds demo sets, themes, a wishlist, minifigs and part prices', () => {
+it('seeds demo sets, themes, a wishlist, minifigs, part prices and barcodes', () => {
   const { sqlite } = openNodeDb(':memory:');
   expect(seedDemo(sqlite)).toBe(21);
   const count = (sql: string) => (sqlite.prepare(sql).get() as { n: number }).n;
@@ -54,4 +54,5 @@ it('seeds demo sets, themes, a wishlist, minifigs and part prices', () => {
   expect(count('SELECT count(*) AS n FROM cmf_figs')).toBe(12);
   expect(count('SELECT count(*) AS n FROM part_prices')).toBe(6);
   expect(count('SELECT count(*) AS n FROM designer_projects')).toBe(3);
+  expect(count("SELECT count(*) AS n FROM set_barcodes WHERE source = 'user' AND verified = 1")).toBe(3);
 });

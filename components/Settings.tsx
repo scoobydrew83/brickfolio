@@ -1,17 +1,22 @@
 'use client';
 import { useEffect, useState, useTransition } from 'react';
-import { bricksetStatus, downloadLdrawLibrary, ldrawLibraryStatus, rebrickableStatus, syncBricksetNow, syncRebrickableNow, testBricksetKey, testRebrickableKey, type BricksetStatus, type RebrickableStatus, addLocation, createToken, deleteLocation, importFile, renameLocation, revokeToken, setCurrency, type Result } from '@/app/actions';
+import { shareCodes, syncCommunityNow, bricksetStatus, downloadLdrawLibrary, ldrawLibraryStatus, rebrickableStatus, syncBricksetNow, syncRebrickableNow, testBricksetKey, testRebrickableKey, type BricksetStatus, type RebrickableStatus, addLocation, createToken, deleteLocation, importFile, renameLocation, revokeToken, setCurrency, type Result } from '@/app/actions';
 import { Banner, Button, field } from './ui';
 import { PageHeader } from './shell/PageHeader';
 import type { LibraryStatus } from '@/lib/ldraw/download';
+import type { BarcodeCapabilities } from '@/lib/barcode/providers';
+import type { CommunityStatus } from '@/lib/barcode/community';
+import Link from 'next/link';
+
+type BarcodeStatus = { caps: BarcodeCapabilities; saved: { total: number; user: number; community: number; brickset: number; providers: number }; community: CommunityStatus };
 
 type Token = { id: number; name: string; prefix: string; createdAt: string; lastUsedAt: string | null };
-type Props = { locations: string[]; currency: string; tokens: Token[]; user: string; authMode: string; priced: boolean; alerts: boolean; rebrickable: RebrickableStatus; brickset: BricksetStatus; ldraw: LibraryStatus };
+type Props = { locations: string[]; currency: string; tokens: Token[]; user: string; authMode: string; priced: boolean; alerts: boolean; rebrickable: RebrickableStatus; brickset: BricksetStatus; ldraw: LibraryStatus; barcodes: BarcodeStatus };
 
 const h2 = 'text-lg font-extrabold [font-stretch:110%]';
 const section = 'space-y-3 border-t border-line pt-6';
 
-export default function Settings({ locations, currency, tokens, user, authMode, priced, alerts, rebrickable, brickset, ldraw }: Props) {
+export default function Settings({ locations, currency, tokens, user, authMode, priced, alerts, rebrickable, brickset, ldraw, barcodes }: Props) {
   const [pending, start] = useTransition();
   const [message, setMessage] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
   const [newToken, setNewToken] = useState<string | null>(null);
@@ -103,6 +108,7 @@ export default function Settings({ locations, currency, tokens, user, authMode, 
 
       <RebrickableSection initial={rebrickable} />
       <BricksetSection initial={brickset} />
+      <BarcodeSection status={barcodes} />
 
       <LdrawSection initial={ldraw} />
 
@@ -236,6 +242,67 @@ function BricksetSection({ initial }: { initial: BricksetStatus }) {
           setNote(r.ok ? { kind: 'ok', text: 'Brickset accepted the key.' } : { kind: 'error', text: r.error });
         })}>Test key</Button>
       </div>
+    </section>
+  );
+}
+
+/** Barcode scanning: which lookup services are on, and how many barcodes are saved. Keys live in the server env. */
+function BarcodeSection({ status: { caps, saved, community } }: { status: BarcodeStatus }) {
+  const on = caps.providers.filter((p) => p.enabled);
+  const [note, setNote] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
+  const [share, setShare] = useState<{ count: number; issueUrl: string | null; href: string } | null>(null);
+  const [pending, start] = useTransition();
+  const code = (s: string) => <code className="rounded-chip bg-muted px-1">{s}</code>;
+  return (
+    <section id="barcodes" className={section}>
+      <h2 className={h2}>Barcode scanning</h2>
+      {!caps.scanning ? <p className="text-sm text-fg-3">Turned off with {code('BARCODE_SCANNING=off')}.</p> : (
+        <>
+          <p className="text-sm text-fg-3">
+            <Link href="/scan" className="font-medium text-link hover:underline">Scan</Link> the UPC or EAN on a box to add it.{' '}
+            <b className="text-fg tabular-nums">{saved.total}</b> barcode{saved.total === 1 ? '' : 's'} saved
+            {saved.total > 0 && <> ({saved.user} you confirmed, {saved.community} from the community list, {saved.brickset} from Brickset, {saved.providers} from lookup services)</>}.
+          </p>
+          <p className="text-sm text-fg-3">
+            {on.length ? <>Unknown barcodes are looked up with {on.map((p) => p.name).join(', then ')}. </> : <>No lookup service is set up: unknown boxes need their set number typed once, then they&apos;re remembered. </>}
+            {caps.brickset ? 'The Brickset sync also saves the barcodes of sets you own or want.' : <>With {code('BRICKSET_API_KEY')} set, the Brickset sync also saves the barcodes of sets you own or want.</>}
+          </p>
+          <p className="text-sm text-fg-3">
+            Optional keys: {code('COMPARETHEBRICKS_API_KEY')} (free key, 250 lookups a day) and {code('BRICKECONOMY_API_KEY')}. Order with {code('BARCODE_PROVIDERS')}. See docs/install.md. Only the barcode is sent, never anything about your collection.
+          </p>
+          <p className="text-sm text-fg-3">
+            Minifigure boxes are recognised from their square code using the fan-collected L-Scan table, the community list and the codes you confirm.
+          </p>
+          <h3 className="pt-2 font-semibold">Community list</h3>
+          <p className="text-sm text-fg-3">
+            {community.enabled ? <>Barcodes and minifigure codes other collectors confirmed and a maintainer reviewed (CC0): <b className="text-fg tabular-nums">{community.sets}</b> barcodes and <b className="text-fg tabular-nums">{community.minifigs}</b> minifigure codes here{community.syncedAt ? <>, updated {new Date(community.syncedAt).toLocaleDateString()}</> : null}. Downloaded in the daily sync; nothing is sent.</> : <>Turned off with {code('COMMUNITY_LIST=off')}.</>}
+          </p>
+          {note && <Banner kind={note.kind} onDismiss={() => setNote(null)}>{note.text}</Banner>}
+          <div className="flex flex-wrap gap-2">
+            {community.enabled && <Button loading={pending} onClick={() => start(async () => { const r = await syncCommunityNow(); setNote(r.ok ? { kind: 'ok', text: r.message ?? 'Updated.' } : { kind: 'error', text: r.error }); })}>Update now</Button>}
+            <Button disabled={pending} onClick={() => start(async () => {
+              const r = await shareCodes();
+              if (!r.ok) return setNote({ kind: 'error', text: r.error });
+              const count = r.file.sets.length + r.file.minifigs.length;
+              setShare({ count, issueUrl: r.issueUrl, href: URL.createObjectURL(new Blob([JSON.stringify(r.file, null, 1)], { type: 'application/json' })) });
+            })}>Share my codes</Button>
+          </div>
+          {share && (
+            <div className="space-y-2 rounded-control bg-subtle p-3 text-sm" aria-live="polite">
+              {share.count === 0 ? <p className="text-fg-3">You haven’t confirmed any codes yet. Scan a box nobody knows and type its set number (or pick the figure in an opened minifigure box) to confirm one.</p> : (
+                <>
+                  <p>{share.count} code{share.count === 1 ? '' : 's'} you confirmed. Only barcodes, set numbers and figure names are shared: nothing else about your collection. By sharing you release them under CC0.</p>
+                  <p className="flex flex-wrap gap-3">
+                    {share.issueUrl && <a href={share.issueUrl} target="_blank" rel="noreferrer" className="font-medium text-link hover:underline">Send as a GitHub issue</a>}
+                    <a href={share.href} download="brickfolio-codes.json" className="font-medium text-link hover:underline">Download the file</a>
+                  </p>
+                  {!share.issueUrl && <p className="text-xs text-fg-3">Too many for a link: attach the file to a new issue, or open a pull request adding them to lib/barcode/data/community.json.</p>}
+                </>
+              )}
+            </div>
+          )}
+        </>
+      )}
     </section>
   );
 }

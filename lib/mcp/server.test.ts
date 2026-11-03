@@ -48,3 +48,12 @@ it('answers questions about the collection', async () => {
   for (const t of ['list_wishlist', 'retirement_radar', 'designer_program', 'list_minifigures', 'value_history']) expect((await call(t)).isError).toBe(false);
   expect((await call('search_parts', { query: '3001' })).structuredContent).toMatchObject({ total: 0 });
 });
+
+it('looks up a saved barcode without calling anything outside', async () => {
+  const { rememberBarcode } = await import('../service/barcodes');
+  await rememberBarcode(db, '673419264150', '10497');
+  const hit = await call('lookup_barcode', { barcode: '0673419264150' });
+  expect(hit.structuredContent).toMatchObject({ status: 'matched', candidates: [{ setNo: '10497', name: 'Galaxy Explorer', confirmed: true, ownedQty: 2, onWishlist: false }] });
+  expect((await call('lookup_barcode', { barcode: '5702015869935' })).structuredContent).toMatchObject({ status: 'not_found', candidates: [] });
+  expect((await call('lookup_barcode', { barcode: '123' })).isError).toBe(true);
+});

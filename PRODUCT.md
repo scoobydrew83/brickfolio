@@ -30,7 +30,7 @@ Keep an accurate record of a physical collection (which sets, how many copies, w
 - Auth is delegated to the deployment: none, Tailscale or Cloudflare Access. No built-in accounts.
 - Budget: BrickLink allows 5,000 API calls a day; Rebrickable about one call a second.
 - Terminology: "set number" (10497, shown without the -1 suffix), "pieces", "minifigs", "sold price", "Est. Value", "location", "Partial".
-- Also shipped: wishlist with alerts, set pages, 3D model viewer, "What can I build?", Brickset retail prices and the Retirement Radar, minifigures, quick add and part-out value.
+- Also shipped: wishlist with alerts, set pages, 3D model viewer, "What can I build?", Brickset retail prices and the Retirement Radar, minifigures, quick add, part-out value and barcode scanning.
 
 ## Brand Commitments
 - Name: Brickfolio. Not affiliated with the LEGO Group or BrickLink; trademarks are acknowledged in NOTICE and must not be used as the product's identity.

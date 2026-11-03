@@ -10,7 +10,7 @@ export class BricksetError extends Error {}
 
 /** Retail price by currency, from Brickset's LEGO.com regions. */
 export type Retail = Partial<Record<'USD' | 'GBP' | 'CAD' | 'EUR', number>>;
-export type BsSet = { setNo: string; retail: Retail; launchDate: string | null; exitDate: string | null; retired: boolean };
+export type BsSet = { setNo: string; retail: Retail; launchDate: string | null; exitDate: string | null; retired: boolean; ean?: string | null; upc?: string | null };
 
 export type RetailSource = {
   /** One call that throws a readable error when the key is wrong or Brickset is unreachable. */
@@ -28,9 +28,12 @@ export type ApiSet = {
   number: string; numberVariant?: number; availability?: string | null;
   launchDate?: string | null; exitDate?: string | null;
   LEGOCom?: Partial<Record<keyof typeof REGIONS, Region>>;
+  barcode?: { EAN?: string | null; UPC?: string | null } | null; // the box's barcodes, saved for the scanner
 };
 type ApiReply = { status: string; message?: string; sets?: ApiSet[] };
 
+/** A barcode as Brickset sent it, digits only, or null. Checked properly when saved (lib/barcode/gtin.ts). */
+const code = (v?: string | null) => (v && /^\d{8,14}$/.test(v.trim()) ? v.trim() : null);
 const day = (v?: string | null) => (v && /^\d{4}-\d{2}-\d{2}/.test(v) ? v.slice(0, 10) : null);
 
 /** Maps one Brickset set to what Brickfolio keeps. `today` is YYYY-MM-DD. */
@@ -50,6 +53,8 @@ export function toBsSet(s: ApiSet, today = new Date().toISOString().slice(0, 10)
     launchDate: day(s.launchDate),
     exitDate,
     retired: /retired/i.test(s.availability ?? '') || (!!exitDate && exitDate < today),
+    ean: code(s.barcode?.EAN),
+    upc: code(s.barcode?.UPC),
   };
 }
 

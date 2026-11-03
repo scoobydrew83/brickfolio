@@ -121,6 +121,50 @@ const spec = {
         responses: { 201: ok({ type: 'object', properties: { added: { type: 'integer' }, merged: { type: 'integer' }, waiting: { type: 'integer' }, figsAdded: { type: 'integer' }, figsMerged: { type: 'integer' }, invalid: { type: 'array', items: { type: 'string' } } } }, 'Added'), 400: err },
       },
     },
+    '/barcodes': {
+      get: { summary: 'Which barcode lookups are on (never the keys) and how many barcodes are saved, by source', responses: { 200: ok({ type: 'object', properties: { scanning: { type: 'boolean' }, brickset: { type: 'boolean' }, providers: { type: 'array', items: { type: 'object', properties: { id: { type: 'string' }, name: { type: 'string' }, enabled: { type: 'boolean' } } } }, saved: { type: 'object' } } }) } },
+    },
+    '/barcodes/lookup': {
+      post: {
+        summary: 'Find the set for a box barcode (12-digit UPC or 13-digit EAN): saved barcodes first, then the configured providers in order. Two different sets come back as `ambiguous` to pick from. Errors carry a `code`: INVALID_BARCODE, UNSUPPORTED_FORMAT or RATE_LIMITED.',
+        requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['barcode'], properties: { barcode: { type: 'string', example: '673419264150' }, format: { enum: ['UPC_A', 'EAN_13', 'EAN_8', 'UPC_E'] }, refresh: { type: 'boolean', description: 'Ask the providers again for a barcode that recently was not found' } } } } } },
+        responses: {
+          200: ok({
+            type: 'object',
+            properties: {
+              status: { enum: ['matched', 'ambiguous', 'not_found'] },
+              barcode: { type: 'object', properties: { raw: { type: 'string' }, format: { type: 'string' }, gtin: { type: 'string', description: 'Lookup form: UPC-A with a leading 0, EAN-13 as is' } } },
+              candidates: { type: 'array', items: { type: 'object', properties: { setNo: { type: 'string' }, name: nullable('string'), year: nullable('integer'), pieces: nullable('integer'), imageUrl: nullable('string'), source: { enum: ['user', 'community', 'brickset', 'comparethebricks', 'brickeconomy'] }, verified: { type: 'boolean' }, owned: { type: ['object', 'null'], properties: { qty: { type: 'integer' } } }, wished: { type: 'boolean' } } } },
+              providers: { type: 'array', items: { type: 'object', properties: { id: { type: 'string' }, outcome: { type: 'string' }, message: { type: 'string' } } } },
+              noProviders: { type: 'boolean' }, cachedMiss: { type: 'boolean' },
+            },
+          }),
+          400: err, 429: err,
+        },
+      },
+    },
+    '/barcodes/mappings': {
+      post: { summary: 'Save "this barcode is that set" as your own, confirmed barcode. It wins over provider answers on later scans.', requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['barcode', 'setNo'], properties: { barcode: { type: 'string' }, setNo: { type: 'string', example: '75192-1' }, format: { type: 'string' } } } } } }, responses: { 201: ok({ type: 'object', properties: { gtin: { type: 'string' }, setNo: { type: 'string' } } }, 'Saved'), 400: err } },
+      delete: { summary: 'Forget a wrong barcode-to-set link (yours and any provider’s)', parameters: [{ name: 'barcode', in: 'query', required: true, schema: { type: 'string' } }, { name: 'setNo', in: 'query', required: true, schema: { type: 'string' } }], responses: { 200: ok({ type: 'object', properties: { removed: { type: 'integer' } } }), 400: err, 404: err } },
+    },
+    '/barcodes/minifig': {
+      post: {
+        summary: 'Find the figure for a Collectible Minifigures box code: the text of the square Data Matrix on the box (e.g. "6472866 444S3"). Your codes first, then the community list, then the bundled L-Scan table (fan-collected).',
+        requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['code'], properties: { code: { type: 'string', example: '6472866 444S3' } } } } } },
+        responses: { 200: ok({ type: 'object', properties: { status: { enum: ['matched', 'ambiguous', 'not_found'] }, code: { type: 'object' }, candidates: { type: 'array', items: { type: 'object', properties: { name: { type: 'string' }, series: { type: 'string' }, rbFigNo: nullable('string'), source: { enum: ['user', 'community', 'lscan'] }, exact: { type: 'boolean' }, owned: { type: 'integer' } } } } } }), 400: err, 429: err },
+      },
+    },
+    '/barcodes/export': {
+      get: { summary: 'Your own confirmed barcodes and minifigure box codes in the community list format (CC0), for sharing. Codes and names only.', responses: { 200: ok({ type: 'object', properties: { license: { type: 'string' }, sets: { type: 'array', items: { type: 'object' } }, minifigs: { type: 'array', items: { type: 'object' } } } }) } },
+    },
+    '/barcodes/batch': {
+      post: {
+        summary: 'Add scanned sets to the collection (sets you own get more copies) or the wishlist, at most 200 at a time. Send an Idempotency-Key header: the same key again returns the first answer with `replayed: true` instead of adding twice.',
+        parameters: [{ name: 'Idempotency-Key', in: 'header', required: true, schema: { type: 'string', maxLength: 100 } }],
+        requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['items'], properties: { items: { type: 'array', maxItems: 200, items: { type: 'object', required: ['setNo'], properties: { setNo: { type: 'string' }, qty: { type: 'integer', minimum: 1, maximum: 999 }, target: { enum: ['collection', 'wishlist'] }, condition: { enum: ['New', 'Used', 'Partial'] }, location: nullable('string') } } } } } } } },
+        responses: { 201: ok({ type: 'object', properties: { added: { type: 'integer' }, merged: { type: 'integer' }, wished: { type: 'integer' }, alreadyWished: { type: 'integer' }, waiting: { type: 'integer' }, replayed: { type: 'boolean' } } }, 'Added'), 400: err, 409: err },
+      },
+    },
     '/minifigs': {
       get: { summary: 'Minifigures you own as items of their own, with BrickLink sold prices and totals', responses: { 200: ok({ type: 'object', properties: { minifigs: { type: 'array', items: { type: 'object' } }, totals: { type: 'object' } } }) } },
       post: {

@@ -7,7 +7,14 @@ import { parseQuickList, parseSetInput } from '@/lib/sets';
 import * as svc from '@/lib/service/sets';
 import * as tokens from '@/lib/service/tokens';
 import { importCsv } from '@/lib/service/csv';
-import { brickColors, brickMinifig, brickPartPrice, brickStore, bricklink, brickset, currentUser, rebrickable } from '@/lib/session';
+import { barcodeProviders, brickColors, brickMinifig, brickPartPrice, brickStore, bricklink, brickset, currentUser, rebrickable } from '@/lib/session';
+import * as barcodes from '@/lib/service/barcodes';
+import { describeSet, resolveBarcode, type Resolution, type ScanCandidate } from '@/lib/barcode/resolve';
+import { formatHint } from '@/lib/barcode/gtin';
+import { lookupLimit } from '@/lib/barcode/limit';
+import { scanSummary } from '@/lib/barcode/summary';
+import * as community from '@/lib/barcode/community';
+import { rememberFigCode, resolveFigCode, type FigResolution } from '@/lib/barcode/figcodes';
 import * as parts from '@/lib/service/parts';
 import * as wish from '@/lib/service/wishlist';
 import * as models from '@/lib/service/models';
@@ -407,4 +414,98 @@ export async function editDesignerProject(id: number, form: Record<string, unkno
 
 export async function removeDesignerProject(id: number): Promise<Result> {
   return act(async () => designer.removeProject(await getDb(), id));
+}
+
+// ---- barcode scanner ----
+
+/**
+ * Finds the set for a scanned or typed barcode. A read, so it also works in the demo (saved barcodes only, nothing
+ * stored, no outside calls). `refresh` asks the providers again for a barcode that recently wasn't found.
+ */
+export async function lookupBarcode(code: string, format?: string | null, refresh = false): Promise<Resolution | { status: 'error'; error: string }> {
+  if (!(await currentUser())) return { status: 'error', error: 'Not signed in.' };
+  if (!lookupLimit().take()) return { status: 'error', error: 'Too many lookups. Wait a minute and scan again.' };
+  try {
+    const db = await getDb();
+    if (!isDemo()) await community.ensureCommunity(db);
+    return await resolveBarcode(db, String(code ?? '').slice(0, 40), { providers: barcodeProviders(), hint: formatHint(format), readOnly: isDemo(), refresh });
+  } catch (e) {
+    return { status: 'error', error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+/** A set typed in by hand on the scanner: what the collection, wishlist and saved barcodes know about it. */
+export async function describeScanSet(no: string): Promise<{ ok: true; set: ScanCandidate } | { ok: false; error: string }> {
+  if (!(await currentUser())) return { ok: false, error: 'Not signed in.' };
+  const n = String(no ?? '').trim();
+  if (!/^\d{3,7}(-\d{1,2})?$/.test(n)) return { ok: false, error: 'Set number must look like 10280 or 10280-1' };
+  return { ok: true, set: await describeSet(await getDb(), n.includes('-') ? n : `${n}-1`) };
+}
+
+/** "This barcode is that set": saved so the next scan finds it. */
+export async function rememberScan(code: string, setNo: string, format?: string | null): Promise<Result> {
+  return act(async () => barcodes.rememberBarcode(await getDb(), code, setNo, formatHint(format)));
+}
+
+/** "Wrong set": forgets the link between this barcode and that set. */
+export async function forgetScan(code: string, setNo: string): Promise<Result> {
+  return act(async () => barcodes.forgetBarcode(await getDb(), code, setNo));
+}
+
+/** Adds scanned sets (one, or a reviewed batch). `key` makes a retried submit safe. Returns a one-line summary. */
+export async function addScannedSets(items: unknown, key: string, figList?: unknown): Promise<Result & { message?: string; result?: barcodes.ScanAddResult }> {
+  let result: barcodes.ScanAddResult | undefined;
+  const r = await act(async () => {
+    const db = await getDb();
+    const p = barcodes.parseScanItems(items ?? [], await svc.listLocations(db));
+    if (!p.ok) return p;
+    const f = barcodes.parseScanFigs(figList);
+    if (!f.ok) return f;
+    if (!p.items.length && !f.figs.length) return { ok: false, error: 'Nothing to add.' };
+    const res = await barcodes.addScanned(db, p.items, { key, lookup: bricklink(), minifig: brickMinifig(), figs: f.figs });
+    if (res.ok) { const { ok: _, ...rest } = res; result = rest; }
+    return res;
+  });
+  return r.ok && result ? { ...r, result, message: scanSummary(result) } : r;
+}
+
+// ---- minifigure box codes and the community list ----
+
+/** Finds the figure for a Collectible Minifigures box code (the square code). Loads the series checklist if needed. */
+export async function lookupFigCode(text: string): Promise<FigResolution | { status: 'error'; error: string }> {
+  if (!(await currentUser())) return { status: 'error', error: 'Not signed in.' };
+  try {
+    const db = await getDb();
+    if (!isDemo()) await community.ensureCommunity(db);
+    const src = rebrickable();
+    return await resolveFigCode(db, String(text ?? '').slice(0, 64), { loadSeries: src && !isDemo() ? (id) => figs.cmfChecklist(db, id, src) : undefined });
+  } catch (e) {
+    return { status: 'error', error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+/** "This box is that figure": remembered for next time. */
+export async function rememberFig(text: string, fig: { name: string; series: string; rbFigNo?: string | null }): Promise<Result> {
+  return act(async () => rememberFigCode(await getDb(), text, fig));
+}
+
+/** Downloads the community list now (Settings). */
+export async function syncCommunityNow(): Promise<Result & { message?: string }> {
+  let message = '';
+  const r = await act(async () => {
+    const db = await getDb();
+    const err = await community.syncCommunity(db);
+    if (err) return { ok: false, error: err };
+    const s = await community.communityStatus(db);
+    message = `Community list updated: ${s.sets} barcodes and ${s.minifigs} minifigure codes.`;
+    return { ok: true };
+  });
+  return r.ok ? { ...r, message } : r;
+}
+
+/** Your confirmed codes in the community format, and a prefilled GitHub issue link when they fit in one. */
+export async function shareCodes(): Promise<{ ok: true; file: community.CommunityFile; issueUrl: string | null } | { ok: false; error: string }> {
+  if (!(await currentUser())) return { ok: false, error: 'Not signed in.' };
+  const file = await community.shareable(await getDb());
+  return { ok: true, file, issueUrl: community.shareIssueUrl(file) };
 }
