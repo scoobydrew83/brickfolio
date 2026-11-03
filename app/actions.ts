@@ -3,15 +3,18 @@
 import { refresh } from 'next/cache';
 import { after } from 'next/server';
 import { getDb } from '@/lib/db';
-import { parseSetInput } from '@/lib/sets';
+import { parseQuickList, parseSetInput } from '@/lib/sets';
 import * as svc from '@/lib/service/sets';
 import * as tokens from '@/lib/service/tokens';
 import { importCsv } from '@/lib/service/csv';
-import { brickColors, brickStore, bricklink, brickset, currentUser, rebrickable } from '@/lib/session';
+import { brickColors, brickMinifig, brickPartPrice, brickStore, bricklink, brickset, currentUser, rebrickable } from '@/lib/session';
 import * as parts from '@/lib/service/parts';
 import * as wish from '@/lib/service/wishlist';
 import * as models from '@/lib/service/models';
 import * as missing from '@/lib/service/missing';
+import * as figs from '@/lib/service/minifigs';
+import * as partout from '@/lib/service/partout';
+import * as designer from '@/lib/service/designer';
 import type { MissingItem } from '@/lib/service/missing';
 import * as ldraw from '@/lib/ldraw/download';
 import { DEMO_ERROR, isDemo } from '@/lib/demo';
@@ -72,7 +75,7 @@ export async function runSync(): Promise<Result> {
     if (!lookup) return { ok: false, error: 'Set the BRICKLINK_* keys to sync prices.' };
     const db = await getDb();
     const s = await svc.startSync(db);
-    if (s.ok) after(() => svc.runSync(db, s.runId, lookup, brickStore() ?? undefined, rebrickable() ?? undefined, brickset() ?? undefined));
+    if (s.ok) after(() => svc.runSync(db, s.runId, lookup, brickStore() ?? undefined, rebrickable() ?? undefined, brickset() ?? undefined, { minifig: brickMinifig() ?? undefined, partPrice: brickPartPrice() ?? undefined }));
     return s;
   });
 }
@@ -283,4 +286,125 @@ export async function saveMissingParts(setNo: string, items: MissingItem[]): Pro
     const p = await input({ setNo }, true);
     return p.ok ? missing.saveMissing(await getDb(), p.value.setNo, items, bricklink()) : p;
   });
+}
+
+// ---- minifigures ----
+
+const figInput = async (form: Record<string, unknown>, partial: boolean) => figs.parseFigInput(form, await svc.listLocations(await getDb()), partial);
+
+/** `merge` = the user confirmed adding more copies of a figure already in stock. */
+export async function addMinifig(form: Record<string, unknown>, merge = false): Promise<Result> {
+  return act(async () => {
+    const p = await figInput(form, false);
+    return p.ok ? figs.addMinifig(await getDb(), p.value, { lookup: brickMinifig(), merge }) : p;
+  });
+}
+
+export async function editMinifig(key: string, form: Record<string, unknown>): Promise<Result> {
+  return act(async () => {
+    const p = await figInput(form, true);
+    return p.ok ? figs.editMinifig(await getDb(), key, p.value, brickMinifig()) : p;
+  });
+}
+
+export async function removeMinifig(key: string): Promise<Result> {
+  return act(async () => figs.removeMinifig(await getDb(), key));
+}
+
+/** One Collectible Minifigures series with what you own (asks Rebrickable the first time). */
+export async function cmfChecklistFor(themeId: number): Promise<svc.Result<{ figs: figs.CmfFig[]; owned: number; total: number }>> {
+  if (!(await currentUser())) return { ok: false, error: 'Not signed in.' };
+  if (!Number.isInteger(themeId)) return { ok: false, error: 'Pick a series.' };
+  try {
+    return await figs.cmfChecklist(await getDb(), themeId, rebrickable());
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+/** Ticks a checklist figure off: adds it (Rebrickable number only, unpriced) or one more copy. */
+export async function tickCmfFig(fig: { rbFigNo: string; name: string; imageUrl: string | null }): Promise<Result> {
+  return act(async () => {
+    const p = await figInput({ rbFigNo: fig.rbFigNo, name: fig.name, imageUrl: fig.imageUrl }, false);
+    return p.ok ? figs.addMinifig(await getDb(), p.value, { lookup: null, merge: true }) : p;
+  });
+}
+
+// ---- quick add ----
+
+/** Adds a pasted list of set and minifig numbers. Returns a one-line summary. */
+export async function quickAddList(text: string, location: string, condition: string): Promise<Result & { message?: string }> {
+  let message = '';
+  const r = await act(async () => {
+    const list = parseQuickList(String(text ?? '').slice(0, 50_000));
+    if (!list.sets.length && !list.minifigs.length) return { ok: false, error: list.invalid.length ? `Nothing recognised. Check: ${list.invalid.slice(0, 5).join(', ')}` : 'Paste at least one set number.' };
+    const cond = condition === 'New' || condition === 'Used' || condition === 'Partial' ? condition : undefined;
+    const res = await svc.quickAdd(await getDb(), list, { location: location || null, condition: cond, lookup: bricklink(), minifig: brickMinifig() });
+    if (res.ok) message = quickSummary(res);
+    return res;
+  });
+  return r.ok ? { ...r, message } : r;
+}
+
+function quickSummary(r: svc.QuickAddResult): string {
+  const n = (k: number, one: string, many = `${one}s`) => `${k} ${k === 1 ? one : many}`;
+  const parts = [
+    r.added && `Added ${n(r.added, 'set')}`,
+    r.merged && `${n(r.merged, 'set')} you had got more copies`,
+    r.figsAdded && `added ${n(r.figsAdded, 'minifig')}`,
+    r.figsMerged && `${n(r.figsMerged, 'minifig')} got more copies`,
+  ].filter(Boolean).join(', ');
+  const wait = r.waiting ? ` ${n(r.waiting, 'item')} will be looked up on BrickLink at the next sync.` : '';
+  const bad = r.invalid.length ? ` Skipped ${r.invalid.slice(0, 5).join(', ')}${r.invalid.length > 5 ? ` and ${r.invalid.length - 5} more` : ''}.` : '';
+  return `${parts.charAt(0).toUpperCase()}${parts.slice(1)}.${wait}${bad}`;
+}
+
+// ---- part-out value ----
+
+/** Most part prices "Price parts now" fetches for one set (about 250 ms each). */
+const PRICE_NOW_MAX = 600;
+
+/** Prices one set's parts in the background. The page shows the part-out value once they're in. */
+export async function priceSetParts(setNo: string): Promise<Result & { message?: string }> {
+  const lookup = brickPartPrice();
+  let message = '';
+  const r = await act(async () => {
+    if (!lookup) return { ok: false, error: 'Set the BRICKLINK_* keys to price parts.' };
+    const p = await input({ setNo }, true);
+    if (!p.ok) return p;
+    const db = await getDb();
+    const s = await svc.getSet(db, p.value.setNo);
+    if (!s) return { ok: false, status: 404, error: 'Set not found.' };
+    const currency = await svc.getCurrency(db);
+    const todo = Math.min(await partout.unpricedLots(db, s.id, s.condition, currency), PRICE_NOW_MAX);
+    if (!todo) { message = 'Every part already has a recent price.'; return { ok: true }; }
+    after(async () => {
+      await partout.refreshPartPrices(db, lookup, currency, { setIds: [s.id], maxCalls: todo });
+      await missing.reapplyMissing(db);
+    });
+    const secs = Math.ceil(todo * 0.3);
+    message = `Pricing ${todo} part${todo === 1 ? '' : 's'} on BrickLink in the background, about ${secs < 90 ? `${secs} seconds` : `${Math.ceil(secs / 60)} minutes`}. Reload the page to see the part-out value.`;
+    return { ok: true };
+  });
+  return r.ok ? { ...r, message } : r;
+}
+
+// ---- BrickLink Designer Program ----
+
+export async function addDesignerProject(form: Record<string, unknown>): Promise<Result> {
+  return act(async () => {
+    const p = designer.parseProjectInput({ ...form, watching: form.watching ?? 'false' });
+    return p.ok ? designer.addProject(await getDb(), p.value) : p;
+  });
+}
+
+export async function editDesignerProject(id: number, form: Record<string, unknown>): Promise<Result> {
+  return act(async () => {
+    const p = designer.parseProjectInput({ ...form, watching: form.watching ?? 'false' }, true);
+    return p.ok ? designer.editProject(await getDb(), id, p.value) : p;
+  });
+}
+
+export async function removeDesignerProject(id: number): Promise<Result> {
+  return act(async () => designer.removeProject(await getDb(), id));
 }

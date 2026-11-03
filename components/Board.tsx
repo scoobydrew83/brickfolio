@@ -1,20 +1,22 @@
 'use client';
 import Link from 'next/link';
-import { LayoutGrid, Plus, RefreshCw, Rows3 } from 'lucide-react';
+import { ClipboardList, LayoutGrid, Plus, RefreshCw, Rows3 } from 'lucide-react';
 import { useSearchParams } from 'next/navigation';
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, useTransition } from 'react';
-import { addSet, editSet, relookupSet, reload, removeSet, runSync, type Result } from '@/app/actions';
+import { addSet, editSet, quickAddList, relookupSet, reload, removeSet, runSync, type Result } from '@/app/actions';
 import type { SyncStatus } from '@/lib/service/sets';
 import { dailyHistory, filterSets, groupTotals, totals, type Filters, type HistoryRow, type SetRow } from '@/lib/sets';
-import { availability, collectionGain } from '@/lib/retail';
+import { availability, collectionGain, retirement } from '@/lib/retail';
 import { SetCard } from './board/SetCard';
 import { PartsDialog } from './board/PartsDialog';
 import { SetForm } from './board/SetForm';
+import { QuickAdd } from './board/QuickAdd';
 import { SetTable } from './board/SetTable';
 import { ValueChart } from './board/ValueChart';
 import { moneyIn } from './board/ui';
 import { Banner, Button, EmptyState, FilterChip, SearchInput, Segmented, Select } from './ui';
 import { PageHeader } from './shell/PageHeader';
+import { CollectionTabs } from './shell/CollectionTabs';
 
 // Filters and view live in the URL, so a reload or a shared link keeps them. Defaults are left out of the URL.
 const DEFAULTS = { q: '', location: '', condition: '', theme: '', availability: '', sort: 'setNo', view: 'cards' } as const;
@@ -33,6 +35,7 @@ export default function Board({ sets, history, sync, locations, currency, readAt
   const [view, setView] = useState<View>(() => (params.get('view') === 'table' ? 'table' : 'cards'));
   const [editing, setEditing] = useState<SetRow | 'new' | null>(null);
   const [partsOf, setPartsOf] = useState<SetRow | null>(null);
+  const [pasting, setPasting] = useState(false);
   const [message, setMessage] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
   const [dupe, setDupe] = useState<{ form: Record<string, unknown>; name: string; qty: number } | null>(null);
   const [pending, startTransition] = useTransition();
@@ -79,12 +82,14 @@ export default function Board({ sets, history, sync, locations, currency, readAt
   const themed = sets.some((s) => s.theme);
   const dated = sets.some((s) => availability(s));
   const gain = useMemo(() => collectionGain(sets, currency), [sets, currency]);
+  const retiring = useMemo(() => sets.filter((s) => retirement(s)?.kind === 'retiring').length, [sets]);
   const remove = (s: SetRow) => act(() => removeSet(s.setNo), s.qty > 1 ? `Removed one ${s.name}. ${s.qty - 1} left.` : `Removed ${s.name}.`);
   const retry = (s: SetRow) => act(() => relookupSet(s.setNo), `Lookup worked for ${s.name}.`);
   const rowProps = { onEdit: setEditing, onParts: setPartsOf, onRemove: remove, onRetry: retry, pending, money, currency };
 
   return (
     <div className="space-y-6">
+      <CollectionTabs />
       <PageHeader
         title="Sets"
         badge={<span className="text-sm text-fg-3 tabular-nums">{all.count} sets · {all.copies} copies</span>}
@@ -95,6 +100,7 @@ export default function Board({ sets, history, sync, locations, currency, readAt
                 {syncing ? `Syncing… ${sync.processed}/${sync.total}` : 'Sync BrickLink'}
               </Button>
             )}
+            <Button icon={ClipboardList} onClick={() => setPasting(true)}>Paste a list</Button>
             <Button variant="primary" icon={Plus} onClick={() => setEditing('new')}>Add set</Button>
           </span>
         }
@@ -111,6 +117,11 @@ export default function Board({ sets, history, sync, locations, currency, readAt
 
       {message && <Banner kind={message.kind} onDismiss={() => setMessage(null)}>{message.text}</Banner>}
       {all.errors > 0 && <Banner kind="error">{all.errors} set{all.errors === 1 ? '' : 's'} could not be found on BrickLink. Use Retry lookup on the card.</Banner>}
+      {retiring > 0 && (
+        <p role="status" className="rounded-control bg-warn-soft px-4 py-3 text-sm text-warn">
+          {retiring} of your sets {retiring === 1 ? 'is' : 'are'} expected to retire within six months (Brickset). <Link href="/radar" className="font-semibold underline">See the Retirement Radar</Link>
+        </p>
+      )}
 
       {/* Phones: one line, so search is reachable without scrolling. */}
       <p className="flex flex-wrap items-baseline gap-x-2 sm:hidden">
@@ -194,6 +205,19 @@ export default function Board({ sets, history, sync, locations, currency, readAt
       )}
 
       {partsOf && <PartsDialog set={partsOf} priced={priced} onClose={() => { setPartsOf(null); startTransition(() => reload()); }} />}
+
+      {pasting && (
+        <QuickAdd
+          locations={locations}
+          pending={pending}
+          onClose={() => setPasting(false)}
+          onSubmit={(text, location, condition) => startTransition(async () => {
+            const r = await quickAddList(text, location, condition);
+            setMessage(r.ok ? { kind: 'ok', text: r.message ?? 'Added.' } : { kind: 'error', text: r.error });
+            if (r.ok) setPasting(false);
+          })}
+        />
+      )}
 
       {editing && (
         <SetForm

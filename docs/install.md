@@ -71,6 +71,10 @@ With the same key, each sync also looks up alternate builds of your sets and the
 
 Each sync asks Brickset about sets it hasn't checked in 30 days, 50 sets per call and at most 10 calls, to stay well inside the key's daily limit. Retail prices are stored in your collection currency when Brickset has it (USD, GBP, CAD or EUR), otherwise in USD; the gain is only shown when the currencies match. **Settings → Brickset** shows the counts and has **Test key** and **Sync Brickset now**. Prices you could sell for still come only from BrickLink.
 
+### Part-out value and BrickLink's daily limit
+
+A set's page shows what it would fetch sold as parts. Each part's price is one BrickLink call, kept for 30 days and shared by every set that uses the part. The daily sync prices parts with what's left of the 5,000 calls a day after sets, minifigs and the wishlist (2 calls each), keeping 500 spare and fetching at most `PARTOUT_DAILY_CALLS` (default 1,500; `0` turns it off). Most valuable sets go first. **Price parts now** on a set's page prices that set straight away.
+
 ### Optional: wishlist alerts
 
 After each sync Brickfolio can send one message listing wishlist sets whose average sold price dropped under your target. It alerts once per drop; a set that goes back above target alerts again the next time it drops.
@@ -79,7 +83,20 @@ After each sync Brickfolio can send one message listing wishlist sets whose aver
 - **Discord:** create a webhook in a channel's settings and use its URL.
 - **Anything else:** any URL that accepts a JSON POST (`{title, message, url, items}`); Home Assistant, n8n and Zapier all do.
 
+With a Brickset key, the same webhook also warns once when a wishlist set will retire within `RETIRE_ALERT_DAYS` days (default 60; `0` turns it off), and again if its date moves away and back.
+
+Watched BrickLink Designer Program projects (Radar → Designer Program) alert `DESIGNER_ALERT_DAYS` days before their pre-order opens (default 7; `0` turns it off) and 3 days before it closes.
+
 Set `APP_URL` to your Brickfolio address so alerts link back to the wishlist. Settings → About this server shows whether alerts are on.
+
+### Optional: ask Claude about your collection (MCP)
+
+Brickfolio is also an MCP server, at `/api/mcp` on your own address, so Claude (or any assistant that speaks the Model Context Protocol) can answer questions like "what's my most valuable retired set?" or "which sets retire before March?". Its tools are read-only: collection summary, set search and details, wishlist, Retirement Radar, Designer Program, minifigures, parts search and value history.
+
+1. Create a token in **Settings → API tokens**.
+2. In Claude Code: `claude mcp add --transport http brickfolio https://your-host/api/mcp --header "Authorization: Bearer <token>"`. Other clients take the same URL and header.
+
+The client has to reach your server: on Tailscale, run it on a device in your tailnet; behind Cloudflare Access, add a service token or bypass rule for `/api/mcp`, as for the REST API.
 
 ### Optional: 3D models of your sets
 

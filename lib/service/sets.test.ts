@@ -3,6 +3,7 @@ import type { Lookup } from '../bricklink/client';
 import { openNodeDb } from '../db/node';
 import type { DB } from '../db/types';
 import * as svc from './sets';
+import { parseQuickList } from '../sets';
 
 let db: DB;
 const calls: string[] = [];
@@ -112,5 +113,29 @@ describe('locations', () => {
     expect((await svc.setCurrency(db, 'eur')).ok).toBe(true);
     expect(await svc.getCurrency(db)).toBe('EUR');
     expect((await svc.setCurrency(db, 'euro')).ok).toBe(false);
+  });
+});
+
+describe('quick add', () => {
+  const figLookup = async (no: string) => ({ blName: `Fig ${no}`, year: 2020, categoryId: 1, imageUrl: null, avgSold: 5, minSold: 1, maxSold: 9, qtySold: 2 });
+  it('looks up a short list straight away and merges sets you already have', async () => {
+    await add('10280-1');
+    calls.length = 0;
+    const r = await svc.quickAdd(db, parseQuickList('10280\n21325 x2\nsw0001'), { location: 'Display', condition: 'New', lookup, minifig: figLookup });
+    expect(r).toMatchObject({ ok: true, added: 1, merged: 1, waiting: 0, figsAdded: 1, invalid: [] });
+    expect(calls).toEqual(['21325-1:N+parts']);
+    expect(await svc.getSet(db, '10280-1')).toMatchObject({ qty: 2 });
+    expect(await svc.getSet(db, '21325-1')).toMatchObject({ name: 'BL 21325-1', qty: 2, location: 'Display', avgSold: 50 });
+  });
+  it('leaves a long list for the sync, which fills in the names', async () => {
+    const text = Array.from({ length: 12 }, (_, i) => String(70000 + i)).join('\n');
+    const r = await svc.quickAdd(db, parseQuickList(text), { lookup, minifig: null });
+    expect(r).toMatchObject({ ok: true, added: 12, waiting: 12 });
+    expect(calls).toEqual([]);
+    expect(await svc.getSet(db, '70000-1')).toMatchObject({ name: 'Set 70000', blName: null });
+    const run = await svc.startSync(db);
+    if (run.ok) await svc.runSync(db, run.runId, lookup);
+    expect(await svc.getSet(db, '70000-1')).toMatchObject({ name: 'BL 70000-1' });
+    expect(await svc.quickAdd(db, parseQuickList('1234'), { location: 'Attic', lookup, minifig: null })).toMatchObject({ ok: false, status: 400 });
   });
 });

@@ -8,6 +8,13 @@ A self-hosted tracker for your brick-set collection: what you own, where it is, 
 - **Finish your Partial sets:** tick the parts a set is missing from its parts list; Missing % and value follow exactly, and the missing parts download as a BrickLink Wanted List.
 - **Real sold prices:** BrickLink average, low and high sold prices for each set's condition, less missing pieces. A daily sync keeps them fresh and saves the history.
 - **Set pages:** photo, value and price history, the full parts list with counts, notes, and the set's LDraw model in 3D with a step-by-step build view.
+- **Retirement Radar:** what you own or want is retiring month by month, and how your retired sets have grown per year since, from Brickset dates and your own stored BrickLink prices. BrickLink Designer Program and SMART Play sets are flagged, and a wishlist set about to retire can send an alert.
+- **BrickLink Designer Program tracker:** follow projects from crowdfunding to pre-order, with alerts before the window opens and closes.
+- **Valuation report:** a PDF for insurance, with every item's value, where the price came from and when, and totals by location.
+- **Ask Claude:** a built-in MCP server (`/api/mcp`) lets Claude and other assistants answer questions about your collection, read-only.
+- **Minifigures:** loose figures as items of their own, priced from BrickLink, plus a Collectible Minifigures checklist per series (Rebrickable).
+- **Part-out value:** what a set would fetch sold as parts against its complete price, from BrickLink part prices. Once a set is priced, Missing % is weighted by what the missing parts are worth.
+- **Quick add:** paste a list of set and minifig numbers ("10497 x2") to add them all at once.
 - **Wishlist:** sets you want and the price you'd pay; Brickfolio tells you when one sells for less (in the app, or by ntfy, Discord or any webhook), and "Got it" moves it into your collection.
 - **Parts:** every set's parts from BrickLink, searchable across the whole collection.
 - **Value vs. retail and a retirement watch** from Brickset (optional, free API key): each set's original price and your gain since, plus which sets you own or want are retiring soon.
@@ -58,10 +65,16 @@ In Sheets, use **File → Download → Comma-separated values** on the Sets, His
 ## Everyday use
 
 - **Add Set:** looks the set up on BrickLink right away. Adding a set you already own asks before adding another copy.
+- **Paste a list:** next to Add set. Up to 10 new items are looked up right away; longer lists are looked up at the next sync.
 - **Remove:** takes away one copy. On the last copy it deletes the set.
 - **Sync BrickLink:** refreshes every set, then your store inventory and orders (it also runs daily at `SYNC_HOUR`). Progress shows on the button.
 - **Set page:** click a set number or name for its photo, value history, parts list and notes.
 - **Parts:** open a set's parts list from its card, or search every set's parts on the Parts page (e.g. which sets have a given part).
+- **Radar:** upcoming retirements by month and growth since retiring. Rates marked * start from the retail price or a short price history.
+- **Designer Program:** on the Radar page. **Follow a project**, add its pre-order dates, and the bell turns its alerts on or off.
+- **Valuation report:** **Settings → Valuation report** downloads the PDF.
+- **Minifigs:** the switch above the Sets page. Add figures by BrickLink number, or pick a Collectible Minifigures series and tick off the ones you have.
+- **Part-out value:** on a set's page, under its value. **Price parts now** fetches that set's part prices; the daily sync prices the rest with leftover BrickLink calls.
 - **Wishlist:** add a set with the price you'd pay. Sets under your target go to the top; **Got it** moves one into your collection.
 - **3D model:** on a set's page, upload its LDraw model (many are in the LDraw Official Model Repository) to orbit it or step through the build. Needs the LDraw parts library; see [the install guide](docs/install.md#optional-3d-models-of-your-sets).
 - **Missing parts:** on a set's page, **Mark missing parts** and type how many of each are gone. The set becomes Partial, Missing % is worked out from the pieces, and **Wanted List** downloads them for BrickLink (Want → Upload). Refreshing the parts list keeps your marks.
@@ -86,7 +99,17 @@ curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/jso
   -d '{"setNo":"10280","name":"Flower Bouquet","condition":"Used"}' https://your-host/api/v1/sets
 ```
 
-The full description is at `/api/v1/openapi.json` (OpenAPI 3.1): sets CRUD, lookup, parts lists, wishlist, sync, history, locations, store inventory, orders, import and export.
+The full description is at `/api/v1/openapi.json` (OpenAPI 3.1): sets CRUD, bulk add, lookup, parts lists, part-out value, minifigures, the Retirement Radar, Designer Program projects, a valuation PDF (`/api/v1/report.pdf`), wishlist, sync, history, locations, store inventory, orders, import and export.
+
+## Ask Claude (MCP)
+
+`/api/mcp` is a read-only MCP server with the same API tokens. In Claude Code:
+
+```bash
+claude mcp add --transport http brickfolio https://your-host/api/mcp --header "Authorization: Bearer $TOKEN"
+```
+
+See [the install guide](docs/install.md#optional-ask-claude-about-your-collection-mcp) for the tools and how to reach it through Tailscale or Cloudflare Access.
 
 ## Configuration
 

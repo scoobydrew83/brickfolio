@@ -1,0 +1,219 @@
+// A Model Context Protocol server for Brickfolio, so Claude and other assistants can answer questions about the
+// collection. Streamable HTTP transport, stateless, JSON responses (no server-sent events); every tool is read-only.
+// Spec: https://modelcontextprotocol.io/specification. Served at /api/mcp (app/api/mcp/route.ts).
+import pkg from '../../package.json';
+import { APP_NAME } from '../brand';
+import type { DB } from '../db/types';
+import { dailyHistory, displayNo, filterSets, groupTotals, setNo as fullSetNo, totals, type Filters, type SetRow } from '../sets';
+import { collectionGain, retirement } from '../retail';
+import { getCurrency, getSet, listHistory, listSets, priceHistory, syncStatus } from '../service/sets';
+import { listWishlist } from '../service/wishlist';
+import { getRadar } from '../service/radar';
+import { listProjects } from '../service/designer';
+import { listMinifigs, minifigTotals } from '../service/minifigs';
+import { partout, unpricedLots } from '../service/partout';
+import { listMissing } from '../service/missing';
+import { searchParts } from '../service/parts';
+
+export const PROTOCOL_VERSIONS = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'] as const;
+const VERSION = pkg.version;
+
+type Json = Record<string, unknown>;
+type Tool = { name: string; title: string; description: string; inputSchema: Json; run: (db: DB, args: Json) => Promise<unknown> };
+
+const str = (v: unknown, max = 200) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
+const int = (v: unknown, def: number, min: number, max: number) => { const n = Number(v); return Number.isFinite(n) ? Math.min(Math.max(Math.round(n), min), max) : def; };
+const r2 = (v: number | null | undefined) => (v == null ? null : Math.round(v * 100) / 100);
+
+/** A set as the tools return it: short, with the source of each number spelled out once in the descriptions. */
+const brief = (s: SetRow) => ({
+  setNo: displayNo(s.setNo), name: s.name, year: s.year, theme: s.subtheme ? `${s.theme} / ${s.subtheme}` : s.theme ?? null,
+  qty: s.qty, condition: s.condition, missingPct: s.missingPct, location: s.location, estValueEach: r2(s.estValue),
+  estValueTotal: s.estValue == null ? null : r2(s.estValue * s.qty), retail: s.retailPrice ?? null, retailCurrency: s.retailCurrency ?? null,
+  retirement: retirement(s), pieces: s.pieces,
+});
+
+export const TOOLS: Tool[] = [
+  {
+    name: 'collection_summary',
+    title: 'Collection summary',
+    description: 'Totals for the whole collection: sets, copies, minifigures, estimated value (BrickLink average sold prices, less missing pieces), change over the stored value history, gain over original retail (Brickset), and value by location, condition and theme. Start here.',
+    inputSchema: { type: 'object', properties: {} },
+    async run(db) {
+      const [sets, figs, hist, currency, sync] = await Promise.all([listSets(db), listMinifigs(db), listHistory(db), getCurrency(db), syncStatus(db)]);
+      const t = totals(sets), f = minifigTotals(figs), d = dailyHistory(hist);
+      const group = (k: 'location' | 'condition' | 'theme') => groupTotals(sets, k).map((g) => ({ [k]: g.label, sets: g.count, copies: g.copies, estValue: r2(g.estValue) }));
+      return {
+        currency, lastSync: sync?.finishedAt ?? null,
+        sets: { count: t.count, copies: t.copies, pieces: t.pieces, estValue: r2(t.estValue), notFoundOnBrickLink: t.errors },
+        minifigures: { count: f.count, copies: f.copies, estValue: r2(f.estValue), unpriced: f.unpriced },
+        totalEstValue: r2(t.estValue + f.estValue),
+        history: d.length > 1 ? { from: d[0].date, fromValue: d[0].estValue, to: d[d.length - 1].date, toValue: d[d.length - 1].estValue } : null,
+        vsRetail: collectionGain(sets, currency),
+        byLocation: group('location'), byCondition: group('condition'), byTheme: group('theme').slice(0, 15),
+      };
+    },
+  },
+  {
+    name: 'search_sets',
+    title: 'Search sets',
+    description: 'Find sets in the collection by text (set number, name, theme, location, year) and filters. Returns up to `limit` sets with quantity, condition, location, estimated value per copy and in total, retail price and retirement status.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Free text, e.g. "castle" or "10497"' },
+        location: { type: 'string' }, condition: { type: 'string', enum: ['New', 'Used', 'Partial'] }, theme: { type: 'string' },
+        availability: { type: 'string', enum: ['Available', 'Retiring soon', 'Retired'] },
+        sort: { type: 'string', enum: ['setNo', 'value', 'name', 'year'], default: 'value' },
+        limit: { type: 'integer', minimum: 1, maximum: 200, default: 25 },
+      },
+    },
+    async run(db, a) {
+      const sorts = ['setNo', 'value', 'name', 'year'];
+      const f: Filters = { q: str(a.query), location: str(a.location), condition: str(a.condition), theme: str(a.theme), availability: str(a.availability), sort: (sorts.includes(str(a.sort)) ? str(a.sort) : 'value') as Filters['sort'] };
+      const all = filterSets(await listSets(db), f);
+      return { currency: await getCurrency(db), matched: all.length, sets: all.slice(0, int(a.limit, 25, 1, 200)).map(brief) };
+    },
+  },
+  {
+    name: 'get_set',
+    title: 'Set details',
+    description: 'Everything about one set you own: value and BrickLink low/average/high sold prices with the number of sales, recent price history, retail and retirement (Brickset), part-out value (what its parts would sell for), marked missing parts and notes.',
+    inputSchema: { type: 'object', properties: { setNo: { type: 'string', description: 'Set number, e.g. 10497 or 10497-1' } }, required: ['setNo'] },
+    async run(db, a) {
+      const s = await getSet(db, fullSetNo(str(a.setNo, 12)));
+      if (!s) throw new Error(`Set ${str(a.setNo, 12)} isn't in the collection.`);
+      const currency = await getCurrency(db);
+      const [prices, po, unpriced, missing] = await Promise.all([priceHistory(db, s.id), partout(db, s.id, s.condition, currency), unpricedLots(db, s.id, s.condition, currency), listMissing(db, s.id)]);
+      return {
+        currency, ...brief(s), notes: s.notes,
+        bricklink: { avgSold: s.avgSold, minSold: s.minSold, maxSold: s.maxSold, sales: s.qtySold, lookedUp: s.lastUpdated, error: s.blError },
+        priceHistory: prices.slice(-12).map((p) => ({ date: p.date, avgSold: p.avgSold })),
+        partout: po.lots ? { value: po.value, coveragePct: po.coverage, pricedLots: po.pricedLots, lots: po.lots, unpricedLots: unpriced, ageDays: po.ageDays } : null,
+        missingParts: missing.items.map((m) => ({ partNo: m.partNo, name: m.name, color: m.colorName, qty: m.qty })),
+      };
+    },
+  },
+  {
+    name: 'list_wishlist',
+    title: 'Wishlist',
+    description: 'Sets on the wishlist with the target price, the current BrickLink average sold price for the wanted condition, whether it is under target, and retail and retirement dates.',
+    inputSchema: { type: 'object', properties: {} },
+    async run(db) {
+      const rows = await listWishlist(db);
+      return {
+        currency: await getCurrency(db),
+        wishlist: rows.map((w) => ({
+          setNo: displayNo(w.setNo), name: w.name, condition: w.condition, target: w.target, avgSold: w.avgSold, sales: w.qtySold,
+          underTarget: w.target != null && w.avgSold != null && w.avgSold <= w.target, retail: w.retailPrice, retirement: retirement(w), notes: w.notes,
+        })),
+      };
+    },
+  },
+  {
+    name: 'retirement_radar',
+    title: 'Retirement Radar',
+    description: 'Sets you own or want that are expected to retire, grouped by month (Brickset dates), and retired sets you own ranked by growth per year since retiring (from stored BrickLink prices, or retail when no early price is stored; `thin` marks short history). Flags BrickLink Designer Program and SMART Play sets.',
+    inputSchema: { type: 'object', properties: { months: { type: 'integer', minimum: 1, maximum: 60, default: 24, description: 'How many months ahead to include' } } },
+    async run(db, a) {
+      const r = await getRadar(db);
+      const until = new Date(Date.parse(r.today) + int(a.months, 24, 1, 60) * 30.44 * 86_400_000).toISOString().slice(0, 7);
+      const item = (i: (typeof r.retired)[number]) => ({ kind: i.kind, setNo: displayNo(i.setNo), name: i.name, flags: i.flags, exitDate: i.exitDate, qty: i.qty, value: r2(i.value), retail: i.retailPrice, gainPct: i.gainPct, growth: i.growth });
+      return { currency: r.currency, today: r.today, totals: r.totals, retiring: r.retiring.filter((m) => m.month <= until).map((m) => ({ month: m.month, items: m.items.map(item) })), retired: r.retired.map(item) };
+    },
+  },
+  {
+    name: 'designer_program',
+    title: 'Designer Program projects',
+    description: 'BrickLink Designer Program projects the owner follows: stage, pre-order window (upcoming, open with days left, closed), price, and whether they own or want the set.',
+    inputSchema: { type: 'object', properties: {} },
+    async run(db) {
+      return { currency: await getCurrency(db), projects: (await listProjects(db)).map(({ openAlertedAt: _o, closeAlertedAt: _c, createdAt: _a, updatedAt: _u, ...p }) => ({ ...p, setNo: p.setNo ? displayNo(p.setNo) : null })) };
+    },
+  },
+  {
+    name: 'list_minifigures',
+    title: 'Minifigures',
+    description: 'Loose minifigures the owner has (not the ones inside sets), with BrickLink numbers, condition, location, quantity and BrickLink average sold price. Optional text filter.',
+    inputSchema: { type: 'object', properties: { query: { type: 'string' }, limit: { type: 'integer', minimum: 1, maximum: 500, default: 100 } } },
+    async run(db, a) {
+      const q = str(a.query).toLowerCase();
+      const rows = (await listMinifigs(db)).filter((m) => !q || [m.figNo, m.rbFigNo, m.name, m.location].some((v) => String(v ?? '').toLowerCase().includes(q)));
+      return {
+        currency: await getCurrency(db), totals: minifigTotals(rows),
+        minifigures: rows.slice(0, int(a.limit, 100, 1, 500)).map((m) => ({ figNo: m.figNo, rebrickableNo: m.rbFigNo, name: m.name, qty: m.qty, condition: m.condition, location: m.location, avgSold: m.avgSold, sales: m.qtySold })),
+      };
+    },
+  },
+  {
+    name: 'search_parts',
+    title: 'Search parts',
+    description: 'Search the parts lists of every set you own by part number, part name, color or set number, e.g. "which of my sets have 3001 in red?". Returns matching lines with the set they belong to.',
+    inputSchema: { type: 'object', properties: { query: { type: 'string' }, limit: { type: 'integer', minimum: 1, maximum: 500, default: 50 } }, required: ['query'] },
+    async run(db, a) {
+      const r = await searchParts(db, { q: str(a.query, 80), limit: int(a.limit, 50, 1, 500) });
+      return { total: r.total, parts: r.parts.map((p) => ({ partNo: p.partNo, name: p.name, color: p.colorName, type: p.type, qty: p.qty, alternate: p.alternate, setNo: displayNo(p.setNo), setName: p.setName })) };
+    },
+  },
+  {
+    name: 'value_history',
+    title: 'Value history',
+    description: 'Daily totals of the collection (estimated value, sets, copies, pieces) saved after each sync, oldest first.',
+    inputSchema: { type: 'object', properties: { days: { type: 'integer', minimum: 1, maximum: 3650, default: 90 } } },
+    async run(db, a) {
+      const d = dailyHistory(await listHistory(db));
+      return { currency: await getCurrency(db), history: d.slice(-int(a.days, 90, 1, 3650)) };
+    },
+  },
+];
+
+const INSTRUCTIONS = `${APP_NAME} is a self-hosted tracker for one person's brick-set collection. Values are BrickLink average sold prices (in the collection currency), retail prices and retirement dates come from Brickset, themes from Rebrickable. Every tool is read-only. Say where a number comes from when you quote it, and remember values are market estimates, not appraisals.`;
+
+type Rpc = { jsonrpc?: string; id?: string | number | null; method?: string; params?: Json };
+type RpcOut = { jsonrpc: '2.0'; id: string | number | null; result?: unknown; error?: { code: number; message: string } };
+
+const fail = (id: Rpc['id'], code: number, message: string): RpcOut => ({ jsonrpc: '2.0', id: id ?? null, error: { code, message } });
+
+/** Handles one JSON-RPC message. Returns null for notifications (no reply). */
+export async function handleRpc(db: DB, msg: Rpc): Promise<RpcOut | null> {
+  if (!msg || typeof msg !== 'object' || msg.jsonrpc !== '2.0' || typeof msg.method !== 'string') return fail(msg?.id, -32600, 'Invalid request');
+  if (msg.id === undefined || msg.id === null) return null; // notification, e.g. notifications/initialized
+  const { id, method, params = {} } = msg;
+  switch (method) {
+    case 'initialize': {
+      const asked = String(params.protocolVersion ?? '');
+      return {
+        jsonrpc: '2.0', id,
+        result: {
+          protocolVersion: (PROTOCOL_VERSIONS as readonly string[]).includes(asked) ? asked : PROTOCOL_VERSIONS[0],
+          capabilities: { tools: { listChanged: false } },
+          serverInfo: { name: APP_NAME.toLowerCase(), title: APP_NAME, version: VERSION },
+          instructions: INSTRUCTIONS,
+        },
+      };
+    }
+    case 'ping':
+      return { jsonrpc: '2.0', id, result: {} };
+    case 'tools/list':
+      return {
+        jsonrpc: '2.0', id,
+        result: { tools: TOOLS.map(({ name, title, description, inputSchema }) => ({ name, title, description, inputSchema, annotations: { title, readOnlyHint: true, openWorldHint: false } })) },
+      };
+    case 'tools/call': {
+      const tool = TOOLS.find((t) => t.name === params.name);
+      if (!tool) return fail(id, -32602, `Unknown tool: ${String(params.name)}`);
+      try {
+        const data = await tool.run(db, (params.arguments && typeof params.arguments === 'object' ? params.arguments : {}) as Json);
+        return { jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: JSON.stringify(data) }], structuredContent: data, isError: false } };
+      } catch (e) {
+        return { jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: e instanceof Error ? e.message : String(e) }], isError: true } };
+      }
+    }
+    case 'resources/list':
+      return { jsonrpc: '2.0', id, result: { resources: [] } };
+    case 'prompts/list':
+      return { jsonrpc: '2.0', id, result: { prompts: [] } };
+    default:
+      return fail(id, -32601, `Method not found: ${method}`);
+  }
+}

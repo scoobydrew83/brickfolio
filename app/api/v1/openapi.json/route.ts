@@ -110,6 +110,47 @@ const spec = {
       get: { summary: 'Your wishlist with targets and BrickLink sold prices', responses: { 200: ok({ type: 'object', properties: { wishlist: { type: 'array', items: { type: 'object' } } } }) } },
       post: { summary: 'Add a wish: { setNo, target?, condition?: New|Used, name?, notes? }', requestBody: { content: { 'application/json': {} } }, responses: { 201: ok({ type: 'object' }), 400: err, 409: err } },
     },
+    '/sets/{setNo}/partout': {
+      parameters: [setNo],
+      get: { summary: 'Part-out value: the set sold as parts, from cached BrickLink part prices, next to its complete sold price. `coverage` = % of pieces with a price.', responses: { 200: ok({ type: 'object', properties: { partout: { type: 'object', properties: { value: { type: 'number' }, complete: nullable('number'), coverage: { type: 'number' }, lots: { type: 'integer' }, pricedLots: { type: 'integer' }, unpriced: { type: 'integer' }, currency: { type: 'string' } } } } }), 404: err } },
+    },
+    '/sets/bulk': {
+      post: {
+        summary: 'Add a pasted list of set numbers ("10497", "10497 x2") and BrickLink minifig numbers. Sets you have get more copies. Up to 10 new items are looked up now; more wait for the next sync.',
+        requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['text'], properties: { text: { type: 'string', example: '10497\n21325 x2\nsw0001' }, location: { type: 'string' }, condition: { enum: ['New', 'Used', 'Partial'] } } } } } },
+        responses: { 201: ok({ type: 'object', properties: { added: { type: 'integer' }, merged: { type: 'integer' }, waiting: { type: 'integer' }, figsAdded: { type: 'integer' }, figsMerged: { type: 'integer' }, invalid: { type: 'array', items: { type: 'string' } } } }, 'Added'), 400: err },
+      },
+    },
+    '/minifigs': {
+      get: { summary: 'Minifigures you own as items of their own, with BrickLink sold prices and totals', responses: { 200: ok({ type: 'object', properties: { minifigs: { type: 'array', items: { type: 'object' } }, totals: { type: 'object' } } }) } },
+      post: {
+        summary: 'Add a minifigure by BrickLink number (sw0001) and price it. `merge: true` adds copies to one you already have instead of answering 409.',
+        requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['figNo'], properties: { figNo: { type: 'string', example: 'sw0001' }, name: { type: 'string' }, condition: { enum: ['New', 'Used'] }, qty: { type: 'integer' }, location: { type: 'string' }, notes: { type: 'string' }, merge: { type: 'boolean' } } } } } },
+        responses: { 201: ok({ type: 'object' }, 'Created'), 400: err, 409: err },
+      },
+    },
+    '/minifigs/{figNo}': {
+      parameters: [{ name: 'figNo', in: 'path', required: true, schema: { type: 'string', example: 'sw0001' }, description: 'BrickLink (sw0001) or Rebrickable (fig-000123) number' }],
+      get: { summary: 'One minifigure', responses: { 200: ok({ type: 'object' }), 404: err } },
+      patch: { summary: 'Change the given fields (a condition change re-prices it)', responses: { 200: ok({ type: 'object' }), 400: err, 404: err } },
+      delete: { summary: 'Remove one copy (deletes the figure on the last one)', responses: { 200: ok({ type: 'object', properties: { remaining: { type: 'integer' } } }), 404: err } },
+    },
+    '/designer': {
+      get: { summary: 'BrickLink Designer Program projects you follow, with the pre-order window (none, upcoming, open, closed) and whether you own or want the set', responses: { 200: ok({ type: 'object', properties: { projects: { type: 'array', items: { type: 'object' } } } }) } },
+      post: {
+        summary: 'Follow a Designer Program project',
+        requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['name'], properties: { name: { type: 'string' }, setNo: { type: 'string', example: '910038' }, series: { type: 'string' }, designer: { type: 'string' }, stage: { enum: ['crowdfunding', 'selected', 'preorder', 'closed', 'not-made'] }, preorderStart: { type: 'string', format: 'date' }, preorderEnd: { type: 'string', format: 'date' }, price: { type: 'number' }, pieces: { type: 'integer' }, url: { type: 'string' }, notes: { type: 'string' }, watching: { type: 'boolean' } } } } } },
+        responses: { 201: ok({ type: 'object' }, 'Created'), 400: err },
+      },
+    },
+    '/designer/{id}': {
+      parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }],
+      patch: { summary: 'Change the given fields (new dates re-arm the alerts)', responses: { 200: ok({ type: 'object' }), 400: err, 404: err } },
+      delete: { summary: 'Stop following a project', responses: { 200: ok({ type: 'object' }), 404: err } },
+    },
+    '/radar': {
+      get: { summary: 'Retirement Radar: upcoming retirements by month (sets and wishes), retired sets you own with growth per year since retiring, and totals', responses: { 200: ok({ type: 'object', properties: { currency: { type: 'string' }, retiring: { type: 'array', items: { type: 'object' } }, retired: { type: 'array', items: { type: 'object' } }, totals: { type: 'object' } } }) } },
+    },
     '/wishlist/{setNo}': {
       parameters: [setNo],
       get: { summary: 'One wish', responses: { 200: ok({ type: 'object' }), 404: err } },

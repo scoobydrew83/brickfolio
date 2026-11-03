@@ -31,6 +31,10 @@ let client: ReturnType<typeof brickLinkFromEnv> | undefined;
 const blClient = () => (isDemo() ? null : client === undefined ? (client = brickLinkFromEnv()) : client);
 /** Set lookups, or null when the BrickLink keys aren't set. */
 export const bricklink = () => blClient()?.lookup ?? null;
+/** Minifigure lookups, or null when the BrickLink keys aren't set. */
+export const brickMinifig = () => blClient()?.minifig ?? null;
+/** Part sold prices (part-out value), or null when the BrickLink keys aren't set. */
+export const brickPartPrice = () => blClient()?.partPrice ?? null;
 /** Fetches BrickLink color names, or null when the keys aren't set. */
 export const brickColors = () => blClient()?.colors ?? null;
 /** Your BrickLink store's inventory and orders, or null when the keys aren't set. */

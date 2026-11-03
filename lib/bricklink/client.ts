@@ -52,7 +52,12 @@ export type Order = {
 };
 /** Your BrickLink store: inventory and orders. */
 export type Store = { inventory(): Promise<InventoryItem[]>; orders(direction: 'in' | 'out'): Promise<Order[]> };
-export type BrickLink = { lookup: Lookup; store: Store; colors(): Promise<Color[]> };
+/** A minifigure's catalog entry and sold prices (2 calls). Throws BrickLinkError with a readable message. */
+export type MinifigLookup = (figNo: string, guide: 'N' | 'U', currency: string) => Promise<Omit<LookupResult, 'parts' | 'pieces' | 'partLots'>>;
+/** Sold price for one part in one colour (1 call), for part-out value. avgSold is null when nothing sold. */
+export type PartPrice = { avgSold: number | null; qtySold: number };
+export type PartPriceLookup = (type: string, partNo: string, colorId: number | null, guide: 'N' | 'U', currency: string) => Promise<PartPrice>;
+export type BrickLink = { lookup: Lookup; minifig: MinifigLookup; partPrice: PartPriceLookup; store: Store; colors(): Promise<Color[]> };
 
 type Item = { name: string; year_released?: number; category_id?: number; image_url?: string };
 type Price = { avg_price: string; min_price: string; max_price: string; total_quantity: number; unit_quantity: number };
@@ -97,12 +102,13 @@ export function createBrickLink(keys: OAuthKeys, fetchImpl: typeof fetch = fetch
     }
   }
 
-  const lookup: Lookup = async (setNo, guide, currency, opts = {}) => {
-    const no = encodeURIComponent(setNo);
-    const item = await get<Item>(`/items/SET/${no}`);
-    const p = await get<Price>(`/items/SET/${no}/price`, { guide_type: 'sold', new_or_used: guide, currency_code: currency });
+  /** Catalog entry and sold price guide for one item (2 calls). */
+  async function item(type: 'SET' | 'MINIFIG', itemNo: string, guide: 'N' | 'U', currency: string): Promise<LookupResult> {
+    const no = encodeURIComponent(itemNo);
+    const item = await get<Item>(`/items/${type}/${no}`);
+    const p = await get<Price>(`/items/${type}/${no}/price`, { guide_type: 'sold', new_or_used: guide, currency_code: currency });
     const sold = p.total_quantity > 0; // with no sales BrickLink reports 0.0000; show "—" instead of $0
-    const out: LookupResult = {
+    return {
       blName: decode(item.name),
       year: item.year_released ?? null,
       categoryId: item.category_id ?? null,
@@ -112,6 +118,11 @@ export function createBrickLink(keys: OAuthKeys, fetchImpl: typeof fetch = fetch
       maxSold: sold ? price(p.max_price) : null,
       qtySold: p.total_quantity,
     };
+  }
+
+  const lookup: Lookup = async (setNo, guide, currency, opts = {}) => {
+    const no = encodeURIComponent(setNo);
+    const out = await item('SET', setNo, guide, currency);
     if (opts.parts) {
       out.parts = (await get<Subset>(`/items/SET/${no}/subsets`)).flatMap((g) =>
         g.entries.map((e) => ({
@@ -138,9 +149,16 @@ export function createBrickLink(keys: OAuthKeys, fetchImpl: typeof fetch = fetch
         currency: d.cost?.currency_code ?? null, subtotal: price(d.cost?.subtotal), grandTotal: price(d.cost?.grand_total),
       })),
   };
+  const minifig: MinifigLookup = (figNo, guide, currency) => item('MINIFIG', figNo, guide, currency);
+  const partPrice: PartPriceLookup = async (type, partNo, colorId, guide, currency) => {
+    const params: Record<string, string> = { guide_type: 'sold', new_or_used: guide, currency_code: currency };
+    if (colorId !== null && type === 'PART') params.color_id = String(colorId);
+    const p = await get<Price>(`/items/${encodeURIComponent(type)}/${encodeURIComponent(partNo)}/price`, params);
+    return { avgSold: p.total_quantity > 0 ? price(p.avg_price) : null, qtySold: p.total_quantity };
+  };
   const colors = async () =>
     (await get<ApiColor[]>('/colors')).map((c) => ({ id: c.color_id, name: c.color_name, rgb: c.color_code || null }));
-  return { lookup, store, colors };
+  return { lookup, minifig, partPrice, store, colors };
 }
 
 /**

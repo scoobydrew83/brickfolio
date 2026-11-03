@@ -4,9 +4,10 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useMemo, useState, useTransition } from 'react';
 import { Copy, Download, ExternalLink, ListX, Pencil, RefreshCw } from 'lucide-react';
-import { editSet, refreshPartsFor, relookupSet, removeSet, saveMissingParts, type Result } from '@/app/actions';
+import { editSet, refreshPartsFor, relookupSet, removeSet, priceSetParts, saveMissingParts, type Result } from '@/app/actions';
 import type { BuildMatch } from '@/lib/service/builds';
 import type { MissingSummary } from '@/lib/service/missing';
+import type { Partout } from '@/lib/service/partout';
 import { partKey } from '@/lib/bricklink/wanted';
 import type { PartRow } from '@/lib/service/parts';
 import { displayNo, num, type SetRow } from '@/lib/sets';
@@ -18,10 +19,10 @@ import { SetForm } from './board/SetForm';
 import { blLink, moneyIn } from './board/ui';
 import { Banner, Button, Callout, CONDITION_TONE, Chip, EmptyState, FilterChip, buttonClass, cx } from './ui';
 
-type Props = { set: SetRow; parts: PartRow[]; prices: { date: string; avgSold: number | null }[]; currency: string; locations: string[]; priced: boolean; model: { fileName: string; author: string | null } | null; library: boolean; builds: BuildMatch[]; view?: '3d'; missing: MissingSummary };
+type Props = { set: SetRow; parts: PartRow[]; prices: { date: string; avgSold: number | null }[]; currency: string; locations: string[]; priced: boolean; model: { fileName: string; author: string | null } | null; library: boolean; builds: BuildMatch[]; view?: '3d'; missing: MissingSummary; partout: (Partout & { unpriced: number }) | null; partsPriced: boolean };
 
 /** One set: its photo, value and price history, parts list and copies. */
-export default function SetDetail({ set: s, parts, prices, currency, locations, priced, model, library, builds, view, missing }: Props) {
+export default function SetDetail({ set: s, parts, prices, currency, locations, priced, model, library, builds, view, missing, partout, partsPriced }: Props) {
   const router = useRouter();
   const money = useMemo(() => moneyIn(currency), [currency]);
   const [editing, setEditing] = useState(false);
@@ -151,6 +152,16 @@ export default function SetDetail({ set: s, parts, prices, currency, locations, 
             )}
           </Callout>
 
+          {partout && (
+            <PartoutCallout
+              p={partout} complete={s.avgSold} money={money} canPrice={partsPriced} pending={pending}
+              onPrice={() => start(async () => {
+                const r = await priceSetParts(s.setNo);
+                setMessage(r.ok ? { kind: 'ok', text: r.message ?? 'Pricing parts.' } : { kind: 'error', text: r.error });
+              })}
+            />
+          )}
+
           <div className="flex flex-wrap items-center gap-2">
             <Button variant="primary" icon={Pencil} onClick={() => setEditing(true)}>Edit</Button>
             <a href={blLink(s.setNo)} target="_blank" rel="noreferrer" className={buttonClass('secondary')}><ExternalLink aria-hidden className="size-4" />BrickLink</a>
@@ -271,5 +282,40 @@ function PriceHistory({ prices, money }: { prices: { date: string; avgSold: numb
         <span className={change >= 0 ? 'font-semibold text-ok' : 'font-semibold text-danger'}>{change >= 0 ? '+' : '−'}{money(Math.abs(change))}</span>
       </figcaption>
     </figure>
+  );
+}
+
+/** Part-out vs. complete: what the set fetches as separate parts, from BrickLink part prices, next to its sold price. */
+function PartoutCallout({ p, complete, money, canPrice, pending, onPrice }: { p: Partout & { unpriced: number }; complete: number | null; money: (v: unknown) => string; canPrice: boolean; pending: boolean; onPrice: () => void }) {
+  const days = p.ageDays;
+  const ratio = complete && p.value && p.coverage >= 50 ? Math.round((p.value / complete) * 100) / 100 : null;
+  const guide = p.guide === 'N' ? 'new' : 'used';
+  return (
+    <Callout className="px-4 py-3 text-sm">
+      <div className="flex items-end justify-between gap-3">
+        <div>
+          <p className="text-xs text-fg-3">Part-out value ({guide})</p>
+          <p className="text-2xl font-extrabold tracking-tight tabular-nums [font-stretch:112%]">{p.pricedLots ? money(p.value) : '—'}</p>
+        </div>
+        <div className="text-right">
+          <p className="text-xs text-fg-3">Complete ({guide})</p>
+          <p className="text-2xl font-extrabold tracking-tight tabular-nums [font-stretch:112%]">{money(complete)}</p>
+        </div>
+      </div>
+      {ratio !== null && (
+        <p className={cx('mt-1 font-semibold', ratio >= 1 ? 'text-ok' : 'text-fg-2')}>
+          {ratio >= 1 ? `Worth ${ratio}× more as parts` : `Parts fetch ${Math.round(ratio * 100)}% of the complete price`}
+        </p>
+      )}
+      <p className="mt-2 text-xs text-fg-3">
+        {p.pricedLots
+          ? <>BrickLink {guide} part prices for {p.coverage}% of the pieces ({p.pricedLots} of {p.lots} lots){days === 0 ? ', fetched today' : days !== null ? `, up to ${days} day${days === 1 ? '' : 's'} old` : ''}. Lots with no recent sales count as $0.</>
+          : <>No part prices yet. The daily sync prices parts with BrickLink calls it has left over, most valuable sets first.</>}
+        {p.missingPctByValue !== null && <> Missing % is weighted by these prices.</>}
+      </p>
+      {canPrice && p.unpriced > 0 && (
+        <Button size="sm" className="mt-2" loading={pending} onClick={onPrice}>Price {p.unpriced} part{p.unpriced === 1 ? '' : 's'} now</Button>
+      )}
+    </Callout>
   );
 }

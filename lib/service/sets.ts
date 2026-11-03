@@ -1,21 +1,25 @@
 // Collection logic shared by server actions, the REST API and the scheduler.
 // Every function takes the database (and BrickLink lookup) as arguments, so tests can pass an in-memory one.
 import { and, asc, desc, eq, gt, lt, lte, sql } from 'drizzle-orm';
-import type { Lookup, Store } from '../bricklink/client';
+import type { Lookup, MinifigLookup, PartPriceLookup, Store } from '../bricklink/client';
 import type { BuildSource, Catalog } from '../rebrickable/client';
 import type { DB } from '../db/types';
-import { history, locations, priceSnapshots, sets, settings, syncRuns } from '../db/schema';
+import { history, locations, minifigs, priceSnapshots, sets, settings, syncRuns, wishlist } from '../db/schema';
 import { hasParts, replaceParts } from './parts';
 import { syncStore } from './store';
 import { syncCatalog, themeMap, themeNames } from './catalog';
 import { syncWishlist } from './wishlist';
 import { syncBuilds } from './builds';
 import { syncRetail } from './retail';
-import { hasMissing } from './missing';
+import { hasMissing, reapplyMissing } from './missing';
+import { partoutBudget, refreshPartPrices } from './partout';
 import type { RetailSource } from '../brickset/client';
 import { syncOmrModels } from './models';
 import { alertsFromEnv, notifyUnderTarget } from './alerts';
-import { estValue, parseLocation, priceGuide, totals, type HistoryRow, type SetInput, type SetRow } from '../sets';
+import { notifyRetiring } from './radar';
+import { notifyDesigner } from './designer';
+import { addMinifig, syncMinifigs } from './minifigs';
+import { estValue, parseLocation, placeholderName, priceGuide, totals, type Condition, type HistoryRow, type QuickList, type SetInput, type SetRow } from '../sets';
 
 /** `status` lets the REST API pick an HTTP code. `existing` = already in stock, so the UI asks before adding. */
 export type Result<T extends object = object> =
@@ -100,7 +104,11 @@ export async function lookupInto(db: DB, s: Pick<SetRow, 'id' | 'setNo' | 'condi
     const { parts, pieces: _p, partLots: _l, ...r } = await lookup(s.setNo, guide, currency, { parts: !(await hasParts(db, s.id)) });
     if (parts) await replaceParts(db, s.id, parts); // also sets pieces and part lots
     await db.update(sets)
-      .set({ ...r, estValue: estValue(r.avgSold, s.missingPct), blError: null, lastUpdated: nowIso(), updatedAt: nowIso() })
+      .set({
+        ...r, estValue: estValue(r.avgSold, s.missingPct), blError: null, lastUpdated: nowIso(), updatedAt: nowIso(),
+        // A pasted set keeps its placeholder name until BrickLink answers.
+        name: sql`case when ${sets.name} = ${placeholderName(s.setNo)} then ${r.blName} else ${sets.name} end`,
+      })
       .where(eq(sets.id, s.id));
     const snap = { guide, avgSold: r.avgSold, minSold: r.minSold, maxSold: r.maxSold, qtySold: r.qtySold };
     await db.insert(priceSnapshots).values({ setId: s.id, date: today(), ...snap })
@@ -138,6 +146,45 @@ export async function addSet(db: DB, input: SetInput, opts: { another?: boolean;
   const row = (await getSet(db, input.setNo))!;
   if (opts.lookup) await lookupInto(db, row, opts.lookup, await getCurrency(db));
   return { ok: true, set: (await getSet(db, input.setNo))! };
+}
+
+/** Up to this many new items in a pasted list are looked up right away; the rest wait for the next sync. */
+export const QUICK_LOOKUPS = 10;
+
+export type QuickAddResult = { added: number; merged: number; waiting: number; figsAdded: number; figsMerged: number; invalid: string[] };
+
+/**
+ * Adds a pasted list (see parseQuickList). Sets already in the collection get more copies. New ones are added
+ * with a placeholder name; small lists are looked up straight away, bigger ones at the next sync so a long
+ * paste can't use up the BrickLink daily limit.
+ */
+export async function quickAdd(
+  db: DB, list: QuickList,
+  opts: { location?: string | null; condition?: Condition; lookup: Lookup | null; minifig: MinifigLookup | null },
+): Promise<Result<QuickAddResult>> {
+  if (opts.location && !(await listLocations(db)).includes(opts.location)) return { ok: false, status: 400, error: `Unknown location ${opts.location}.` };
+  const out: QuickAddResult = { added: 0, merged: 0, waiting: 0, figsAdded: 0, figsMerged: 0, invalid: list.invalid };
+  const now = list.sets.length + list.minifigs.length <= QUICK_LOOKUPS;
+  const currency = await getCurrency(db);
+  for (const { setNo: no, qty } of list.sets) {
+    const have = await getSet(db, no);
+    if (have) {
+      await db.update(sets).set({ qty: sql`${sets.qty} + ${qty}`, updatedAt: nowIso() }).where(eq(sets.id, have.id));
+      out.merged++;
+      continue;
+    }
+    await db.insert(sets).values({ setNo: no, name: placeholderName(no), qty, condition: opts.condition ?? 'Used', location: opts.location ?? null }).onConflictDoNothing();
+    out.added++;
+    const row = await getSet(db, no);
+    if (row && now && opts.lookup) await lookupInto(db, row, opts.lookup, currency);
+    else out.waiting++;
+  }
+  for (const f of list.minifigs) {
+    const r = await addMinifig(db, { figNo: f.figNo, qty: f.qty, condition: opts.condition === 'New' ? 'New' : 'Used', location: opts.location ?? null }, { lookup: now ? opts.minifig : null, merge: true });
+    if (!r.ok) { out.invalid.push(f.figNo); continue; }
+    if (r.merged) out.figsMerged++; else { out.figsAdded++; if (!now || !opts.minifig) out.waiting++; }
+  }
+  return { ok: true, ...out };
 }
 
 /** Updates the given fields. A condition change that switches new/used prices triggers a fresh lookup. */
@@ -202,7 +249,10 @@ export async function startSync(db: DB): Promise<Result<{ runId: number }>> {
  * Looks up every set, saves today's collection totals, then refreshes your store inventory and orders
  * (when `store` is given) and Rebrickable themes and minifigs (when `catalog` is given). Updates progress as it goes.
  */
-export async function runSync(db: DB, runId: number, lookup: Lookup, store?: Store, catalog?: Catalog & Partial<BuildSource>, retail?: RetailSource): Promise<void> {
+/** Optional BrickLink extras for the sync: minifigure prices and part prices for part-out value. */
+export type SyncExtras = { minifig?: MinifigLookup; partPrice?: PartPriceLookup };
+
+export async function runSync(db: DB, runId: number, lookup: Lookup, store?: Store, catalog?: Catalog & Partial<BuildSource>, retail?: RetailSource, extras: SyncExtras = {}): Promise<void> {
   try {
     const currency = await getCurrency(db);
     const all = await db.select({ id: sets.id, setNo: sets.setNo, condition: sets.condition, missingPct: sets.missingPct }).from(sets).all();
@@ -211,18 +261,32 @@ export async function runSync(db: DB, runId: number, lookup: Lookup, store?: Sto
       if (await lookupInto(db, s, lookup, currency)) errors++;
       await db.update(syncRuns).set({ processed: i + 1, errors }).where(eq(syncRuns.id, runId));
     }
+    const figErrors = extras.minifig ? await syncMinifigs(db, extras.minifig, currency) : 0;
+    let calls = all.length * 2 + (extras.minifig ? Number((await db.select({ n: sql<number>`count(*)` }).from(minifigs).where(sql`fig_no is not null`).all())[0].n) * 2 : 0);
     await saveHistory(db);
     const wishErrors = await syncWishlist(db, lookup, currency);
+    calls += Number((await db.select({ n: sql<number>`count(*)` }).from(wishlist).all())[0].n) * 2 + (store ? 3 : 0);
     const send = alertsFromEnv();
     const alertError = send ? await notifyUnderTarget(db, send) : null;
     const storeErrors = store ? await syncStore(db, store) : [];
     const catalogErrors = catalog ? await syncCatalog(db, catalog) : [];
     if (catalog?.alternates && catalog.buildParts) catalogErrors.push(...(await syncBuilds(db, { alternates: catalog.alternates, buildParts: catalog.buildParts })));
     if (retail) catalogErrors.push(...(await syncRetail(db, retail)));
+    // After Brickset, so exit dates are fresh.
+    const retireError = send ? await notifyRetiring(db, send) : null;
+    if (retireError) catalogErrors.push(retireError);
+    const designerError = send ? await notifyDesigner(db, send) : null;
+    if (designerError) catalogErrors.push(designerError);
     // 3D models from LDraw's OMR, only when a parts library is set up (the 3D view needs it anyway).
     const hasLibrary = !!(process.env.LDRAW_LIBRARY_DIR || process.env.LDRAW_LIBRARY_URL);
     if (hasLibrary && process.env.LDRAW_OMR_SYNC !== 'off') catalogErrors.push(...(await syncOmrModels(db)));
-    const message = [...storeErrors, alertError ?? '', wishErrors ? `${wishErrors} wishlist lookup${wishErrors === 1 ? '' : 's'} failed` : '', ...catalogErrors.slice(0, 3), catalogErrors.length > 3 ? `and ${catalogErrors.length - 3} more errors` : ''].filter(Boolean).join('; ');
+    // Part prices for part-out value, with whatever is left of today's BrickLink budget.
+    if (extras.partPrice) {
+      const r = await refreshPartPrices(db, extras.partPrice, currency, { maxCalls: partoutBudget(calls) });
+      if (r.fetched) await reapplyMissing(db);
+      if (r.errors) catalogErrors.push(`${r.errors} part price lookup${r.errors === 1 ? '' : 's'} failed`);
+    }
+    const message = [...storeErrors, alertError ?? '', wishErrors ? `${wishErrors} wishlist lookup${wishErrors === 1 ? '' : 's'} failed` : '', figErrors ? `${figErrors} minifig lookup${figErrors === 1 ? '' : 's'} failed` : '', ...catalogErrors.slice(0, 3), catalogErrors.length > 3 ? `and ${catalogErrors.length - 3} more errors` : ''].filter(Boolean).join('; ');
     await db.update(syncRuns).set({ status: 'done', finishedAt: nowIso(), message: message || null }).where(eq(syncRuns.id, runId));
   } catch (e) {
     await db.update(syncRuns).set({ status: 'failed', finishedAt: nowIso(), message: e instanceof Error ? e.message : String(e) }).where(eq(syncRuns.id, runId));

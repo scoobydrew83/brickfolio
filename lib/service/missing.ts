@@ -7,6 +7,7 @@ import { colors, setMissingParts, setParts, sets } from '../db/schema';
 import type { DB } from '../db/types';
 import { displayNo, estValue, priceGuide } from '../sets';
 import { getCurrency, getSet, lookupInto, type Result } from './sets';
+import { partout } from './partout';
 
 export type MissingItem = { partNo: string; colorId: number | null; type: string; qty: number };
 export type MissingRow = MissingItem & { name: string; colorName: string | null; rgb: string | null; inSet: number };
@@ -56,7 +57,9 @@ async function applyMissing(db: DB, setNo: string, lookup: Lookup | null): Promi
   const s = (await getSet(db, setNo))!;
   const { lots, pct } = await listMissing(db, s.id);
   const condition = lots ? 'Partial' : s.condition;
-  const missingPct = lots ? pct : null;
+  // Weighted by part price once nearly every part is priced (lib/service/partout.ts); by piece count until then.
+  const byValue = lots ? (await partout(db, s.id, condition, await getCurrency(db))).missingPctByValue : null;
+  const missingPct = lots ? (byValue ?? pct) : null;
   await db.update(sets).set({ condition, missingPct, estValue: estValue(s.avgSold, missingPct), updatedAt: new Date().toISOString() }).where(eq(sets.id, s.id));
   if (lookup && priceGuide(s.condition) !== priceGuide(condition)) await lookupInto(db, { ...s, condition, missingPct }, lookup, await getCurrency(db));
 }
@@ -107,4 +110,13 @@ export async function missingWantedList(db: DB, setNo: string): Promise<{ xml: s
   if (!s) return null;
   const { items } = await listMissing(db, s.id);
   return { xml: toWantedListXml(items, `Missing parts for ${s.name} (${displayNo(s.setNo)})`), items: items.length, name: s.name };
+}
+
+/** Recomputes Missing % for every set with marked parts, e.g. after part prices were refreshed. */
+export async function reapplyMissing(db: DB): Promise<void> {
+  const ids = await db.selectDistinct({ setId: setMissingParts.setId }).from(setMissingParts).all();
+  for (const { setId } of ids) {
+    const row = await db.select({ setNo: sets.setNo }).from(sets).where(eq(sets.id, setId)).get();
+    if (row) await applyMissing(db, row.setNo, null);
+  }
 }

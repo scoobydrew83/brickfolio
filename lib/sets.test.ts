@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { dailyHistory, displayNo, estValue, filterSets, groupTotals, parseSetInput, setNo, totals, type SetRow } from './sets';
+import { dailyHistory, displayNo, estValue, filterSets, groupTotals, parseQuickList, parseSetInput, setNo, totals, type SetRow } from './sets';
 
 const LOCS = ['Out', 'Storage', 'Sell'];
 const parse = (f: Record<string, unknown>, partial = true) => parseSetInput(f, partial, LOCS);
@@ -91,4 +91,19 @@ it('estValue subtracts Missing % for any condition, like the sheet formula', () 
   expect(estValue(100, 25)).toBe(75);
   expect(estValue(22.8833, null)).toBe(22.8833); // unrounded
   expect(estValue(null, 0)).toBeNull();
+});
+
+describe('parseQuickList', () => {
+  it('reads set and minifig numbers with counts, adding repeats', () => {
+    expect(parseQuickList('10497\n10497-1 x2, 2x 21325; sw0001\nSW0001*3\n# a comment\n#10305\n\nhello, 10497x0')).toEqual({
+      sets: [{ setNo: '10497-1', qty: 3 }, { setNo: '21325-1', qty: 2 }, { setNo: '10305-1', qty: 1 }],
+      minifigs: [{ figNo: 'sw0001', qty: 4 }],
+      invalid: ['hello', '10497x0'],
+    });
+  });
+  it('caps a paste at 500 entries', () => {
+    const r = parseQuickList(Array.from({ length: 502 }, (_, i) => String(10000 + i)).join('\n'));
+    expect(r.sets).toHaveLength(500);
+    expect(r.invalid).toEqual(['10500-1', '10501-1']);
+  });
 });

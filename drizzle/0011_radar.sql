@@ -1,0 +1,1 @@
+ALTER TABLE `wishlist` ADD `retire_alerted_at` text;

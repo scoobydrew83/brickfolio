@@ -1,6 +1,7 @@
 // Shared, framework-free logic: row shape, input validation, filtering and totals.
 // Used by the server (service layer, API) and the browser (Board). Tested in lib/sets.test.ts.
 import { availability } from './retail';
+import { FIG_NO } from './minifigs';
 
 export const CONDITIONS = ['New', 'Used', 'Partial'] as const;
 export type Condition = (typeof CONDITIONS)[number];
@@ -202,4 +203,35 @@ export const priceGuide = (condition: Condition | null): 'N' | 'U' => (condition
 /** Est. Value per copy, as the sheet's formula had it: average sold price less Missing %, for any condition. */
 export function estValue(avgSold: number | null, missingPct: number | null): number | null {
   return avgSold === null ? null : avgSold * (1 - num(missingPct) / 100);
+}
+
+/** Name given to a pasted set until BrickLink fills in the real one. */
+export const placeholderName = (no: string) => `Set ${displayNo(no)}`;
+
+export type QuickList = { sets: { setNo: string; qty: number }[]; minifigs: { figNo: string; qty: number }[]; invalid: string[] };
+export const QUICK_MAX = 500;
+
+/**
+ * Reads a pasted list: one entry per line (or comma or semicolon), each a set number (10497, 10497-1) or a
+ * BrickLink minifig number (sw0001), with an optional count like "10497 x2" or "2x 10497". Repeats add up.
+ * Lines starting with # are skipped.
+ */
+export function parseQuickList(text: string): QuickList {
+  const sets = new Map<string, number>(), figs = new Map<string, number>(), invalid: string[] = [];
+  for (const raw of String(text ?? '').split(/[\n,;]+/)) {
+    const entry = raw.trim().replace(/^#\s*(?=\d)/, ''); // "#10497" means set 10497
+    if (!entry || entry.startsWith('#')) continue;
+    let id = entry, qty = 1;
+    const pre = entry.match(/^(\d{1,3})\s*[x×*]\s+(\S+)$/i) ?? entry.match(/^(\d{1,3})\s*[x×*](\S*[a-z-]\S*)$/i);
+    const post = entry.match(/^(\S+?)\s*[x×*]\s*(\d{1,3})$/i);
+    if (pre) { qty = Number(pre[1]); id = pre[2]; } else if (post) { id = post[1]; qty = Number(post[2]); }
+    if (qty < 1 || qty > 999) { invalid.push(entry); continue; }
+    if (/^\d{3,7}(-\d{1,2})?$/.test(id)) sets.set(setNo(id), (sets.get(setNo(id)) ?? 0) + qty);
+    else if (FIG_NO.test(id)) figs.set(id.toLowerCase(), (figs.get(id.toLowerCase()) ?? 0) + qty);
+    else invalid.push(entry);
+  }
+  const all = [...sets].map(([setNo, qty]) => ({ setNo, qty }));
+  const mf = [...figs].map(([figNo, qty]) => ({ figNo, qty }));
+  const room = Math.max(0, QUICK_MAX - all.length);
+  return { sets: all.slice(0, QUICK_MAX), minifigs: mf.slice(0, room), invalid: [...invalid, ...all.slice(QUICK_MAX).map((s) => s.setNo), ...mf.slice(room).map((f) => f.figNo)] };
 }

@@ -4,6 +4,26 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-03
+
+### Added
+- Valuation report: **Settings → Valuation report** (and `GET /api/v1/report.pdf?owner=`) downloads a PDF of every set and minifigure with condition, location, value per copy and in total, how many BrickLink sales each price rests on and when it was fetched, grouped by location, with totals and how values are worked out.
+- BrickLink Designer Program tracker on the Radar page (and `/api/v1/designer`): follow projects from crowdfunding to pre-order with stage, series, designer, dates, price and pieces; see whether you own or want the set and add it to the wishlist. Watched projects alert `DESIGNER_ALERT_DAYS` (default 7) before the pre-order opens and 3 days before it closes.
+- MCP server at `/api/mcp` (Streamable HTTP, read-only, API-token auth): tools for the collection summary, set search and details, wishlist, Retirement Radar, Designer Program, minifigures, parts search and value history, so Claude and other assistants can answer questions about the collection.
+
+## [0.5.0] - 2026-11-03
+
+### Added
+- Retirement Radar (`/radar`, `/api/v1/radar`): sets you own and wishes grouped by expected retirement month, and retired sets ranked by growth per year since they retired, from your stored BrickLink prices (or the retail price when there's no stored price from around then). BrickLink Designer Program and SMART Play sets are flagged. The Sets page notes sets retiring within six months.
+- Retirement alerts: the wishlist webhook warns once when a wish will retire within `RETIRE_ALERT_DAYS` (default 60).
+- Minifigures as owned items (`/minifigs`, `/api/v1/minifigs`): add figures by BrickLink number, priced from BrickLink sold history in the daily sync, with condition, location, copies and notes. A Collectible Minifigures checklist loads a series from Rebrickable and ticks off the figures you have.
+- Quick add: **Paste a list** on the Sets page (and `POST /api/v1/sets/bulk`) takes set and minifig numbers with counts like `10497 x2`. Up to 10 new items are looked up now; longer lists wait for the next sync.
+- Part-out value on set pages (`/api/v1/sets/<number>/partout`): the set priced as parts from BrickLink's part price guide, next to its complete price, with coverage and price age. Part prices are cached for 30 days; the daily sync fetches up to `PARTOUT_DAILY_CALLS` (default 1,500) within the BrickLink budget, and **Price parts now** prices one set.
+
+### Changed
+- Once 90% of a Partial set's pieces have part prices, Missing % is weighted by what the missing parts are worth instead of by piece count.
+- The demo data includes a Designer Program set, minifigures, a Collectible Minifigures series and part prices.
+
 ## [0.4.0] - 2026-11-03
 
 ### Added

@@ -232,19 +232,34 @@ All shared UI lives in `components/ui` (`import { Button, Callout, … } from '@
 
 ### P1: what collectors ask for
 - ~~Wishlist~~ Shipped: `/wishlist` and `/api/v1/wishlist`, target prices, an "under target" alert, priced in the daily sync, and "Got it" moves a set into the collection. Alerts shipped too: webhook (ntfy, Discord, JSON) after each sync, and a count on the Wishlist tab.
-- **Minifigures** as owned items, not only as parts inside a set.
+- ~~Minifigures~~ Shipped (0.5.0): `/minifigs` with BrickLink prices, and a Collectible Minifigures checklist per series from Rebrickable. Still to do: minifigs in the CSV export and the collection history.
 - ~~Themes and subthemes~~ Shipped (Rebrickable phase 1): theme filter on the Sets page, theme and minifig count on cards.
 - ~~Value vs. retail~~ Shipped (Brickset): retail price and gain % per set and for the collection.
 - ~~Retirement watch~~ Shipped (Brickset): Retiring/Retired chips on sets and wishlist items, and an Availability filter.
-- **Quick add**: paste a list of set numbers, or scan a barcode or box photo on a phone.
+- ~~Quick add~~ Shipped (0.5.0): **Paste a list** and `POST /api/v1/sets/bulk`. Still to do: scan a barcode or box photo on a phone (Brickognize).
 - **Read-only share link** for showing a collection without giving out access.
 
 ### P2: bigger bets
 - ~~What can I build~~ Shipped (`/build`): alternate builds of owned sets matched against all owned parts, with a Wanted List export. Still to do: official sets and community MOCs beyond alternates.
-- **Part-out value**: what a set is worth sold as parts vs. complete, using BrickLink part prices.
-- ~~Missing parts list~~ Shipped: mark missing parts on a set's page; Missing % is computed from them and they export as a BrickLink Wanted List. Still to do: weight by part price (needs part-out pricing) rather than piece count.
+- ~~Part-out value~~ Shipped (0.5.0): set pages show part-out vs. complete from cached BrickLink part prices, priced within the daily budget.
+- ~~Missing parts list~~ Shipped: mark missing parts on a set's page; Missing % is computed from them and they export as a BrickLink Wanted List. Weighted by part price once 90% of the set's pieces are priced (0.5.0).
 - ~~3D model viewer~~ Shipped on the set page.
 - **Multiple collections or users** (family members, a store vs. a personal shelf).
+
+- ~~Retirement Radar~~ Shipped (0.5.0): `/radar`, retiring timeline, growth per year since retiring, Designer Program and SMART Play flags, and retire-soon alerts. Still to do: sealed vs. used value gap (needs both price guides per set, which costs BrickLink calls).
+
+### Next ideas (ranked, November 2026)
+Trends behind them: the BrickLink Designer Program is the fastest-growing area of the resale market (about 16% a year against about 6% overall, BrickEconomy mid-2026); 2026 retirement dates were reshuffled across many themes; some SMART Play sets retire early.
+1. **Read-only share link** for showing a collection without giving out access.
+2. ~~Designer Program tracker~~ Shipped (0.6.0): on the Radar page, with pre-order alerts. Still to do: fill projects automatically if BrickLink ever offers a feed.
+3. **Sealed vs. built backlog** ("pile of shame"): built/unbuilt per copy, build dates, and the new-vs-used value gap.
+4. ~~MCP server~~ Shipped (0.6.0): `/api/mcp`, read-only tools. Still to do: OAuth so it can be added as a claude.ai connector, and opt-in write tools (add a set, edit the wishlist).
+5. **Brickognize photo scan** to add sets, minifigs and parts from a phone.
+6. ~~Insurance and valuation report~~ Shipped (0.6.0): **Settings → Valuation report**. Still to do: photos in the report.
+7. **Retailer deal alerts** for wishlist sets via the n8n flows in `docs/n8n/`.
+8. **Loose-parts bins:** storage locations for parts outside sets, feeding "What can I build?".
+9. **BrickOwl** as a second marketplace.
+10. **Multiple collections or users.**
 
 ## Integrations
 

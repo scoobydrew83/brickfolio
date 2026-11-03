@@ -8,11 +8,12 @@ import { librarySource } from '@/lib/ldraw/library';
 import { buildMatches } from '@/lib/service/builds';
 import { getModel } from '@/lib/service/models';
 import { listMissing } from '@/lib/service/missing';
+import { partout, unpricedLots } from '@/lib/service/partout';
 import { modelAuthor } from '@/lib/ldraw/omr';
 import { listSetParts } from '@/lib/service/parts';
 import { getCurrency, getSet, listLocations, listSets, priceHistory } from '@/lib/service/sets';
 import { displayNo, setNo } from '@/lib/sets';
-import { bricklink, currentUser } from '@/lib/session';
+import { brickPartPrice, bricklink, currentUser } from '@/lib/session';
 
 export async function generateMetadata({ params }: PageProps<'/sets/[setNo]'>) {
   return { title: displayNo(setNo(decodeURIComponent((await params).setNo))) };
@@ -34,6 +35,7 @@ async function Content({ params, searchParams }: Pick<PageProps<'/sets/[setNo]'>
   const s = await getSet(db, no);
   if (!s) notFound();
   const [parts, prices, currency, locations, all, model, alternates, missing] = await Promise.all([listSetParts(db, s.id), priceHistory(db, s.id), getCurrency(db), listLocations(db), listSets(db), getModel(db, s.id), buildMatches(db, { sourceSetNo: s.setNo }), listMissing(db, s.id)]);
+  const [po, unpriced] = await Promise.all([partout(db, s.id, s.condition, currency), unpricedLots(db, s.id, s.condition, currency)]);
   const inUse = all.map((x) => x.location).filter((l): l is string => !!l);
   return (
     <SetDetail
@@ -48,6 +50,8 @@ async function Content({ params, searchParams }: Pick<PageProps<'/sets/[setNo]'>
       builds={alternates.filter((b) => b.partsKnown).slice(0, 3)}
       view={(await searchParams).view === '3d' ? '3d' : undefined}
       missing={missing}
+      partout={po.lots ? { ...po, unpriced } : null}
+      partsPriced={!!brickPartPrice()}
     />
   );
 }

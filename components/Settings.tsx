@@ -62,6 +62,19 @@ export default function Settings({ locations, currency, tokens, user, authMode, 
       </section>
 
       <section className={section}>
+        <h2 className={h2}>Valuation report</h2>
+        <p className="text-sm text-fg-3">
+          A PDF for insurance or your records: every set and minifigure with its value, condition and location, how many BrickLink sales each price rests on and when it was fetched, with totals by location.
+        </p>
+        <form action="/api/v1/report.pdf" method="get" className="flex flex-wrap items-end gap-2">
+          <label className="text-sm">Name on the report <span className="text-fg-3">(optional)</span>
+            <input name="owner" maxLength={80} placeholder="Your name" className={`${field} w-56`} />
+          </label>
+          <Button type="submit">Download PDF</Button>
+        </form>
+      </section>
+
+      <section className={section}>
         <h2 className={h2}>API tokens</h2>
         <p className="text-sm text-fg-3">
           For scripts and apps: send <code className="rounded-chip bg-muted px-1">Authorization: Bearer &lt;token&gt;</code> to <code className="rounded-chip bg-muted px-1">/api/v1</code>.

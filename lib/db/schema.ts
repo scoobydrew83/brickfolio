@@ -216,6 +216,7 @@ export const wishlist = sqliteTable(
     blError: text('bl_error'),
     lastUpdated: text('last_updated'),
     alertedAt: text('alerted_at'), // when an "under target" alert was sent; cleared when it goes back above
+    retireAlertedAt: text('retire_alerted_at'), // when a "retires soon" alert was sent; cleared if the date moves away
     // Filled in by the optional Brickset sync: original retail price and availability
     retailPrice: real('retail_price'),
     retailCurrency: text('retail_currency'),
@@ -263,3 +264,109 @@ export const buildParts = sqliteTable(
   },
   (t) => [index('build_parts_build').on(t.buildId)],
 );
+
+/**
+ * Minifigures you own as items of their own (not the ones inside a set). A figure has a BrickLink number
+ * (sw0001), which prices it, or only a Rebrickable one (fig-000123) when ticked off the Collectible Minifigures checklist.
+ */
+export const minifigs = sqliteTable(
+  'minifigs',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    figNo: text('fig_no'), // BrickLink minifig number, lowercase: sw0001, col25-3
+    rbFigNo: text('rb_fig_no'), // Rebrickable number: fig-000123
+    name: text('name').notNull(),
+    qty: integer('qty').notNull().default(1),
+    condition: text('condition', { enum: ['New', 'Used'] }).notNull().default('Used'),
+    location: text('location'),
+    notes: text('notes'),
+    // Filled in by the BrickLink lookup
+    blName: text('bl_name'),
+    year: integer('year'),
+    categoryId: integer('category_id'),
+    imageUrl: text('image_url'),
+    avgSold: real('avg_sold'),
+    minSold: real('min_sold'),
+    maxSold: real('max_sold'),
+    qtySold: integer('qty_sold'),
+    blError: text('bl_error'),
+    lastUpdated: text('last_updated'),
+    createdAt: text('created_at').notNull().default(now),
+    updatedAt: text('updated_at').notNull().default(now),
+  },
+  (t) => [
+    uniqueIndex('minifigs_fig_no').on(t.figNo).where(sql`fig_no is not null`),
+    uniqueIndex('minifigs_rb_fig_no').on(t.rbFigNo).where(sql`rb_fig_no is not null`),
+  ],
+);
+
+/** Sold prices per minifigure per day, like price_snapshots for sets. */
+export const minifigPriceSnapshots = sqliteTable(
+  'minifig_price_snapshots',
+  {
+    figId: integer('fig_id').notNull().references(() => minifigs.id, { onDelete: 'cascade' }),
+    date: text('date').notNull(),
+    guide: text('guide', { enum: ['N', 'U'] }).notNull(),
+    avgSold: real('avg_sold'),
+    qtySold: integer('qty_sold'),
+  },
+  (t) => [uniqueIndex('minifig_price_snapshots_fig_date').on(t.figId, t.date)],
+);
+
+/** Rebrickable's figures for each Collectible Minifigures series, cached for the checklist. */
+export const cmfFigs = sqliteTable(
+  'cmf_figs',
+  {
+    rbFigNo: text('rb_fig_no').notNull(),
+    themeId: integer('theme_id').notNull(),
+    name: text('name').notNull(),
+    numParts: integer('num_parts'),
+    imageUrl: text('image_url'),
+    fetchedAt: text('fetched_at').notNull(),
+  },
+  (t) => [uniqueIndex('cmf_figs_key').on(t.themeId, t.rbFigNo)],
+);
+
+/**
+ * BrickLink sold prices for single parts (and minifigs inside sets), shared by every set, for part-out value.
+ * colorId -1 = no color. Refreshed after 30 days, a capped number per day (PARTOUT_DAILY_CALLS).
+ */
+export const partPrices = sqliteTable(
+  'part_prices',
+  {
+    type: text('type').notNull(), // PART, MINIFIG, GEAR, …
+    partNo: text('part_no').notNull(),
+    colorId: integer('color_id').notNull().default(-1),
+    guide: text('guide', { enum: ['N', 'U'] }).notNull(),
+    currency: text('currency').notNull(),
+    avgSold: real('avg_sold'), // null = nothing sold recently
+    qtySold: integer('qty_sold'),
+    error: text('error'),
+    fetchedAt: text('fetched_at').notNull(),
+  },
+  (t) => [uniqueIndex('part_prices_key').on(t.type, t.partNo, t.colorId, t.guide, t.currency), index('part_prices_fetched').on(t.fetchedAt)],
+);
+
+/**
+ * BrickLink Designer Program projects you're following: crowdfunding, then a pre-order window, then gone.
+ * Entered by hand (or through the API, e.g. from n8n); BrickLink has no API for the program.
+ */
+export const designerProjects = sqliteTable('designer_projects', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  name: text('name').notNull(),
+  setNo: text('set_no'), // BrickLink set number once it has one, e.g. 910038-1
+  series: text('series'), // e.g. Series 8
+  designer: text('designer'),
+  stage: text('stage', { enum: ['crowdfunding', 'selected', 'preorder', 'closed', 'not-made'] }).notNull().default('crowdfunding'),
+  preorderStart: text('preorder_start'), // YYYY-MM-DD
+  preorderEnd: text('preorder_end'), // YYYY-MM-DD
+  price: real('price'), // pre-order price, collection currency
+  pieces: integer('pieces'),
+  url: text('url'),
+  notes: text('notes'),
+  watching: integer('watching', { mode: 'boolean' }).notNull().default(true),
+  openAlertedAt: text('open_alerted_at'), // "pre-order opens soon" sent
+  closeAlertedAt: text('close_alerted_at'), // "pre-order closes soon" sent
+  createdAt: text('created_at').notNull().default(now),
+  updatedAt: text('updated_at').notNull().default(now),
+});
