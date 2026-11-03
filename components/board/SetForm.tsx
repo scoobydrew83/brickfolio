@@ -54,7 +54,14 @@ export function SetForm({ set, locations, pending, dupe, money, onClose, onAddAn
             </select>
           </label>
           <label className="block text-sm">Missing %
-            <input name="missingPct" type="number" min={0} max={100} step="any" defaultValue={set?.missingPct ?? ''} placeholder="0" className={field} />
+            {set?.missingMarked ? (
+              <>
+                <input type="number" value={set.missingPct ?? 0} readOnly aria-describedby="missing-computed" className={`${field} bg-muted`} />
+                <span id="missing-computed" className="mt-1 block text-xs text-fg-3">From {set.missingMarked} marked missing piece{set.missingMarked === 1 ? '' : 's'}. Clear them on the set page to type a % instead.</span>
+              </>
+            ) : (
+              <input name="missingPct" type="number" min={0} max={100} step="any" defaultValue={set?.missingPct ?? ''} placeholder="0" className={field} />
+            )}
           </label>
           {set && (
             <label className="block text-sm">Qty

@@ -4,6 +4,12 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-03
+
+### Added
+- Complete your Partial sets: mark missing parts on a set's page. Missing % and Est. Value follow from the pieces, the set becomes Partial, and the missing parts download or copy as a BrickLink Wanted List (`/api/v1/sets/<number>/missing`, `…/missing/wanted.xml`). Marks survive a parts refresh.
+- Credits: NOTICE lists every data source and bundled asset, `npm run notices` writes THIRD_PARTY_NOTICES.md, and Settings and the README have a Credits section.
+
 ## [0.3.0] - 2026-11-02
 
 ### Added

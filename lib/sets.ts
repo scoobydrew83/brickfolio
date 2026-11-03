@@ -37,6 +37,7 @@ export type SetRow = {
   subtheme?: string | null; // e.g. Botanical Collection
   minifigs?: number | null;
   hasModel?: boolean; // an LDraw model is saved for the 3D view
+  missingMarked?: number; // pieces marked missing from the parts list; when > 0, Missing % is computed from them
   // From Brickset when BRICKSET_API_KEY is set; null until checked
   retailPrice?: number | null; // original retail price, in retailCurrency
   retailCurrency?: string | null;

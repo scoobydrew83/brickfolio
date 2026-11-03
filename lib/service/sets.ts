@@ -4,13 +4,14 @@ import { and, asc, desc, eq, gt, lt, lte, sql } from 'drizzle-orm';
 import type { Lookup, Store } from '../bricklink/client';
 import type { BuildSource, Catalog } from '../rebrickable/client';
 import type { DB } from '../db/types';
-import { history, locations, priceSnapshots, setModels, sets, settings, syncRuns } from '../db/schema';
+import { history, locations, priceSnapshots, sets, settings, syncRuns } from '../db/schema';
 import { hasParts, replaceParts } from './parts';
 import { syncStore } from './store';
 import { syncCatalog, themeMap, themeNames } from './catalog';
 import { syncWishlist } from './wishlist';
 import { syncBuilds } from './builds';
 import { syncRetail } from './retail';
+import { hasMissing } from './missing';
 import type { RetailSource } from '../brickset/client';
 import { syncOmrModels } from './models';
 import { alertsFromEnv, notifyUnderTarget } from './alerts';
@@ -36,13 +37,15 @@ const columns = {
   maxSold: sets.maxSold, qtySold: sets.qtySold, estValue: sets.estValue, blError: sets.blError, lastUpdated: sets.lastUpdated, notes: sets.notes,
   themeId: sets.themeId, minifigs: sets.minifigs,
   retailPrice: sets.retailPrice, retailCurrency: sets.retailCurrency, launchDate: sets.launchDate, exitDate: sets.exitDate, retired: sets.retired,
-  hasModel: sql<number>`exists (select 1 from ${setModels} where ${setModels.setId} = ${sets.id})`,
+  // Table-qualified on purpose: inside a subquery an unqualified "id" would mean the subquery table's own id.
+  hasModel: sql<number>`exists (select 1 from "set_models" m where m."set_id" = "sets"."id")`,
+  missingMarked: sql<number>`(select coalesce(sum(mp."qty"), 0) from "set_missing_parts" mp where mp."set_id" = "sets"."id")`,
 };
 
 /** Swaps the Rebrickable theme id for readable theme and subtheme names. */
-async function withThemes(db: DB, rows: (Omit<SetRow, 'theme' | 'subtheme' | 'hasModel'> & { themeId: number | null; hasModel: number | boolean })[]): Promise<SetRow[]> {
+async function withThemes(db: DB, rows: (Omit<SetRow, 'theme' | 'subtheme' | 'hasModel' | 'missingMarked'> & { themeId: number | null; hasModel: number | boolean; missingMarked: number | null })[]): Promise<SetRow[]> {
   const map = rows.some((r) => r.themeId !== null) ? await themeMap(db) : new Map();
-  return rows.map(({ themeId, hasModel, ...r }) => ({ ...r, hasModel: Boolean(hasModel), ...themeNames(map, themeId) }));
+  return rows.map(({ themeId, hasModel, missingMarked, ...r }) => ({ ...r, hasModel: Boolean(hasModel), missingMarked: Number(missingMarked ?? 0), ...themeNames(map, themeId) }));
 }
 
 // ---- reads ----
@@ -142,6 +145,8 @@ export async function editSet(db: DB, input: SetInput, lookup: Lookup | null): P
   const before = await getSet(db, input.setNo);
   if (!before) return { ok: false, status: 404, error: `#${input.setNo} isn't in the collection.` };
   const { setNo: _no, ...fields } = input;
+  // With parts marked missing, Missing % comes from them (lib/service/missing.ts), not from the form.
+  if (fields.missingPct !== undefined && (await hasMissing(db, before.id))) delete fields.missingPct;
   const after = { ...before, ...fields };
   const guideChanged = priceGuide(before.condition) !== priceGuide(after.condition);
   await db.update(sets)

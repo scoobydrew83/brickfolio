@@ -170,6 +170,20 @@ export const setParts = sqliteTable(
   (t) => [index('set_parts_set').on(t.setId), index('set_parts_part').on(t.partNo)],
 );
 
+/** Parts you've marked missing from a Partial set. Kept apart from set_parts, which is replaced on every refresh. */
+export const setMissingParts = sqliteTable(
+  'set_missing_parts',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    setId: integer('set_id').notNull().references(() => sets.id, { onDelete: 'cascade' }),
+    partNo: text('part_no').notNull(),
+    colorId: integer('color_id').notNull().default(-1), // -1 = no color (minifigs, gear), so the unique key works
+    type: text('type').notNull(),
+    qty: integer('qty').notNull(),
+  },
+  (t) => [uniqueIndex('set_missing_parts_key').on(t.setId, t.type, t.partNo, t.colorId)],
+);
+
 /** BrickLink color names (the parts list only gives an ID). Filled from GET /colors once. */
 export const colors = sqliteTable('colors', {
   id: integer('id').primaryKey(),

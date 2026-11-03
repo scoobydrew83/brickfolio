@@ -71,6 +71,13 @@
       "when": 1793642442937,
       "tag": "0009_brickset",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1793677387993,
+      "tag": "0010_missing_parts",
+      "breakpoints": true
     }
   ]
 }

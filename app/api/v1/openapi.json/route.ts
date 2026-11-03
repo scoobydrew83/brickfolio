@@ -27,7 +27,7 @@ const spec = {
           estValue: { ...nullable('number'), description: 'Per copy: avg sold for the condition, less Missing % on Partial sets' },
           blError: nullable('string'), lastUpdated: nullable('string'),
           theme: { ...nullable('string'), description: 'Top-level Rebrickable theme (needs REBRICKABLE_API_KEY)' },
-          subtheme: nullable('string'), minifigs: nullable('integer'), hasModel: { type: 'boolean' },
+          subtheme: nullable('string'), minifigs: nullable('integer'), hasModel: { type: 'boolean' }, missingMarked: { type: 'integer' },
         },
       },
       SetInput: {
@@ -81,6 +81,12 @@ const spec = {
       put: { summary: 'Upload or replace the LDraw model (?name=file.mpd, body = file text, ≤ 2 MB)', requestBody: { content: { 'text/plain': {} } }, responses: { 200: ok({ type: 'object' }), 400: err, 404: err } },
       delete: { summary: 'Remove the model', responses: { 200: ok({ type: 'object' }), 404: err } },
     },
+    '/sets/{setNo}/missing': {
+      parameters: [setNo],
+      get: { summary: 'Parts marked missing from a Partial set, with totals and the Missing % they give', responses: { 200: ok({ type: 'object' }), 404: err } },
+      put: { summary: 'Replace the missing parts ({ items: [{ partNo, colorId, type, qty }] }); an empty list clears them', requestBody: { content: { 'application/json': { schema: { type: 'object', properties: { items: { type: 'array', items: { type: 'object', properties: { partNo: { type: 'string' }, colorId: nullable('integer'), type: { type: 'string' }, qty: { type: 'integer' } } } } } } } } }, responses: { 200: ok({ type: 'object' }), 400: err, 404: err } },
+    },
+    '/sets/{setNo}/missing/wanted.xml': { parameters: [setNo], get: { summary: 'The missing parts as a BrickLink Wanted List (XML)', responses: { 200: { description: 'Wanted List XML', content: { 'application/xml': {} } }, 404: err } } },
     '/ldraw/{path}': { get: { summary: 'A file from the LDraw parts library (for the 3D view)', parameters: [{ name: 'path', in: 'path', required: true, schema: { type: 'string' } }], responses: { 200: { description: 'LDraw file', content: { 'text/plain': {} } }, 400: err, 404: err } } },
     '/sets/{setNo}/prices': { parameters: [setNo], get: { summary: 'Sold prices per day', responses: { 200: ok({ type: 'object' }), 404: err } } },
     '/sync': {

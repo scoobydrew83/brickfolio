@@ -7,6 +7,7 @@ import { getDb } from '@/lib/db';
 import { librarySource } from '@/lib/ldraw/library';
 import { buildMatches } from '@/lib/service/builds';
 import { getModel } from '@/lib/service/models';
+import { listMissing } from '@/lib/service/missing';
 import { modelAuthor } from '@/lib/ldraw/omr';
 import { listSetParts } from '@/lib/service/parts';
 import { getCurrency, getSet, listLocations, listSets, priceHistory } from '@/lib/service/sets';
@@ -32,7 +33,7 @@ async function Content({ params, searchParams }: Pick<PageProps<'/sets/[setNo]'>
   const db = await getDb();
   const s = await getSet(db, no);
   if (!s) notFound();
-  const [parts, prices, currency, locations, all, model, alternates] = await Promise.all([listSetParts(db, s.id), priceHistory(db, s.id), getCurrency(db), listLocations(db), listSets(db), getModel(db, s.id), buildMatches(db, { sourceSetNo: s.setNo })]);
+  const [parts, prices, currency, locations, all, model, alternates, missing] = await Promise.all([listSetParts(db, s.id), priceHistory(db, s.id), getCurrency(db), listLocations(db), listSets(db), getModel(db, s.id), buildMatches(db, { sourceSetNo: s.setNo }), listMissing(db, s.id)]);
   const inUse = all.map((x) => x.location).filter((l): l is string => !!l);
   return (
     <SetDetail
@@ -46,6 +47,7 @@ async function Content({ params, searchParams }: Pick<PageProps<'/sets/[setNo]'>
       library={!!librarySource()}
       builds={alternates.filter((b) => b.partsKnown).slice(0, 3)}
       view={(await searchParams).view === '3d' ? '3d' : undefined}
+      missing={missing}
     />
   );
 }

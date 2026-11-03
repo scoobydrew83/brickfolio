@@ -71,7 +71,7 @@ export function SetCard({ s, onEdit, onParts, onRemove, onRetry, pending, money,
             {gain
               ? <>Retail {money(gain.retail)} · <b className={gain.gainPct >= 0 ? 'text-ok' : 'text-danger'}>{gain.gainPct >= 0 ? '+' : '−'}{Math.abs(gain.gainPct)}%</b></>
               : s.qtySold ? `From ${s.qtySold} recent BrickLink sales` : 'No recent BrickLink sales'}
-            {s.missingPct ? <span className="font-semibold text-warn"> · {s.missingPct}% missing</span> : null}
+            {s.missingPct ? <span className="font-semibold text-warn" title={s.missingMarked ? `From ${s.missingMarked} marked missing piece${s.missingMarked === 1 ? '' : 's'}` : 'Typed in by hand'}> · {s.missingPct}% missing</span> : null}
           </p>
         </Callout>
 

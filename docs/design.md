@@ -242,7 +242,7 @@ All shared UI lives in `components/ui` (`import { Button, Callout, … } from '@
 ### P2: bigger bets
 - ~~What can I build~~ Shipped (`/build`): alternate builds of owned sets matched against all owned parts, with a Wanted List export. Still to do: official sets and community MOCs beyond alternates.
 - **Part-out value**: what a set is worth sold as parts vs. complete, using BrickLink part prices.
-- **Missing parts list**: parts needed to complete a Partial set, exported as a BrickLink Wanted List XML (the export exists for builds; reuse it).
+- ~~Missing parts list~~ Shipped: mark missing parts on a set's page; Missing % is computed from them and they export as a BrickLink Wanted List. Still to do: weight by part price (needs part-out pricing) rather than piece count.
 - ~~3D model viewer~~ Shipped on the set page.
 - **Multiple collections or users** (family members, a store vs. a personal shelf).
 

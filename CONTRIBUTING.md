@@ -27,6 +27,8 @@ npm run build
 
 ## Guidelines
 
+- Adding or upgrading a runtime dependency? Run `npm run notices` and commit the updated `THIRD_PARTY_NOTICES.md`. A new data source or bundled asset also gets a line in `NOTICE` and the Credits in `README.md` and Settings.
+
 - **One code path for both targets.** Code must run on Node (Docker) and on Cloudflare Workers. Use Web APIs (`fetch`, `crypto.subtle`) over Node-only modules outside `lib/db/node.ts` and `lib/scheduler.ts`. Always `await` database calls: D1 is async.
 - **Logic goes in `lib/service`**, so the UI, the REST API and the scheduler share it. Add tests with an in-memory database (see `lib/service/sets.test.ts`).
 - **Validate at the edge.** Server actions and API routes parse input with `parseSetInput` and check the user before doing anything.

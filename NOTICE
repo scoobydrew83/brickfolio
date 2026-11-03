@@ -3,10 +3,24 @@ Copyright 2026 The Brickfolio Authors
 
 This product is licensed under the Apache License, Version 2.0 (see LICENSE).
 
+Trademarks
 LEGO® is a trademark of the LEGO Group of companies, which does not sponsor, authorize or endorse this project.
-BrickLink® is a trademark of BrickLink Corporation (part of the LEGO Group). Set data, images and prices are
-fetched from the BrickLink API under each user's own API keys and BrickLink's API terms of use.
-Theme and minifigure data, when enabled, comes from the Rebrickable API (https://rebrickable.com) under each
-user's own API key and Rebrickable's terms of use.
-The 3D view uses parts from the LDraw Parts Library (https://library.ldraw.org), licensed CC BY 2.0 by the
-LDraw.org contributors, and three.js (MIT). The test fixtures in lib/ldraw/fixtures are simplified stand-ins.
+BrickLink® is a trademark of BrickLink Corporation (part of the LEGO Group). This application uses the
+BrickLink API but is not endorsed or certified by BrickLink.
+
+Data sources (each used with the user's own API key and under that service's terms of use)
+- BrickLink (https://www.bricklink.com): set details, images, parts lists and sold prices.
+- Rebrickable (https://rebrickable.com): themes, minifigure counts and alternate builds.
+- Brickset (https://brickset.com): original retail prices and launch and retirement dates.
+- LDraw (https://www.ldraw.org): the LDraw Parts Library and models from the Official Model Repository,
+  licensed CC BY 2.0 by the LDraw.org contributors. Each model's author is shown under the 3D view.
+  The test fixtures in lib/ldraw/fixtures are simplified stand-ins.
+
+Bundled software
+- three.js (MIT) for the 3D view.
+- Lucide icons (ISC), which include icons from Feather (MIT).
+- Archivo by Omnibus-Type (SIL Open Font License 1.1), self-hosted through next/font.
+- sharp and libvips (Apache-2.0 and LGPL-3.0-or-later), used by Next.js image optimization in the Docker image.
+  libvips is dynamically linked; its source is at https://github.com/libvips/libvips.
+- Next.js, React, Drizzle ORM, SQLite (public domain) through better-sqlite3, and the other packages listed
+  with their licenses in THIRD_PARTY_NOTICES.md.

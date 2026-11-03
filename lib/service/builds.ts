@@ -5,6 +5,7 @@ import type { BuildSource } from '../rebrickable/client';
 import type { DB } from '../db/types';
 import { buildParts, builds, setParts, sets } from '../db/schema';
 import { displayNo, setNo as fullSetNo } from '../sets';
+import { toWantedListXml, type WantedItem } from '../bricklink/wanted';
 
 const nowIso = () => new Date().toISOString();
 
@@ -99,8 +100,6 @@ export async function buildMatches(db: DB, filter: { sourceSetNo?: string } = {}
   }).sort((a, b) => Number(b.partsKnown) - Number(a.partsKnown) || b.pct - a.pct || a.missingPieces - b.missingPieces);
 }
 
-const xml = (v: string) => v.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-
 /**
  * The parts you're missing for a build, as a BrickLink Wanted List (Wanted → Upload → paste XML). Parts Rebrickable
  * couldn't map to BrickLink numbers are left out and counted in `skipped`. Null when the build isn't known.
@@ -110,14 +109,14 @@ export async function wantedListXml(db: DB, mocNo: string): Promise<{ xml: strin
   if (!b) return null;
   const owned = await ownedParts(db);
   const lines = await db.select().from(buildParts).where(eq(buildParts.buildId, b.id)).orderBy(asc(buildParts.partNo)).all();
-  const items: string[] = [];
+  const items: WantedItem[] = [];
   let skipped = 0;
   for (const l of lines) {
     const missing = l.qty - Math.min(owned.get(key(l.partNo, l.colorId)) ?? 0, l.qty);
     if (missing <= 0) continue;
     if (!l.mapped) { skipped++; continue; }
-    items.push(`  <ITEM>\n    <ITEMTYPE>P</ITEMTYPE>\n    <ITEMID>${xml(l.partNo)}</ITEMID>\n${l.colorId !== null ? `    <COLOR>${l.colorId}</COLOR>\n` : ''}    <MINQTY>${missing}</MINQTY>\n  </ITEM>`);
+    items.push({ partNo: l.partNo, colorId: l.colorId, qty: missing });
   }
-  const header = `<!-- Missing parts for ${xml(b.name)} (${xml(b.mocNo)}, alternate build of ${xml(displayNo(b.sourceSetNo))}) -->`;
-  return { xml: `${header}\n<INVENTORY>\n${items.join('\n')}${items.length ? '\n' : ''}</INVENTORY>\n`, items: items.length, skipped, name: b.name };
+  const comment = `Missing parts for ${b.name} (${b.mocNo}, alternate build of ${displayNo(b.sourceSetNo)})`;
+  return { xml: toWantedListXml(items, comment), items: items.length, skipped, name: b.name };
 }

@@ -4,6 +4,7 @@ import { partCounts, type Color, type SetPart } from '../bricklink/client';
 import { insertChunked } from '../db/chunk';
 import { colors, setParts, sets } from '../db/schema';
 import type { DB } from '../db/types';
+import { reconcileMissing } from './missing';
 
 export type { SetPart } from '../bricklink/client';
 export type PartRow = SetPart & { colorName: string | null; rgb: string | null };
@@ -18,6 +19,7 @@ export async function replaceParts(db: DB, setId: number, parts: SetPart[]): Pro
   await db.delete(setParts).where(eq(setParts.setId, setId));
   await insertChunked(parts.map((p) => ({ setId, ...p })), (c) => db.insert(setParts).values(c));
   await db.update(sets).set(partCounts(parts)).where(eq(sets.id, setId));
+  await reconcileMissing(db, setId); // keep marked missing parts in step with the new list
 }
 
 /** Fills the colors table from BrickLink the first time it's needed (one API call). Errors are ignored: names are optional. */

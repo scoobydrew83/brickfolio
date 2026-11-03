@@ -1,6 +1,6 @@
 {
   "name": "brickfolio",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -9,6 +9,7 @@
     "lint": "eslint",
     "test": "vitest run",
     "seed": "node scripts/seed.mjs",
+    "notices": "node scripts/third-party-notices.mjs",
     "ldraw:download": "node scripts/ldraw-download.mjs",
     "db:generate": "drizzle-kit generate",
     "cf:build": "opennextjs-cloudflare build",

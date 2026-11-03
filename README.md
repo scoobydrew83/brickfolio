@@ -5,6 +5,7 @@ A self-hosted tracker for your brick-set collection: what you own, where it is, 
 ![A tour: the Sets page with its value history and filters, a set page, the wishlist, and dark mode](docs/screenshots/tour.gif)
 
 - **Collection:** set number, name, copies, location, condition (New / Used / Partial), missing %, notes.
+- **Finish your Partial sets:** tick the parts a set is missing from its parts list; Missing % and value follow exactly, and the missing parts download as a BrickLink Wanted List.
 - **Real sold prices:** BrickLink average, low and high sold prices for each set's condition, less missing pieces. A daily sync keeps them fresh and saves the history.
 - **Set pages:** photo, value and price history, the full parts list with counts, notes, and the set's LDraw model in 3D with a step-by-step build view.
 - **Wishlist:** sets you want and the price you'd pay; Brickfolio tells you when one sells for less (in the app, or by ntfy, Discord or any webhook), and "Got it" moves it into your collection.
@@ -63,6 +64,7 @@ In Sheets, use **File → Download → Comma-separated values** on the Sets, His
 - **Parts:** open a set's parts list from its card, or search every set's parts on the Parts page (e.g. which sets have a given part).
 - **Wishlist:** add a set with the price you'd pay. Sets under your target go to the top; **Got it** moves one into your collection.
 - **3D model:** on a set's page, upload its LDraw model (many are in the LDraw Official Model Repository) to orbit it or step through the build. Needs the LDraw parts library; see [the install guide](docs/install.md#optional-3d-models-of-your-sets).
+- **Missing parts:** on a set's page, **Mark missing parts** and type how many of each are gone. The set becomes Partial, Missing % is worked out from the pieces, and **Wanted List** downloads them for BrickLink (Want → Upload). Refreshing the parts list keeps your marks.
 - **What can I build?:** under Parts. Each build can download its missing parts as a BrickLink Wanted List.
 - **Store** and **Orders:** your BrickLink store as of the last sync. Search and filter lots; switch between orders sold and bought.
 - **Settings:** locations, currency, CSV import/export and API tokens.
@@ -119,6 +121,15 @@ lib/auth.ts       auth modes: none, tailscale, cloudflare-access, plus API token
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) and the [Code of Conduct](CODE_OF_CONDUCT.md). The visual design system and roadmap are in [docs/design.md](docs/design.md).
 
+## Credits
+
+Brickfolio stands on other people's work:
+
+- **Data:** [BrickLink](https://www.bricklink.com) for set details, parts lists and sold prices; [Rebrickable](https://rebrickable.com) for themes, minifigures and alternate builds; [Brickset](https://brickset.com) for retail prices and retirement dates; and [LDraw](https://www.ldraw.org) for the parts library and set models (CC BY 2.0, by the LDraw.org contributors). Each service is used with your own key and under its own terms. This app uses the BrickLink API but is not endorsed or certified by BrickLink.
+- **Software:** [Next.js](https://nextjs.org), [React](https://react.dev), [three.js](https://threejs.org), [Drizzle ORM](https://orm.drizzle.team), [SQLite](https://sqlite.org) via better-sqlite3, [Lucide](https://lucide.dev) icons and the [Archivo](https://github.com/Omnibus-Type/Archivo) typeface (SIL OFL 1.1).
+
+Every bundled package and its license is listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md); [NOTICE](NOTICE) has the trademark notes.
+
 ## License
 
-[Apache License 2.0](LICENSE). See [NOTICE](NOTICE) for trademark notes.
+[Apache License 2.0](LICENSE). See [NOTICE](NOTICE) for trademarks and data sources.

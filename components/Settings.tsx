@@ -98,6 +98,8 @@ export default function Settings({ locations, currency, tokens, user, authMode, 
         <p>Signed in as <b>{user}</b> · Auth mode <b>{authMode}</b> · BrickLink keys <b>{priced ? 'set' : 'not set'}</b> · Rebrickable key <b>{rebrickable.key ? 'set' : 'not set'}</b> · Brickset key <b>{brickset.key ? 'set' : 'not set'}</b> · Wishlist alerts <b>{alerts ? 'on' : 'off'}</b></p>
         {!alerts && <p>To get a message when a wishlist set drops under your target, set <code className="rounded-chip bg-muted px-1">ALERT_WEBHOOK_URL</code> to an ntfy topic, a Discord webhook or any URL that accepts JSON.</p>}
       </section>
+
+      <Credits />
     </div>
   );
 }
@@ -265,6 +267,41 @@ function LdrawSection({ initial }: { initial: LibraryStatus }) {
           </Button>
         </>
       )}
+    </section>
+  );
+}
+
+const REPO = 'https://github.com/scoobydrew83/brickfolio/blob/main';
+const DATA: [string, string, string][] = [
+  ['BrickLink', 'https://www.bricklink.com', 'set details, images, parts lists and sold prices'],
+  ['Rebrickable', 'https://rebrickable.com', 'themes, minifigure counts and alternate builds'],
+  ['Brickset', 'https://brickset.com', 'original retail prices and retirement dates'],
+  ['LDraw', 'https://www.ldraw.org', 'the parts library and set models (CC BY 2.0, by the LDraw.org contributors)'],
+];
+const SOFTWARE: [string, string][] = [
+  ['Next.js', 'https://nextjs.org'], ['React', 'https://react.dev'], ['three.js', 'https://threejs.org'], ['Drizzle ORM', 'https://orm.drizzle.team'],
+  ['SQLite', 'https://sqlite.org'], ['Lucide', 'https://lucide.dev'], ['Archivo', 'https://github.com/Omnibus-Type/Archivo'],
+];
+const ext = 'text-link hover:underline';
+
+/** Data sources and open-source software Brickfolio is built on. */
+function Credits() {
+  return (
+    <section className={`${section} text-sm text-fg-3`} aria-labelledby="credits-title">
+      <h2 id="credits-title" className={`${h2} text-fg`}>Credits</h2>
+      <ul className="space-y-1">
+        {DATA.map(([name, href, what]) => (
+          <li key={name}><a href={href} target="_blank" rel="noreferrer" className={`${ext} font-semibold`}>{name}</a>: {what}.</li>
+        ))}
+      </ul>
+      <p>Each service is used with your own key and under its own terms. This app uses the BrickLink API but is not endorsed or certified by BrickLink. LEGO® is a trademark of the LEGO Group, which does not sponsor or endorse this project.</p>
+      <p>
+        Built with{' '}
+        {SOFTWARE.map(([name, href], i) => (
+          <span key={name}>{i ? (i === SOFTWARE.length - 1 ? ' and ' : ', ') : ''}<a href={href} target="_blank" rel="noreferrer" className={ext}>{name}</a></span>
+        ))}
+        . Every bundled package and its license: <a href={`${REPO}/THIRD_PARTY_NOTICES.md`} target="_blank" rel="noreferrer" className={ext}>third-party notices</a> · <a href={`${REPO}/NOTICE`} target="_blank" rel="noreferrer" className={ext}>NOTICE</a>.
+      </p>
     </section>
   );
 }

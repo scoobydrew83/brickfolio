@@ -24,6 +24,7 @@ COPY --from=build --chown=app:app /app/.next/standalone ./
 COPY --from=build --chown=app:app /app/.next/static ./.next/static
 COPY --from=build --chown=app:app /app/public ./public
 COPY --from=build --chown=app:app /app/drizzle ./drizzle
+COPY --from=build --chown=app:app /app/LICENSE /app/NOTICE /app/THIRD_PARTY_NOTICES.md ./
 # For `node scripts/ldraw-download.mjs` inside the container (Coolify: Execute command).
 COPY --from=build --chown=app:app /app/scripts/ldraw-download.mjs ./scripts/ldraw-download.mjs
 COPY --from=build --chown=app:app /app/lib/ldraw/install.mjs ./lib/ldraw/install.mjs

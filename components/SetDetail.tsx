@@ -3,9 +3,11 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useMemo, useState, useTransition } from 'react';
-import { ExternalLink, Pencil, RefreshCw } from 'lucide-react';
-import { editSet, refreshPartsFor, relookupSet, removeSet, type Result } from '@/app/actions';
+import { Copy, Download, ExternalLink, ListX, Pencil, RefreshCw } from 'lucide-react';
+import { editSet, refreshPartsFor, relookupSet, removeSet, saveMissingParts, type Result } from '@/app/actions';
 import type { BuildMatch } from '@/lib/service/builds';
+import type { MissingSummary } from '@/lib/service/missing';
+import { partKey } from '@/lib/bricklink/wanted';
 import type { PartRow } from '@/lib/service/parts';
 import { displayNo, num, type SetRow } from '@/lib/sets';
 import { ModelViewer } from './ModelViewer';
@@ -14,12 +16,12 @@ import { RemoveButton, RetireChip } from './board/SetCard';
 import { retailGain, retirement } from '@/lib/retail';
 import { SetForm } from './board/SetForm';
 import { blLink, moneyIn } from './board/ui';
-import { Banner, Button, Callout, CONDITION_TONE, Chip, EmptyState, buttonClass, cx } from './ui';
+import { Banner, Button, Callout, CONDITION_TONE, Chip, EmptyState, FilterChip, buttonClass, cx } from './ui';
 
-type Props = { set: SetRow; parts: PartRow[]; prices: { date: string; avgSold: number | null }[]; currency: string; locations: string[]; priced: boolean; model: { fileName: string; author: string | null } | null; library: boolean; builds: BuildMatch[]; view?: '3d' };
+type Props = { set: SetRow; parts: PartRow[]; prices: { date: string; avgSold: number | null }[]; currency: string; locations: string[]; priced: boolean; model: { fileName: string; author: string | null } | null; library: boolean; builds: BuildMatch[]; view?: '3d'; missing: MissingSummary };
 
 /** One set: its photo, value and price history, parts list and copies. */
-export default function SetDetail({ set: s, parts, prices, currency, locations, priced, model, library, builds, view }: Props) {
+export default function SetDetail({ set: s, parts, prices, currency, locations, priced, model, library, builds, view, missing }: Props) {
   const router = useRouter();
   const money = useMemo(() => moneyIn(currency), [currency]);
   const [editing, setEditing] = useState(false);
@@ -36,6 +38,28 @@ export default function SetDetail({ set: s, parts, prices, currency, locations, 
   const gain = retailGain(s, currency);
   const ret = retirement(s);
   const regular = parts.filter((p) => !p.alternate);
+  const saved = useMemo(() => Object.fromEntries(missing.items.map((i) => [partKey(i.type, i.partNo, i.colorId), i.qty])), [missing.items]);
+  const [marking, setMarking] = useState(false);
+  const [draft, setDraft] = useState<Record<string, number>>(saved);
+  const [missingOnly, setMissingOnly] = useState(false);
+  const shownMissing = marking ? draft : saved;
+  const listed = missingOnly && !marking ? regular.filter((p) => (saved[partKey(p.type, p.partNo, p.colorId)] ?? 0) > 0) : regular;
+  const saveMarks = () => act(
+    () => saveMissingParts(s.setNo, regular.flatMap((p) => { const q = draft[partKey(p.type, p.partNo, p.colorId)] ?? 0; return q ? [{ partNo: p.partNo, colorId: p.colorId, type: p.type, qty: q }] : []; })),
+    'Missing parts saved. Missing % and Est. Value now follow them.',
+    () => setMarking(false),
+  );
+  const wantedUrl = `/api/v1/sets/${encodeURIComponent(displayNo(s.setNo))}/missing/wanted.xml`;
+  const copyWanted = () => start(async () => {
+    try {
+      const res = await fetch(wantedUrl);
+      if (!res.ok) throw new Error(`The server answered ${res.status}.`);
+      await navigator.clipboard.writeText(await res.text());
+      setMessage({ kind: 'ok', text: 'Wanted List XML copied. On BrickLink: Want → Upload → paste.' });
+    } catch (e) {
+      setMessage({ kind: 'error', text: `Couldn't copy the Wanted List: ${e instanceof Error ? e.message : String(e)}` });
+    }
+  });
   const alternates = parts.filter((p) => p.alternate);
   const remove = () => act(() => removeSet(s.setNo), s.qty > 1 ? `Removed one copy. ${s.qty - 1} left.` : `Removed ${s.name}.`, () => { if (s.qty <= 1) router.push('/'); });
 
@@ -165,20 +189,44 @@ export default function SetDetail({ set: s, parts, prices, currency, locations, 
           <h2 id="parts-title" className="text-xl font-extrabold [font-stretch:110%]">Parts</h2>
           <p className="text-sm text-fg-3 tabular-nums">
             {parts.length ? `${num(s.pieces).toLocaleString()} pieces in ${regular.length} lots` : ''}
-            {priced && (
+            {priced && !marking && (
               <Button variant="link" className="ml-3" disabled={pending} onClick={() => act(() => refreshPartsFor(s.setNo), 'Parts list updated.')}>
                 <RefreshCw aria-hidden className="size-4" />{parts.length ? 'Refresh from BrickLink' : 'Fetch from BrickLink'}
               </Button>
             )}
+            {regular.length > 0 && !marking && (
+              <Button variant="link" className="ml-3" disabled={pending} onClick={() => { setDraft(saved); setMissingOnly(false); setMarking(true); }}>
+                <ListX aria-hidden className="size-4" />Mark missing parts
+              </Button>
+            )}
           </p>
         </div>
+        {marking && (
+          <Callout className="flex flex-wrap items-center gap-3 px-4 py-3 text-sm">
+            <p className="mr-auto">Type how many of each part are missing. Missing % and Est. Value will follow, and the set becomes Partial.</p>
+            <Button variant="ghost" disabled={pending} onClick={() => { setDraft({}); }}>Clear all</Button>
+            <Button disabled={pending} onClick={() => setMarking(false)}>Cancel</Button>
+            <Button variant="primary" loading={pending} onClick={saveMarks}>Save missing parts</Button>
+          </Callout>
+        )}
+        {!marking && missing.lots > 0 && (
+          <Callout className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3 text-sm">
+            <p className="mr-auto">
+              <b className="tabular-nums">{missing.pieces.toLocaleString()}</b> piece{missing.pieces === 1 ? '' : 's'} in <b className="tabular-nums">{missing.lots}</b> lot{missing.lots === 1 ? '' : 's'} missing
+              {missing.pct !== null && <> (<span className="tabular-nums">{missing.pct}%</span>)</>}, so Est. Value is lowered to match.
+            </p>
+            <FilterChip active={missingOnly} onClick={() => setMissingOnly(!missingOnly)}>Missing only</FilterChip>
+            <a href={wantedUrl} download className={buttonClass('secondary', 'sm')}><Download aria-hidden className="size-4" />Wanted List</a>
+            <Button size="sm" icon={Copy} disabled={pending} onClick={copyWanted}>Copy XML</Button>
+          </Callout>
+        )}
         {parts.length === 0 ? (
           <EmptyState title="No parts list yet">
             {priced ? 'Fetch it from BrickLink, or import the Parts tab in Settings.' : 'Import the Parts tab in Settings, or add BrickLink keys to fetch it.'}
           </EmptyState>
         ) : (
           <Callout className="overflow-hidden">
-            <PartList parts={regular} />
+            <PartList parts={listed} missing={shownMissing} editing={marking} onMissing={(p, q) => setDraft((d) => ({ ...d, [partKey(p.type, p.partNo, p.colorId)]: q }))} />
             {alternates.length > 0 && (
               <>
                 <h3 className="border-t border-line bg-subtle px-4 py-2 text-sm font-semibold text-fg-2">Alternates (not counted)</h3>

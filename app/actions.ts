@@ -11,6 +11,8 @@ import { brickColors, brickStore, bricklink, brickset, currentUser, rebrickable 
 import * as parts from '@/lib/service/parts';
 import * as wish from '@/lib/service/wishlist';
 import * as models from '@/lib/service/models';
+import * as missing from '@/lib/service/missing';
+import type { MissingItem } from '@/lib/service/missing';
 import * as ldraw from '@/lib/ldraw/download';
 import { DEMO_ERROR, isDemo } from '@/lib/demo';
 import { rebrickableStats, type RebrickableStats } from '@/lib/service/catalog';
@@ -273,4 +275,12 @@ export async function syncBricksetNow(): Promise<Result> {
   if (errors.length) return { ok: false, error: errors.join('; ') };
   refresh();
   return { ok: true };
+}
+
+/** Saves the parts marked missing from a set (Missing % and Partial follow). */
+export async function saveMissingParts(setNo: string, items: MissingItem[]): Promise<Result> {
+  return act(async () => {
+    const p = await input({ setNo }, true);
+    return p.ok ? missing.saveMissing(await getDb(), p.value.setNo, items, bricklink()) : p;
+  });
 }
