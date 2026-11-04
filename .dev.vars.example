@@ -1,6 +1,9 @@
-# Copy to .dev.vars for `npm run cf:preview` (local Workers runtime with a local D1).
-AUTH_MODE=none
-CRON_SECRET=dev-secret
+# Secrets for Cloudflare Workers. The Deploy to Cloudflare button asks for each of these; descriptions are in
+# package.json ("cloudflare.bindings"). For local preview, copy to .dev.vars and fill in what you need, then run
+# `npm run cf:preview` (it runs without a login).
+CF_ACCESS_TEAM_DOMAIN=
+CF_ACCESS_AUD=
+CRON_SECRET=
 BRICKLINK_CONSUMER_KEY=
 BRICKLINK_CONSUMER_SECRET=
 BRICKLINK_TOKEN=
@@ -8,4 +11,4 @@ BRICKLINK_TOKEN_SECRET=
 REBRICKABLE_API_KEY=
 BRICKSET_API_KEY=
 ALERT_WEBHOOK_URL=
-LDRAW_LIBRARY_URL=
+COMPARETHEBRICKS_API_KEY=

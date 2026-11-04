@@ -13,8 +13,9 @@
     "ldraw:download": "node scripts/ldraw-download.mjs",
     "db:generate": "drizzle-kit generate",
     "cf:build": "opennextjs-cloudflare build",
-    "cf:preview": "opennextjs-cloudflare build && wrangler d1 migrations apply DB --local && wrangler dev",
+    "cf:preview": "opennextjs-cloudflare build && wrangler d1 migrations apply DB --local && wrangler dev --var AUTH_MODE:none",
     "cf:deploy": "opennextjs-cloudflare build && wrangler d1 migrations apply DB --remote && wrangler deploy",
+    "deploy": "npm run cf:deploy",
     "cf:typegen": "wrangler types --env-interface CloudflareEnv cloudflare-env.d.ts"
   },
   "dependencies": {
@@ -50,5 +51,45 @@
     "vitest": "^5.0.5",
     "wrangler": "^4.156.0"
   },
-  "license": "Apache-2.0"
+  "license": "Apache-2.0",
+  "cloudflare": {
+    "bindings": {
+      "DB": {
+        "description": "The collection database (D1). Created for you; keep the binding name `DB`."
+      },
+      "CF_ACCESS_TEAM_DOMAIN": {
+        "description": "Your Cloudflare Access team domain, e.g. `myteam.cloudflareaccess.com` (**Zero Trust → Settings**). The app refuses every request until Access is set up, so you can fill this in after the first deploy. See [Protect it with Access](https://github.com/scoobydrew83/brickfolio/blob/main/docs/cloudflare.md#3-choose-the-address-and-protect-it-with-cloudflare-access)."
+      },
+      "CF_ACCESS_AUD": {
+        "description": "The **Application Audience (AUD) Tag** of the Access application in front of this Worker. Can be added after the first deploy."
+      },
+      "CRON_SECRET": {
+        "description": "Any long random string, e.g. from `openssl rand -hex 32`. The daily sync uses it."
+      },
+      "BRICKLINK_CONSUMER_KEY": {
+        "description": "From your [BrickLink API registration](https://www.bricklink.com/v2/api/register_consumer.page). Register the access token for IP `0.0.0.0`: Workers have no fixed IP."
+      },
+      "BRICKLINK_CONSUMER_SECRET": {
+        "description": "BrickLink consumer secret."
+      },
+      "BRICKLINK_TOKEN": {
+        "description": "BrickLink's **Token Value**."
+      },
+      "BRICKLINK_TOKEN_SECRET": {
+        "description": "BrickLink token secret."
+      },
+      "REBRICKABLE_API_KEY": {
+        "description": "Optional: themes, minifig counts and \"What can I build?\". Free key from your Rebrickable profile → Settings → API."
+      },
+      "BRICKSET_API_KEY": {
+        "description": "Optional: retail prices and retirement dates. Free key from brickset.com/tools/webservices/requestkey."
+      },
+      "ALERT_WEBHOOK_URL": {
+        "description": "Optional: wishlist and retirement alerts to ntfy, Discord or any JSON webhook."
+      },
+      "COMPARETHEBRICKS_API_KEY": {
+        "description": "Optional: barcode lookups for boxes the scanner has never seen."
+      }
+    }
+  }
 }

@@ -34,12 +34,16 @@ Screenshots use the demo data from `npm run seed`, so photos are blank and price
 
 ## Install
 
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/scoobydrew83/brickfolio)
+
+The button copies Brickfolio to your GitHub account, creates the database and deploys it to Cloudflare Workers, which keeps it up to date from then on. Then put [Cloudflare Access](docs/cloudflare.md#one-click-deploy) in front of it. Until you do, the app refuses every request.
+
 | Setup | Good for | Files you need | Login |
 |---|---|---|---|
 | [Local only](docs/install.md#local-only) | Trying it out | `docker-compose.yml`, `.env` | None |
 | [Docker + Tailscale](docs/install.md#docker--tailscale) | A home server or NAS, used from your own devices | `docker-compose.yml`, `compose.tailscale.yml`, `.env` | Your Tailscale account |
 | [Docker + Cloudflare Tunnel](docs/install.md#docker--cloudflare-tunnel) | A home server, reachable from anywhere | `docker-compose.yml`, `compose.cloudflared.yml`, `.env` | Cloudflare Access (email code, Google, …) |
-| [Cloudflare Workers + D1](docs/cloudflare.md) | No server at all (free plan works) | The whole repo | Cloudflare Access |
+| [Cloudflare Workers + D1](docs/cloudflare.md) (or the button above) | No server at all (free plan works) | The whole repo | Cloudflare Access |
 
 **[docs/install.md](docs/install.md)** has step-by-step instructions for each, including [BrickLink API keys](docs/install.md#get-your-bricklink-api-keys), [Portainer and other Docker GUIs](docs/install.md#portainer-dockge-synology-and-other-docker-guis), [updating](docs/install.md#updating) and [troubleshooting](docs/install.md#troubleshooting).
 

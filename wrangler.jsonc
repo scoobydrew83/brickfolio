@@ -11,7 +11,8 @@
     {
       "binding": "DB",
       "database_name": "brickfolio",
-      "database_id": "REPLACE_WITH_YOUR_D1_DATABASE_ID", // from `npx wrangler d1 create brickfolio`
+      // The Deploy to Cloudflare button creates the database and fills in its ID. Deploying from the CLI instead:
+      // run `npx wrangler d1 create brickfolio` and add "database_id": "<the ID it prints>" here (docs/cloudflare.md).
       "migrations_dir": "drizzle"
     }
   ],

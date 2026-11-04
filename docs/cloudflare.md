@@ -2,6 +2,30 @@
 
 Brickfolio runs on Cloudflare's free plan: the Next.js app is a Worker (via the [OpenNext adapter](https://opennext.js.org/cloudflare)), data lives in D1 (SQLite), and a Cron Trigger runs the daily BrickLink sync. Cloudflare Access puts a login in front of it. There's no server to look after.
 
+## One-click deploy
+
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/scoobydrew83/brickfolio)
+
+The button does steps 1, 2, 4 and 5 below for you:
+1. It copies the repo to your GitHub account.
+2. It creates the D1 database.
+3. It asks for the secrets, each with a short explanation.
+4. It deploys with Workers Builds, and redeploys on every push to your copy.
+
+Before you start:
+- Register your [BrickLink API keys](install.md#get-your-bricklink-api-keys) for IP `0.0.0.0`.
+- You can leave `CF_ACCESS_TEAM_DOMAIN` and `CF_ACCESS_AUD` empty for now.
+
+On the setup page, keep the suggested **build command** (`npm run build`) and **deploy command** (`npm run deploy`). The deploy command builds the Worker, applies the database migrations, then deploys.
+
+Then, once it's deployed:
+1. Do [step 3](#3-choose-the-address-and-protect-it-with-cloudflare-access) to put Cloudflare Access in front of the Worker.
+2. Add the two Access values under **Workers & Pages → brickfolio → Settings → Variables and Secrets**.
+
+Until then, the app refuses every request (`AUTH_MODE=cloudflare-access`), so nobody else can use it in the meantime.
+
+To update later, pull new releases into your copy of the repo; each push redeploys.
+
 ## What you need
 
 - A Cloudflare account (free plan is enough).
@@ -12,7 +36,7 @@ Brickfolio runs on Cloudflare's free plan: the Next.js app is a Worker (via the 
 
 | File | What it's for | Do you edit it? |
 |---|---|---|
-| `wrangler.jsonc` | Worker name, D1 database, daily sync time, plain settings | Yes: paste your `database_id` (step 2). Optionally change `name`, `TZ` and the cron |
+| `wrangler.jsonc` | Worker name, D1 database, daily sync time, plain settings | Yes: add your `database_id` (step 2). Optionally change `name`, `TZ` and the cron |
 | `cloudflare/worker.ts` | Worker entry: the app plus the daily sync trigger | No |
 | `open-next.config.ts` | OpenNext build settings | No |
 | `drizzle/` | Database migrations, applied by `npm run cf:deploy` | No |
@@ -47,7 +71,7 @@ It prints a block like this:
 }
 ```
 
-Copy the `database_id` into `wrangler.jsonc`, replacing `REPLACE_WITH_YOUR_D1_DATABASE_ID`. Keep `"binding": "DB"`; the app looks for that name. The ID isn't secret, so it's fine to commit it to your fork.
+Add the `database_id` to the `DB` entry in `wrangler.jsonc`, as `"database_id": "0a1b2c3d-..."`. Keep `"binding": "DB"`; the app looks for that name. The ID isn't secret, so it's fine to commit it to your fork.
 
 ## 3. Choose the address and protect it with Cloudflare Access
 
@@ -115,6 +139,6 @@ The Worker name in the dashboard must match `name` in `wrangler.jsonc`. Secrets 
 - **Sync schedule:** `triggers.crons` in `wrangler.jsonc`, in UTC (default `17 4 * * *`, 04:17 UTC). The cron calls `POST /api/v1/sync` with `CRON_SECRET`. `TZ` in `vars` sets the time zone for history dates.
 - **Images:** set photos are resized by the Cloudflare Images binding (`IMAGES`). The free plan includes a monthly allowance of transformations.
 - **Backups:** D1 has Time Travel (point-in-time restore for 30 days). For a file copy: `npx wrangler d1 export brickfolio --remote --output backup.sql`.
-- **Local preview:** `cp .dev.vars.example .dev.vars`, add your BrickLink keys, then `npm run cf:preview`. It uses a local D1 and the real Workers runtime, with no login (`AUTH_MODE=none`).
+- **Local preview:** `cp .dev.vars.example .dev.vars`, add your BrickLink keys, then `npm run cf:preview`. It uses a local D1 and the real Workers runtime, with no login (the script passes `AUTH_MODE=none`).
 - **Large collections:** a sync runs inside one Cron invocation (up to 15 minutes of wall time). At about 1 second per set, that covers several hundred sets.
 - **Logs:** `npx wrangler tail` streams live logs, or see **Workers & Pages → brickfolio → Logs**.

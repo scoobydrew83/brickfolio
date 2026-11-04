@@ -9,6 +9,7 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 **Before upgrading, back up your database** (Docker keeps daily copies in `/data/backups`). The upgrade runs six migrations: every set becomes one copy per unit of its old quantity (condition New becomes **Sealed**, the rest **Built**), and saved barcodes move from `set_barcodes` into the new `identifiers` table. Collection totals don't change.
 
 ### Added
+- **Deploy to Cloudflare** button in the README. It copies the repo to your GitHub account, creates the D1 database, asks for the secrets with a description of each, and deploys with Workers Builds. `npm run deploy` runs the Cloudflare deploy (build, migrations, deploy).
 - **Share links:** **Settings → Share links** creates a read-only link to your collection for someone without access to the app. Values, locations and notes are off by default; minifigures are on. A link can expire, and revoking it takes effect at once. The link is shown once and stored hashed. `GET/POST /api/v1/share-links`, `DELETE /api/v1/share-links/{id}`. `compose.tailscale-funnel.yml` and Cloudflare Access bypass rules open only `/share` (see the install guide). New `SHARE_BASE_URL`.
 - **Copies:** each physical copy of a set is tracked on its own, with a status (Sealed, Built, In progress, Parted out), condition, location, acquired and build dates, cost (price paid, tax, shipping), notes and its own Est. Value. A set's page lists its copies with **Add a copy**, **Edit** and **Remove**. A **Gift with purchase** copy costs 0.
 - Cost basis and gain: on the Sets page, each card, a set's page and in MCP `collection_summary`, `search_sets` and `get_set`, over the copies with a price paid.
@@ -17,6 +18,7 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 - A part and colour ID map from Rebrickable: with `REBRICKABLE_API_KEY` set, the daily sync (and **Sync Rebrickable now**) saves the BrickLink and LDraw numbers Rebrickable lists for every colour (one call, refreshed monthly) and part (20 pages of 1,000 parts per sync by default, `REBRICKABLE_ID_PAGES_PER_SYNC`; a full pass is about 60 pages, picks up where the last sync stopped and is redone monthly). Alternate builds' parts lists add the mappings they come with, and the Brickset sync keeps Brickset's own set ids.
 
 ### Changed
+- `wrangler.jsonc` no longer has a placeholder `database_id`: the button fills it in, and CLI deploys add it in step 2. `.dev.vars.example` now lists only secrets. `npm run cf:preview` passes `AUTH_MODE=none` itself.
 - App pages moved into the `app/(app)` route group, so share pages render without the app's header and nav. URLs are unchanged.
 - Existing sets become `qty` copies on upgrade, keeping condition, location, Missing % and value. Condition **New** becomes status **Sealed**; Used, Partial and blank become **Built**. Change a copy afterwards if it was opened. Collection totals are unchanged.
 - Sealed copies are valued with BrickLink's new sold prices and built ones with used prices. Until both guides are fetched, a set fetches the guide most of its copies need (ties go to used); a copy in the other guide uses a snapshot from the last 90 days, or is labelled "priced from new/used sales".
@@ -28,6 +30,9 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 - Wishlist **Got it** adds a copy dated today (sealed when you wanted it New); the action takes an optional price paid.
 - `sets.qty`, `condition`, `location` and `missing_pct` are no longer read or written; they're dropped in a later release.
 - Saved barcodes moved into a new `identifiers` table, one map from every ID scheme (barcodes, LEGO, BrickLink, Rebrickable, Brickset, LDraw) to the BrickLink ID, with the provider's details in `barcode_details`. Upgrading copies every barcode over, and minifigures with both a BrickLink and a Rebrickable number get a mapping. Scanning, the community list and **Settings → Barcode scanning** work as before.
+
+### Fixed
+- Docker images build arm64 on a native runner, so releases publish again. The emulated build ran past its 45-minute limit, so the 0.8.1 images never finished.
 
 ## [0.8.1] - 2026-11-04
 
