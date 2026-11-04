@@ -25,9 +25,9 @@ beforeEach(() => { db = openNodeDb(':memory:').db; });
 
 it('works out Missing % from marked parts, caps quantities, and makes the set Partial', async () => {
   const id = await setUp('Used');
-  const r = await saveMissing(db, '10497-1', [{ partNo: '3001', colorId: 7, type: 'PART', qty: 6 }, { partNo: '3023', colorId: 86, type: 'PART', qty: 99 }]);
+  const r = await saveMissing(db, '10497-1', null, [{ partNo: '3001', colorId: 7, type: 'PART', qty: 6 }, { partNo: '3023', colorId: 86, type: 'PART', qty: 99 }]);
   expect(r.ok).toBe(true);
-  const m = await listMissing(db, id);
+  const m = await listMissing(db, id, (await svc.getSet(db, '10497-1'))!.copies[0].id);
   expect(m).toMatchObject({ lots: 2, pieces: 42, setPieces: 98, pct: 42.9 }); // 6 + 36 (capped) of 60 + 36 + 2
   const s = (await svc.getSet(db, '10497-1'))!;
   expect(s).toMatchObject({ condition: 'Partial', missingPct: 42.9, missingMarked: 42 });
@@ -36,32 +36,32 @@ it('works out Missing % from marked parts, caps quantities, and makes the set Pa
 
 it('refuses parts that are not on the regular parts list', async () => {
   await setUp();
-  expect(await saveMissing(db, '10497-1', [{ partNo: '3024', colorId: 3, type: 'PART', qty: 1 }])).toMatchObject({ ok: false, error: expect.stringMatching(/isn't on this set's parts list/) });
-  expect(await saveMissing(db, '10497-1', [{ partNo: '9999', colorId: 1, type: 'PART', qty: 1 }])).toMatchObject({ ok: false });
-  expect(await saveMissing(db, '99999-1', [])).toMatchObject({ ok: false, status: 404 });
+  expect(await saveMissing(db, '10497-1', null, [{ partNo: '3024', colorId: 3, type: 'PART', qty: 1 }])).toMatchObject({ ok: false, error: expect.stringMatching(/isn't on this set's parts list/) });
+  expect(await saveMissing(db, '10497-1', null, [{ partNo: '9999', colorId: 1, type: 'PART', qty: 1 }])).toMatchObject({ ok: false });
+  expect(await saveMissing(db, '99999-1', null, [])).toMatchObject({ ok: false, status: 404 });
 });
 
 it('keeps marks across a parts refresh, dropping parts that are gone', async () => {
   const id = await setUp('Used');
-  await saveMissing(db, '10497-1', [{ partNo: '3001', colorId: 7, type: 'PART', qty: 6 }, { partNo: 'sp047', colorId: null, type: 'MINIFIG', qty: 1 }]);
+  await saveMissing(db, '10497-1', null, [{ partNo: '3001', colorId: 7, type: 'PART', qty: 6 }, { partNo: 'sp047', colorId: null, type: 'MINIFIG', qty: 1 }]);
   await replaceParts(db, id, [part('3001', 7, 4), part('3023', 86, 36)]); // minifig gone, fewer bricks
-  const m = await listMissing(db, id);
+  const m = await listMissing(db, id, (await svc.getSet(db, '10497-1'))!.copies[0].id);
   expect(m.items.map((i) => [i.partNo, i.qty])).toEqual([['3001', 4]]);
   expect((await svc.getSet(db, '10497-1'))!.missingPct).toBe(10); // 4 of 40
 });
 
 it('clears Missing % when nothing is marked, and the form cannot override computed values', async () => {
   await setUp('Used');
-  await saveMissing(db, '10497-1', [{ partNo: '3001', colorId: 7, type: 'PART', qty: 10 }]);
+  await saveMissing(db, '10497-1', null, [{ partNo: '3001', colorId: 7, type: 'PART', qty: 10 }]);
   await svc.editSet(db, { setNo: '10497-1', missingPct: 50 }, null);
   expect((await svc.getSet(db, '10497-1'))!.missingPct).toBe(10.2);
-  await saveMissing(db, '10497-1', []);
+  await saveMissing(db, '10497-1', null, []);
   expect((await svc.getSet(db, '10497-1'))!).toMatchObject({ missingPct: null, estValue: 100, condition: 'Partial', missingMarked: 0 });
 });
 
 it('exports the missing parts as a BrickLink Wanted List', async () => {
   await setUp('Used');
-  await saveMissing(db, '10497-1', [{ partNo: '3001', colorId: 7, type: 'PART', qty: 6 }, { partNo: 'sp047', colorId: null, type: 'MINIFIG', qty: 1 }]);
+  await saveMissing(db, '10497-1', null, [{ partNo: '3001', colorId: 7, type: 'PART', qty: 6 }, { partNo: 'sp047', colorId: null, type: 'MINIFIG', qty: 1 }]);
   const w = (await missingWantedList(db, '10497-1'))!;
   expect(w.items).toBe(2);
   expect(w.xml).toContain('<!-- Missing parts for Galaxy Explorer (10497) -->');

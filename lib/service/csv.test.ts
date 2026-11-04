@@ -30,8 +30,11 @@ it('imports the Google Sheet tabs and round-trips its own export', async () => {
   ]);
   expect(await listLocations(db)).toContain('Out'); // unknown locations are added
 
-  expect(await importCsv(db, setsCsv(rows))).toMatchObject({ ok: true, count: 2 }); // idempotent
+  expect(rows[1].copies.map((c) => [c.status, c.condition, c.location, c.missingPct])).toEqual([['sealed', 'New', 'Storage', 25], ['sealed', 'New', 'Storage', 25]]);
+  expect(await importCsv(db, setsCsv(rows))).toMatchObject({ ok: true, count: 3 }); // one row per copy, idempotent
   expect(await listSets(db)).toEqual(rows);
+  expect(await importCsv(db, sheet.split('\n').slice(0, 3).join('\n'))).toMatchObject({ ok: true, count: 2 }); // the sheet again: same copy counts
+  expect((await listSets(db)).map((r) => r.qty)).toEqual([1, 2]);
 
   expect(await importCsv(db, 'Date,Sets,Copies,Est. Value,Avg Sold,Pieces\n2026-10-25,2,3,100,120,2000\nbad,1,1,1,1,1')).toEqual({ ok: true, kind: 'history', count: 1 });
   expect(await listHistory(db)).toEqual([{ date: '2026-10-25', sets: 2, copies: 3, estValue: 100, avgSold: 120, pieces: 2000 }]);

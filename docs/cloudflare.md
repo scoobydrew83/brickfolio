@@ -110,6 +110,8 @@ The Worker name in the dashboard must match `name` in `wrangler.jsonc`. Secrets 
 
 ## Notes
 
+- **Share links:** to let people without Access open a share link, add Access applications for the same hostname with paths `share`, `_next/static` and `_next/image`, each with a **Bypass / Everyone** policy. See [Share a read-only link](install.md#share-a-read-only-link).
+
 - **Sync schedule:** `triggers.crons` in `wrangler.jsonc`, in UTC (default `17 4 * * *`, 04:17 UTC). The cron calls `POST /api/v1/sync` with `CRON_SECRET`. `TZ` in `vars` sets the time zone for history dates.
 - **Images:** set photos are resized by the Cloudflare Images binding (`IMAGES`). The free plan includes a monthly allowance of transformations.
 - **Backups:** D1 has Time Travel (point-in-time restore for 30 days). For a file copy: `npx wrangler d1 export brickfolio --remote --output backup.sql`.

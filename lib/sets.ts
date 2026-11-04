@@ -8,8 +8,52 @@ export type Condition = (typeof CONDITIONS)[number];
 /** Default storage locations for a new database. Users edit the list in Settings. */
 export const DEFAULT_LOCATIONS = ['Display', 'Storage', 'Sell'] as const;
 export const REGISTERED = ['Y', 'No QR'] as const;
+/** What a physical copy is: still sealed, built, being built, or taken apart (parted out copies aren't counted). */
+export const STATUSES = ['sealed', 'built', 'in_progress', 'parted_out'] as const;
+export type CopyStatus = (typeof STATUSES)[number];
+export const STATUS_LABEL: Record<CopyStatus, string> = { sealed: 'Sealed', built: 'Built', in_progress: 'In progress', parted_out: 'Parted out' };
 
-/** One set in the collection, as the UI and API see it. Prices are per copy. */
+/** One physical copy of a set. Money is in the collection currency. */
+export type CopyRow = {
+  id: number;
+  setId: number;
+  collectionId: number | null;
+  status: CopyStatus;
+  condition: Condition;
+  missingPct: number | null;
+  location: string | null;
+  acquiredDate: string | null; // YYYY-MM-DD
+  buildDate: string | null; // YYYY-MM-DD
+  pricePaid: number | null;
+  tax: number | null;
+  shipping: number | null;
+  gwp: boolean; // gift with purchase: cost basis 0
+  estValue: number | null;
+  estGuide: 'N' | 'U' | null; // the price guide estValue came from
+  notes: string | null;
+  missingMarked?: number; // pieces marked missing on this copy; when > 0, its Missing % is computed from them
+};
+
+/** Validated copy input. `undefined` = leave alone, `null` = clear. */
+export type CopyInput = {
+  status?: CopyStatus;
+  condition?: Condition;
+  missingPct?: number | null;
+  location?: string | null;
+  acquiredDate?: string | null;
+  buildDate?: string | null;
+  pricePaid?: number | null;
+  tax?: number | null;
+  shipping?: number | null;
+  gwp?: boolean;
+  notes?: string | null;
+};
+
+/**
+ * One set in the collection, as the UI and API see it. Prices are per copy. `qty`, `condition`, `location` and
+ * `missingPct` are derived from the copies: the count of copies that aren't parted out, and the shared value when
+ * every such copy has the same one (else null, with `mixed` set).
+ */
 export type SetRow = {
   id: number;
   setNo: string; // BrickLink item number, always with a suffix: 10280-1
@@ -29,10 +73,17 @@ export type SetRow = {
   minSold: number | null;
   maxSold: number | null;
   qtySold: number | null;
-  estValue: number | null;
+  estValue: number | null; // per copy: valueTotal ÷ qty
   blError: string | null;
   lastUpdated: string | null; // ISO time of the last BrickLink lookup
   notes: string | null;
+  copies: CopyRow[];
+  mixed: { condition: boolean; location: boolean };
+  valueTotal: number | null; // Est. Value of all copies that aren't parted out
+  costBasis: number | null; // over the copies that have one
+  costCovered: number; // how many copies have a cost basis
+  gain: number | null; // value − cost basis, over the covered copies
+  partedOut: number; // copies parted out (not in qty or value)
   // From Rebrickable when REBRICKABLE_API_KEY is set; null until matched
   theme?: string | null; // top-level theme, e.g. Icons
   subtheme?: string | null; // e.g. Botanical Collection
@@ -47,7 +98,10 @@ export type SetRow = {
   retired?: boolean | null;
 };
 
-/** Validated input for add/edit. `undefined` = leave alone, `null` = clear. */
+/**
+ * Validated input for add/edit. `undefined` = leave alone, `null` = clear. `qty`, `condition`, `location` and
+ * `missingPct` act on the copies (see lib/service/sets.ts); `copy` carries the other copy fields for a new copy.
+ */
 export type SetInput = {
   setNo: string;
   name?: string;
@@ -57,6 +111,7 @@ export type SetInput = {
   missingPct?: number | null;
   qty?: number;
   notes?: string | null;
+  copy?: CopyInput;
 };
 
 /** null, '' and non-numbers count as 0 for sums. */
@@ -132,6 +187,143 @@ export function parseSetInput(
   return { ok: true, value };
 }
 
+/**
+ * parseSetInput plus the copy fields of a new copy (status, dates, cost, gift with purchase, `copyNotes`).
+ * Condition, location and Missing % stay on the set input; `notes` are the set's notes.
+ */
+export function parseSetWithCopy(form: Record<string, unknown>, partial: boolean, locations: readonly string[]): ReturnType<typeof parseSetInput> {
+  const p = parseSetInput(form, partial, locations);
+  if (!p.ok) return p;
+  const { condition: _c, location: _l, missingPct: _m, notes: _n, copyNotes, ...rest } = form;
+  const c = parseCopyInput({ ...rest, notes: copyNotes }, true, locations);
+  if (!c.ok) return c;
+  if (c.value.status === 'sealed' && p.value.condition === 'Partial') return { ok: false, error: "A sealed copy can't be Partial." };
+  if (Object.keys(c.value).length) p.value.copy = c.value;
+  return p;
+}
+
+const MONEY_MAX = 1_000_000;
+const isDate = (v: string) => /^\d{4}-\d{2}-\d{2}$/.test(v) && !Number.isNaN(Date.parse(v + 'T00:00:00Z')) && new Date(v + 'T00:00:00Z').toISOString().startsWith(v);
+const truthy = (v: unknown) => v === true || v === 1 || ['on', 'true', '1', 'yes', 'y'].includes(String(v).trim().toLowerCase());
+
+/**
+ * Validates one copy's fields, from a form or JSON. `partial` = edit (only what's given). Rules: sealed means New
+ * (and can't be Partial), money is 0–1,000,000, dates are YYYY-MM-DD, and a gift with purchase costs 0.
+ */
+export function parseCopyInput(
+  form: Record<string, unknown>,
+  partial: boolean,
+  locations: readonly string[],
+): { ok: true; value: CopyInput } | { ok: false; error: string } {
+  const str = (k: string) => (form[k] === undefined || form[k] === null ? undefined : String(form[k]).trim());
+  const value: CopyInput = {};
+  const status = str('status');
+  if (status !== undefined && status !== '') {
+    if (!(STATUSES as readonly string[]).includes(status)) return { ok: false, error: `Status must be one of: ${STATUSES.join(', ')}` };
+    value.status = status as CopyStatus;
+  }
+  const condition = str('condition');
+  if (condition !== undefined && condition !== '') {
+    if (!(CONDITIONS as readonly string[]).includes(condition)) return { ok: false, error: `Condition must be one of: ${CONDITIONS.join(', ')}` };
+    value.condition = condition as Condition;
+  }
+  if (value.status === 'sealed') {
+    if (value.condition === 'Partial') return { ok: false, error: "A sealed copy can't be Partial." };
+    value.condition = 'New';
+  }
+  if (!partial) {
+    value.status ??= value.condition === 'New' ? 'sealed' : 'built';
+    value.condition ??= value.status === 'sealed' ? 'New' : 'Used';
+  }
+  const location = str('location');
+  if (location !== undefined) {
+    if (location && !locations.includes(location)) return { ok: false, error: `Location must be one of: ${locations.join(', ')}` };
+    value.location = location || null;
+  }
+  const missing = str('missingPct');
+  if (missing !== undefined) {
+    if (missing === '') value.missingPct = null;
+    else {
+      const m = Number(missing);
+      if (!Number.isFinite(m) || m < 0 || m > 100) return { ok: false, error: 'Missing % must be 0–100' };
+      value.missingPct = m;
+    }
+  }
+  for (const [k, label] of [['acquiredDate', 'Acquired date'], ['buildDate', 'Build date']] as const) {
+    const v = str(k);
+    if (v === undefined) continue;
+    if (v && !isDate(v)) return { ok: false, error: `${label} must be a date like 2026-11-04` };
+    value[k] = v || null;
+  }
+  for (const [k, label] of [['pricePaid', 'Price paid'], ['tax', 'Tax'], ['shipping', 'Shipping']] as const) {
+    const v = str(k);
+    if (v === undefined) continue;
+    if (v === '') { value[k] = null; continue; }
+    const n = Number(v);
+    if (!Number.isFinite(n) || n < 0 || n > MONEY_MAX) return { ok: false, error: `${label} must be 0–1,000,000` };
+    value[k] = Math.round(n * 100) / 100;
+  }
+  if (form.gwp !== undefined && form.gwp !== null && form.gwp !== '') value.gwp = truthy(form.gwp);
+  else if (!partial) value.gwp = false;
+  if (value.gwp) value.pricePaid = 0;
+  const notes = str('notes');
+  if (notes !== undefined) {
+    if (notes.length > 2000) return { ok: false, error: 'Notes are too long' };
+    value.notes = notes || null;
+  }
+  return { ok: true, value };
+}
+
+/** Copies that count: everything except parted out. */
+export const isActive = (c: Pick<CopyRow, 'status'>) => c.status !== 'parted_out';
+
+/** BrickLink guide for a copy: new sold prices when sealed or New, used otherwise. */
+export const copyGuide = (c: Pick<CopyRow, 'status' | 'condition'>): 'N' | 'U' => (c.status === 'sealed' || c.condition === 'New' ? 'N' : 'U');
+
+/** What a copy cost: 0 for a gift with purchase, null when nothing is known, else paid + tax + shipping. */
+export function costBasis(c: Pick<CopyRow, 'gwp' | 'pricePaid' | 'tax' | 'shipping'>): number | null {
+  if (c.gwp) return 0;
+  if (c.pricePaid == null && c.tax == null && c.shipping == null) return null;
+  return Math.round((num(c.pricePaid) + num(c.tax) + num(c.shipping)) * 100) / 100;
+}
+
+/** The one guide fetched for a set (until both are): the guide of most of its active copies. Ties go to used. */
+export function setGuide(copies: Pick<CopyRow, 'status' | 'condition'>[]): 'N' | 'U' {
+  const pool = copies.some(isActive) ? copies.filter(isActive) : copies;
+  const n = pool.filter((c) => copyGuide(c) === 'N').length;
+  return n > pool.length - n ? 'N' : 'U';
+}
+
+const round2 = (v: number) => Math.round(v * 100) / 100;
+
+/** A set row with its derived fields (qty, shared condition/location/Missing %, value, cost, gain) worked out from `copies`. */
+export function withCopies<T extends Omit<SetRow, 'copies' | 'mixed' | 'valueTotal' | 'costBasis' | 'costCovered' | 'gain' | 'partedOut' | 'qty' | 'condition' | 'location' | 'missingPct' | 'estValue'>>(
+  base: T, copies: CopyRow[],
+): T & Pick<SetRow, 'copies' | 'mixed' | 'valueTotal' | 'costBasis' | 'costCovered' | 'gain' | 'partedOut' | 'qty' | 'condition' | 'location' | 'missingPct' | 'estValue'> {
+  const act = copies.filter(isActive);
+  const shared = <K extends 'condition' | 'location' | 'missingPct'>(k: K) => {
+    const vals = new Set(act.map((c) => c[k] ?? null));
+    return { value: vals.size === 1 ? ([...vals][0] as CopyRow[K] | null) : null, mixed: vals.size > 1 };
+  };
+  const cond = shared('condition'), loc = shared('location'), miss = shared('missingPct');
+  const valued = act.filter((c) => c.estValue != null);
+  const valueTotal = valued.length ? round2(valued.reduce((t, c) => t + num(c.estValue), 0)) : null;
+  const covered = act.filter((c) => costBasis(c) != null);
+  const cost = covered.length ? round2(covered.reduce((t, c) => t + num(costBasis(c)), 0)) : null;
+  const gain = covered.length ? round2(covered.reduce((t, c) => t + num(c.estValue) - num(costBasis(c)), 0)) : null;
+  return {
+    ...base, copies, qty: act.length, condition: cond.value as Condition | null, location: loc.value as string | null, missingPct: miss.value as number | null,
+    mixed: { condition: cond.mixed, location: loc.mixed }, estValue: valueTotal === null || !act.length ? null : round2(valueTotal / act.length),
+    valueTotal, costBasis: cost, costCovered: covered.length, gain, partedOut: copies.length - act.length,
+  };
+}
+
+/** "2 sealed · 1 built" for a set's active copies (parted out ones are listed last). */
+export function copiesSummary(copies: Pick<CopyRow, 'status'>[]): string {
+  const n = (s: CopyStatus) => copies.filter((c) => c.status === s).length;
+  return STATUSES.filter((s) => n(s)).map((s) => `${n(s)} ${STATUS_LABEL[s].toLowerCase()}`).join(' · ');
+}
+
 /** Validates a location name for Settings. */
 export function parseLocation(raw: unknown): { ok: true; value: string } | { ok: false; error: string } {
   const v = String(raw ?? '').trim();
@@ -140,44 +332,61 @@ export function parseLocation(raw: unknown): { ok: true; value: string } | { ok:
   return { ok: true, value: v };
 }
 
-export type Filters = { q: string; location: string; condition: string; theme?: string; availability?: string; sort: 'setNo' | 'value' | 'name' | 'year' };
+export type Filters = { q: string; location: string; condition: string; status?: string; theme?: string; availability?: string; sort: 'setNo' | 'value' | 'name' | 'year' };
+
+/** Whether any copy matches a filter value ('(none)' = blank). */
+const anyCopy = (s: SetRow, k: 'location' | 'condition' | 'status', v: string) =>
+  s.copies.some((c) => (v === '(none)' ? !c[k] : c[k] === v));
 
 export function filterSets(sets: SetRow[], f: Filters): SetRow[] {
   const q = f.q.trim().toLowerCase();
   const hit = (s: SetRow) =>
-    (!q || [s.setNo, s.name, s.blName, s.location, s.year, s.theme, s.subtheme].some((v) => String(v ?? '').toLowerCase().includes(q))) &&
     (!f.theme || (f.theme === '(none)' ? !s.theme : s.theme === f.theme)) &&
-    (!f.location || (f.location === '(none)' ? !s.location : s.location === f.location)) &&
-    (!f.condition || (f.condition === '(none)' ? !s.condition : s.condition === f.condition)) &&
+    (!q || s.copies.some((c) => c.location?.toLowerCase().includes(q) || c.notes?.toLowerCase().includes(q)) || [s.setNo, s.name, s.blName, s.year, s.theme, s.subtheme].some((v) => String(v ?? '').toLowerCase().includes(q))) &&
+    (!f.location || anyCopy(s, 'location', f.location)) &&
+    (!f.condition || anyCopy(s, 'condition', f.condition)) &&
+    (!f.status || anyCopy(s, 'status', f.status)) &&
     (!f.availability || (availability(s) ?? '(none)') === f.availability);
   const by: Record<Filters['sort'], (a: SetRow, b: SetRow) => number> = {
     setNo: (a, b) => a.setNo.localeCompare(b.setNo, undefined, { numeric: true }),
-    value: (a, b) => num(b.estValue) - num(a.estValue),
+    value: (a, b) => num(b.valueTotal) - num(a.valueTotal),
     name: (a, b) => a.name.localeCompare(b.name),
     year: (a, b) => num(b.year) - num(a.year),
   };
   return sets.filter(hit).sort(by[f.sort]);
 }
 
+/** Collection totals over copies that aren't parted out. A set whose copies are all parted out isn't counted. */
 export function totals(sets: SetRow[]) {
+  const covered = sets.filter((s) => s.costCovered > 0);
   return {
-    count: sets.length,
+    count: sets.filter((s) => s.qty > 0).length,
     copies: sets.reduce((t, s) => t + s.qty, 0),
-    estValue: sets.reduce((t, s) => t + num(s.estValue) * s.qty, 0), // values are per copy
+    estValue: sets.reduce((t, s) => t + num(s.valueTotal), 0),
     avgSold: sets.reduce((t, s) => t + num(s.avgSold) * s.qty, 0),
     minSold: sets.reduce((t, s) => t + num(s.minSold) * s.qty, 0),
     maxSold: sets.reduce((t, s) => t + num(s.maxSold) * s.qty, 0),
     pieces: sets.reduce((t, s) => t + num(s.pieces) * s.qty, 0),
     errors: sets.filter((s) => s.blError).length,
+    costBasis: covered.length ? covered.reduce((t, s) => t + num(s.costBasis), 0) : null,
+    gain: covered.length ? covered.reduce((t, s) => t + num(s.gain), 0) : null,
+    partedOut: sets.reduce((t, s) => t + s.partedOut, 0),
   };
 }
 
-/** Totals per location, condition, theme or availability, biggest Est. Value first. Blank = '(none)', the same value the filters use. */
+/**
+ * Totals per location, condition, theme or availability, biggest Est. Value first. Blank = '(none)', the same value
+ * the filters use. Location and condition group copies: a set with copies in two places counts in both, split.
+ */
 export function groupTotals(sets: SetRow[], key: 'location' | 'condition' | 'theme' | 'availability') {
   const groups = new Map<string, SetRow[]>();
+  const add = (k: string, s: SetRow) => groups.set(k, [...(groups.get(k) ?? []), s]);
   for (const s of sets) {
-    const k = (key === 'availability' ? availability(s) : s[key]) || '(none)';
-    groups.set(k, [...(groups.get(k) ?? []), s]);
+    if (key === 'location' || key === 'condition') {
+      const byKey = new Map<string, CopyRow[]>();
+      for (const c of s.copies.filter(isActive)) byKey.set(c[key] || '(none)', [...(byKey.get(c[key] || '(none)') ?? []), c]);
+      for (const [k, cs] of byKey) add(k, withCopies(s, cs));
+    } else add((key === 'availability' ? availability(s) : s[key]) || '(none)', s);
   }
   return [...groups].map(([label, rows]) => ({ label, ...totals(rows) })).sort((a, b) => b.estValue - a.estValue);
 }
@@ -197,7 +406,7 @@ export const money = (v: unknown, currency = 'USD') =>
     ? '—'
     : num(v).toLocaleString('en-US', { style: 'currency', currency, minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-/** BrickLink price guide to use: new sold prices for New sets, used for Used and Partial. */
+/** BrickLink price guide for a condition: new sold prices for New, used for Used and Partial. For copies use copyGuide. */
 export const priceGuide = (condition: Condition | null): 'N' | 'U' => (condition === 'New' ? 'N' : 'U');
 
 /** Est. Value per copy, as the sheet's formula had it: average sold price less Missing %, for any condition. */

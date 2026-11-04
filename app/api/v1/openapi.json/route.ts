@@ -6,6 +6,9 @@ const ok = (schema: object, description = 'OK') => ({ description, content: { 'a
 const err = { description: 'Error', content: { 'application/json': { schema: ref('Error') } } };
 const setNo = { name: 'setNo', in: 'path', required: true, schema: { type: 'string', example: '10280-1' } };
 const nullable = (type: string) => ({ type: [type, 'null'] });
+const copyQ = { name: 'copy', in: 'query', required: false, schema: { type: 'integer' }, description: 'Copy id. Defaults to the only copy, the only Partial copy, or the first; required for a PUT when that is ambiguous.' };
+const money = { ...nullable('number'), minimum: 0, maximum: 1_000_000 };
+const date = { ...nullable('string'), format: 'date' };
 
 const spec = {
   openapi: '3.1.0',
@@ -19,12 +22,15 @@ const spec = {
       Set: {
         type: 'object',
         properties: {
-          id: { type: 'integer' }, setNo: { type: 'string' }, name: { type: 'string' }, qty: { type: 'integer' },
-          location: nullable('string'), condition: { enum: ['New', 'Used', 'Partial', null] }, registered: nullable('string'),
-          missingPct: nullable('number'), notes: nullable('string'), blName: nullable('string'), year: nullable('integer'),
+          id: { type: 'integer' }, setNo: { type: 'string' }, name: { type: 'string' }, qty: { type: 'integer', description: 'Copies that are not parted out' },
+          location: { ...nullable('string'), description: 'Shared by every copy, else null (see mixed)' }, condition: { enum: ['New', 'Used', 'Partial', null], description: 'Shared by every copy, else null' }, registered: nullable('string'),
+          missingPct: { ...nullable('number'), description: 'Shared by every copy, else null' }, notes: nullable('string'), blName: nullable('string'), year: nullable('integer'),
           categoryId: nullable('integer'), imageUrl: nullable('string'), pieces: nullable('integer'), partLots: nullable('integer'),
           avgSold: nullable('number'), minSold: nullable('number'), maxSold: nullable('number'), qtySold: nullable('integer'),
-          estValue: { ...nullable('number'), description: 'Per copy: avg sold for the condition, less Missing % on Partial sets' },
+          estValue: { ...nullable('number'), description: 'Per copy: valueTotal ÷ qty' },
+          copies: { type: 'array', items: ref('Copy') }, mixed: { type: 'object', properties: { condition: { type: 'boolean' }, location: { type: 'boolean' } } },
+          valueTotal: { ...nullable('number'), description: 'Est. Value of every copy that is not parted out' },
+          costBasis: { ...nullable('number'), description: 'Sum over copies with a cost' }, costCovered: { type: 'integer' }, gain: { ...nullable('number'), description: 'Value − cost basis, over the copies with a cost' }, partedOut: { type: 'integer' },
           blError: nullable('string'), lastUpdated: nullable('string'),
           theme: { ...nullable('string'), description: 'Top-level Rebrickable theme (needs REBRICKABLE_API_KEY)' },
           subtheme: nullable('string'), minifigs: nullable('integer'), hasModel: { type: 'boolean' }, missingMarked: { type: 'integer' },
@@ -36,6 +42,27 @@ const spec = {
           name: { type: 'string', maxLength: 120 }, condition: { enum: ['New', 'Used', 'Partial'] }, location: nullable('string'),
           registered: { enum: ['Y', 'No QR', null] }, missingPct: { ...nullable('number'), minimum: 0, maximum: 100 },
           qty: { type: 'integer', minimum: 1, maximum: 999 }, notes: nullable('string'),
+          status: { enum: ['sealed', 'built', 'in_progress', 'parted_out'] }, acquiredDate: date, buildDate: date, pricePaid: money, tax: money, shipping: money, gwp: { type: 'boolean' }, copyNotes: nullable('string'),
+        },
+        description: 'Condition, location and Missing % apply to the copies: on add, to the new copies; on PATCH, to the only copy (409 with several). qty adds or removes copies. Copy fields (status, dates, cost, gwp, copyNotes) go on new copies.',
+      },
+      Copy: {
+        type: 'object',
+        properties: {
+          id: { type: 'integer' }, setId: { type: 'integer' }, collectionId: nullable('integer'), status: { enum: ['sealed', 'built', 'in_progress', 'parted_out'] },
+          condition: { enum: ['New', 'Used', 'Partial'] }, missingPct: nullable('number'), location: nullable('string'), acquiredDate: date, buildDate: date,
+          pricePaid: nullable('number'), tax: nullable('number'), shipping: nullable('number'), gwp: { type: 'boolean', description: 'Gift with purchase: cost basis 0' },
+          estValue: nullable('number'), estGuide: { enum: ['N', 'U', null], description: "BrickLink guide the value came from; differs from the copy's own guide when priced from the other one" },
+          notes: nullable('string'), missingMarked: { type: 'integer' },
+        },
+      },
+      CopyInput: {
+        type: 'object',
+        description: 'Sealed means New (and cannot be Partial). gwp sets pricePaid to 0.',
+        properties: {
+          status: { enum: ['sealed', 'built', 'in_progress', 'parted_out'] }, condition: { enum: ['New', 'Used', 'Partial'] }, location: nullable('string'),
+          missingPct: { ...nullable('number'), minimum: 0, maximum: 100 }, acquiredDate: date, buildDate: date, pricePaid: money, tax: money, shipping: money,
+          gwp: { type: 'boolean' }, notes: nullable('string'),
         },
       },
       Sync: { type: ['object', 'null'], properties: { running: { type: 'boolean' }, startedAt: { type: 'string' }, finishedAt: nullable('string'), total: { type: 'integer' }, processed: { type: 'integer' }, errors: { type: 'integer' }, message: nullable('string') } },
@@ -58,7 +85,26 @@ const spec = {
       parameters: [setNo],
       get: { summary: 'Get one set', responses: { 200: ok({ type: 'object', properties: { set: ref('Set') } }), 404: err } },
       patch: { summary: 'Edit a set', requestBody: { required: true, content: { 'application/json': { schema: ref('SetInput') } } }, responses: { 200: ok({ type: 'object', properties: { set: ref('Set') } }), 400: err, 404: err } },
-      delete: { summary: 'Remove one copy', responses: { 200: ok({ type: 'object', properties: { remaining: { type: 'integer' } } }), 404: err } },
+      delete: { summary: 'Remove the newest copy (the set goes with its last one)', responses: { 200: ok({ type: 'object', properties: { remaining: { type: 'integer' } } }), 404: err } },
+    },
+    '/share-links': {
+      get: { summary: 'List read-only share links (never the link or its hash)', responses: { 200: ok({ type: 'object', properties: { shareLinks: { type: 'array', items: { type: 'object' } } } }) } },
+      post: {
+        summary: 'Create a read-only share link; the URL is returned once',
+        requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['name'], properties: { name: { type: 'string', maxLength: 60 }, showValues: { type: 'boolean' }, showLocations: { type: 'boolean' }, showNotes: { type: 'boolean' }, showMinifigs: { type: 'boolean', default: true }, expires: { type: 'string', description: "'never', a number of days, or a date (YYYY-MM-DD), at most 5 years out" } } } } } },
+        responses: { 201: ok({ type: 'object', properties: { id: { type: 'integer' }, url: { type: 'string' } } }, 'Created'), 400: err },
+      },
+    },
+    '/share-links/{id}': { delete: { summary: 'Revoke a share link', parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }], responses: { 200: ok({ type: 'object' }), 404: err } } },
+    '/sets/{setNo}/copies': {
+      parameters: [setNo],
+      get: { summary: "The set's copies", responses: { 200: ok({ type: 'object', properties: { copies: { type: 'array', items: ref('Copy') } } }), 404: err } },
+      post: { summary: 'Add a copy', requestBody: { required: true, content: { 'application/json': { schema: ref('CopyInput') } } }, responses: { 201: ok({ type: 'object', properties: { set: ref('Set'), copyId: { type: 'integer' } } }, 'Added'), 400: err, 404: err } },
+    },
+    '/sets/{setNo}/copies/{id}': {
+      parameters: [setNo, { name: 'id', in: 'path', required: true, schema: { type: 'integer' } }],
+      patch: { summary: 'Edit a copy', requestBody: { required: true, content: { 'application/json': { schema: ref('CopyInput') } } }, responses: { 200: ok({ type: 'object', properties: { set: ref('Set') } }), 400: err, 404: err } },
+      delete: { summary: 'Remove a copy (the set goes with its last one)', responses: { 200: ok({ type: 'object', properties: { remaining: { type: 'integer' } } }), 404: err } },
     },
     '/sets/{setNo}/lookup': { parameters: [setNo], post: { summary: 'Re-run the BrickLink lookup', responses: { 200: ok({ type: 'object', properties: { set: ref('Set') } }), 400: err, 404: err } } },
     '/sets/{setNo}/parts': { parameters: [setNo], get: { summary: "The set's parts list", responses: { 200: ok({ type: 'object', properties: { parts: { type: 'array', items: ref('Part') }, pieces: nullable('integer'), partLots: nullable('integer') } }), 404: err } } },
@@ -82,11 +128,11 @@ const spec = {
       delete: { summary: 'Remove the model', responses: { 200: ok({ type: 'object' }), 404: err } },
     },
     '/sets/{setNo}/missing': {
-      parameters: [setNo],
-      get: { summary: 'Parts marked missing from a Partial set, with totals and the Missing % they give', responses: { 200: ok({ type: 'object' }), 404: err } },
+      parameters: [setNo, copyQ],
+      get: { summary: 'Parts marked missing from a copy, with totals and the Missing % they give', responses: { 200: ok({ type: 'object' }), 404: err } },
       put: { summary: 'Replace the missing parts ({ items: [{ partNo, colorId, type, qty }] }); an empty list clears them', requestBody: { content: { 'application/json': { schema: { type: 'object', properties: { items: { type: 'array', items: { type: 'object', properties: { partNo: { type: 'string' }, colorId: nullable('integer'), type: { type: 'string' }, qty: { type: 'integer' } } } } } } } } }, responses: { 200: ok({ type: 'object' }), 400: err, 404: err } },
     },
-    '/sets/{setNo}/missing/wanted.xml': { parameters: [setNo], get: { summary: 'The missing parts as a BrickLink Wanted List (XML)', responses: { 200: { description: 'Wanted List XML', content: { 'application/xml': {} } }, 404: err } } },
+    '/sets/{setNo}/missing/wanted.xml': { parameters: [setNo, copyQ], get: { summary: "A copy's missing parts as a BrickLink Wanted List (XML)", responses: { 200: { description: 'Wanted List XML', content: { 'application/xml': {} } }, 404: err } } },
     '/ldraw/{path}': { get: { summary: 'A file from the LDraw parts library (for the 3D view)', parameters: [{ name: 'path', in: 'path', required: true, schema: { type: 'string' } }], responses: { 200: { description: 'LDraw file', content: { 'text/plain': {} } }, 400: err, 404: err } } },
     '/sets/{setNo}/prices': { parameters: [setNo], get: { summary: 'Sold prices per day', responses: { 200: ok({ type: 'object' }), 404: err } } },
     '/sync': {

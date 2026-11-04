@@ -1,9 +1,10 @@
 // Barcode writes: barcodes you confirm, corrections, and adding a batch of scanned sets. Adding goes through the
 // existing collection and wishlist services (quickAdd, addWish), so their rules apply unchanged.
-import { and, eq, inArray, lt, sql } from 'drizzle-orm';
+import { and, eq, lt, sql } from 'drizzle-orm';
 import type { Lookup, MinifigLookup } from '../bricklink/client';
 import type { DB } from '../db/types';
-import { barcodeMisses, idempotencyKeys, setBarcodes, sets } from '../db/schema';
+import { barcodeMisses, idempotencyKeys, sets } from '../db/schema';
+import { barcodeRows, forgetBarcodeLinks, saveBarcode } from '../identifiers/barcodes';
 import { parseBarcode, type BarcodeFormat } from '../barcode/gtin';
 import { CONDITIONS, placeholderName, setNo as fullSetNo, type Condition } from '../sets';
 import { listLocations, quickAdd, type Result } from './sets';
@@ -24,9 +25,7 @@ export async function rememberBarcode(db: DB, raw: unknown, no: unknown, hint?: 
   if (!SET_NO.test(n)) return { ok: false, status: 400, error: 'Set number must look like 10280 or 10280-1' };
   const setNo = fullSetNo(n);
   const t = nowIso();
-  await db.insert(setBarcodes)
-    .values({ barcode: b.raw, format: b.format, gtin: b.gtin, setNo, source: 'user', verified: true, verifiedAt: t })
-    .onConflictDoUpdate({ target: [setBarcodes.gtin, setBarcodes.setNo, setBarcodes.source], set: { verified: true, verifiedAt: t, lastSeenAt: t, updatedAt: t } });
+  await saveBarcode(db, { barcode: b.raw, format: b.format, gtin: b.gtin, setNo, source: 'user', verified: true, verifiedAt: t }, 'seen');
   await db.delete(barcodeMisses).where(eq(barcodeMisses.gtin, b.gtin));
   return { ok: true, gtin: b.gtin, setNo };
 }
@@ -37,23 +36,21 @@ export async function forgetBarcode(db: DB, raw: unknown, no: unknown): Promise<
   if (!b.ok) return { ok: false, status: 400, error: b.error };
   const n = String(no ?? '').trim();
   if (!SET_NO.test(n)) return { ok: false, status: 400, error: 'Set number must look like 10280 or 10280-1' };
-  const r = await db.delete(setBarcodes).where(and(eq(setBarcodes.gtin, b.gtin), eq(setBarcodes.setNo, fullSetNo(n)))).returning({ id: setBarcodes.id }).all();
-  return r.length ? { ok: true, removed: r.length } : { ok: false, status: 404, error: 'That barcode isn’t saved for that set.' };
+  const removed = await forgetBarcodeLinks(db, b.gtin, fullSetNo(n));
+  return removed ? { ok: true, removed } : { ok: false, status: 404, error: 'That barcode isn’t saved for that set.' };
 }
 
 /**
  * Saves barcodes Brickset sent with its set details (source 'brickset'), so sets you own or want scan without any
  * outside call. Existing rows are left alone; invalid codes are skipped.
  */
-export async function saveBricksetBarcodes(db: DB, found: { setNo: string; ean?: string | null; upc?: string | null }[]): Promise<number> {
+export async function saveBarcodesFromBrickset(db: DB, found: { setNo: string; ean?: string | null; upc?: string | null }[]): Promise<number> {
   let saved = 0;
   for (const s of found) {
     for (const code of [s.ean, s.upc]) {
       const b = code ? parseBarcode(code) : null;
       if (!b?.ok) continue;
-      const r = await db.insert(setBarcodes).values({ barcode: b.raw, format: b.format, gtin: b.gtin, setNo: s.setNo, source: 'brickset' })
-        .onConflictDoNothing().returning({ id: setBarcodes.id }).all();
-      saved += r.length;
+      if (await saveBarcode(db, { barcode: b.raw, format: b.format, gtin: b.gtin, setNo: s.setNo, source: 'brickset' })) saved++;
     }
   }
   return saved;
@@ -175,7 +172,7 @@ export async function addScanned(
  */
 async function nameFromBarcodes(db: DB, nos: string[]) {
   if (!nos.length) return;
-  const known = await db.select().from(setBarcodes).where(and(inArray(setBarcodes.setNo, nos), sql`${setBarcodes.name} is not null`)).all();
+  const known = await barcodeRows(db, { setNo: nos, named: true });
   for (const k of known) {
     await db.update(sets).set({
       name: k.name!,

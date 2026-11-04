@@ -1,8 +1,8 @@
 import Image from 'next/image';
 import Link from 'next/link';
 import { Box, Pencil, Puzzle } from 'lucide-react';
-import { displayNo, num, type SetRow } from '@/lib/sets';
-import { RemoveButton, type RowActions } from './SetCard';
+import { copiesSummary, displayNo, num, type SetRow } from '@/lib/sets';
+import { locationLabel, RemoveButton, type RowActions } from './SetCard';
 import { Button, CONDITION_TONE, Chip, IconButton } from '../ui';
 
 const th = 'px-3 py-2 font-medium';
@@ -40,7 +40,7 @@ export function SetTable({ sets, onEdit, onParts, onRemove, onRetry, pending, mo
               <td className="px-3 py-2 text-base font-extrabold tabular-nums [font-stretch:112%]">
                 <Link href={`/sets/${encodeURIComponent(displayNo(s.setNo))}`} className="hover:text-link">{displayNo(s.setNo)}</Link>
               </td>
-              <td className={`${num_} font-bold`}>{s.qty}x</td>
+              <td className={`${num_} font-bold`} title={copiesSummary(s.copies)}>{s.qty}x</td>
               <td className="px-3 py-2">
                 <Link href={`/sets/${encodeURIComponent(displayNo(s.setNo))}`} className="font-medium hover:text-link hover:underline">{s.name}</Link>
                 {s.hasModel && (
@@ -56,15 +56,15 @@ export function SetTable({ sets, onEdit, onParts, onRemove, onRetry, pending, mo
                 )}
               </td>
               <td className="px-3 py-2 text-fg-3">{s.theme ?? ''}</td>
-              <td className="px-3 py-2 text-fg-2">{s.location ?? ''}</td>
+              <td className="px-3 py-2 text-fg-2">{s.location ?? (s.mixed.location ? locationLabel(s) : '')}</td>
               <td className="px-3 py-2">
-                {s.condition && <Chip tone={CONDITION_TONE[s.condition] ?? 'neutral'}>{s.condition}</Chip>}
+                {s.condition ? <Chip tone={CONDITION_TONE[s.condition] ?? 'neutral'}>{s.condition}</Chip> : s.mixed.condition ? <Chip>Mixed</Chip> : null}
                 {!!s.missingPct && <span className="ml-1.5 text-xs text-warn">{s.missingPct}% missing</span>}
               </td>
               <td className={num_}>{s.year ?? ''}</td>
               <td className={num_}>{s.pieces ? num(s.pieces).toLocaleString() : ''}</td>
               <td className={num_}>{money(s.avgSold)}</td>
-              <td className={`${num_} font-bold`}>{money(s.estValue)}</td>
+              <td className={`${num_} font-bold`} title={s.qty > 1 ? `${money(s.estValue)} each` : undefined}>{money(s.valueTotal)}</td>
               <td className="whitespace-nowrap px-2 py-1.5">
                 <span className="flex items-center justify-end">
                   <IconButton icon={Puzzle} label="Parts list" onClick={() => onParts(s)} />

@@ -2,7 +2,7 @@ import { expect, it } from 'vitest';
 import { createBrickset, toBsSet, type ApiSet } from './client';
 
 const galaxy: ApiSet = {
-  number: '10497', numberVariant: 1, availability: 'Retail', launchDate: '2022-08-01T00:00:00Z', exitDate: '2026-12-31T00:00:00Z',
+  setID: 32069, number: '10497', numberVariant: 1, availability: 'Retail', launchDate: '2022-08-01T00:00:00Z', exitDate: '2026-12-31T00:00:00Z',
   LEGOCom: { US: { retailPrice: 99.99, dateFirstAvailable: '2022-08-01T00:00:00Z' }, UK: { retailPrice: 89.99 }, DE: { retailPrice: 99.99 } },
 };
 const castle: ApiSet = { number: '6080', numberVariant: 1, availability: 'Retired', LEGOCom: {} };
@@ -10,7 +10,7 @@ const reply = (sets: ApiSet[]) => Response.json({ status: 'success', matches: se
 const params = (url: string) => JSON.parse(new URL(url).searchParams.get('params') ?? '{}');
 
 it('maps retail prices by currency, dates, and retirement', () => {
-  expect(toBsSet(galaxy, '2026-11-02')).toEqual({ setNo: '10497-1', retail: { USD: 99.99, GBP: 89.99, EUR: 99.99 }, launchDate: '2022-08-01', exitDate: '2026-12-31', retired: false, ean: null, upc: null });
+  expect(toBsSet(galaxy, '2026-11-02')).toEqual({ setNo: '10497-1', retail: { USD: 99.99, GBP: 89.99, EUR: 99.99 }, launchDate: '2022-08-01', exitDate: '2026-12-31', retired: false, ean: null, upc: null, bricksetId: 32069 });
   expect(toBsSet(galaxy, '2027-01-05').retired).toBe(true); // past its exit date
   expect(toBsSet(castle).retired).toBe(true);
   expect(toBsSet({ ...castle, barcode: { EAN: '5702015869935', UPC: ' 673419264150 ' } })).toMatchObject({ ean: '5702015869935', upc: '673419264150' });

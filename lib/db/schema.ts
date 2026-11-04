@@ -11,11 +11,11 @@ export const sets = sqliteTable(
     id: integer('id').primaryKey({ autoIncrement: true }),
     setNo: text('set_no').notNull(), // normalized, always with suffix: 10280-1
     name: text('name').notNull(),
-    location: text('location'),
-    condition: text('condition', { enum: ['New', 'Used', 'Partial'] }),
+    location: text('location'), // legacy, replaced by set_copies; dropped in a later release
+    condition: text('condition', { enum: ['New', 'Used', 'Partial'] }), // legacy, replaced by set_copies; dropped in a later release
     registered: text('registered'),
-    missingPct: real('missing_pct'),
-    qty: integer('qty').notNull().default(1),
+    missingPct: real('missing_pct'), // legacy, replaced by set_copies; dropped in a later release
+    qty: integer('qty').notNull().default(1), // legacy, replaced by set_copies; dropped in a later release
     notes: text('notes'),
     // Filled in by the BrickLink lookup
     blName: text('bl_name'),
@@ -48,6 +48,35 @@ export const sets = sqliteTable(
     updatedAt: text('updated_at').notNull().default(now),
   },
   (t) => [uniqueIndex('sets_set_no').on(t.setNo)],
+);
+
+/**
+ * One row per physical copy of a set: sealed, built, in progress or parted out, each with its own condition,
+ * location, cost basis and value. `collection_id` has no FK on purpose: adding one later would rebuild the table.
+ */
+export const setCopies = sqliteTable(
+  'set_copies',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    setId: integer('set_id').notNull().references(() => sets.id, { onDelete: 'cascade' }),
+    collectionId: integer('collection_id'),
+    status: text('status', { enum: ['sealed', 'built', 'in_progress', 'parted_out'] }).notNull().default('built'),
+    condition: text('condition', { enum: ['New', 'Used', 'Partial'] }).notNull().default('Used'),
+    missingPct: real('missing_pct'),
+    location: text('location'),
+    acquiredDate: text('acquired_date'), // YYYY-MM-DD
+    buildDate: text('build_date'), // YYYY-MM-DD
+    pricePaid: real('price_paid'), // in the collection currency
+    tax: real('tax'),
+    shipping: real('shipping'),
+    gwp: integer('gwp', { mode: 'boolean' }).notNull().default(false), // gift with purchase: cost basis 0
+    estValue: real('est_value'), // cached at the last price, like sets.est_value
+    estGuide: text('est_guide', { enum: ['N', 'U'] }), // the guide est_value came from
+    notes: text('notes'),
+    createdAt: text('created_at').notNull().default(now),
+    updatedAt: text('updated_at').notNull().default(now),
+  },
+  (t) => [index('set_copies_set').on(t.setId), index('set_copies_collection').on(t.collectionId), index('set_copies_location').on(t.location)],
 );
 
 /** Sold prices per set per day, so a set's value can be charted over time. */
@@ -111,6 +140,22 @@ export const apiTokens = sqliteTable('api_tokens', {
 });
 
 /** Key/value settings, e.g. currency. */
+/** Read-only share links. Like API tokens, only the SHA-256 hash is stored; the link is shown once. Revoke = delete. */
+export const shareLinks = sqliteTable('share_links', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  name: text('name').notNull(),
+  hash: text('hash').notNull().unique(),
+  prefix: text('prefix').notNull(),
+  showValues: integer('show_values', { mode: 'boolean' }).notNull().default(false),
+  showLocations: integer('show_locations', { mode: 'boolean' }).notNull().default(false),
+  showNotes: integer('show_notes', { mode: 'boolean' }).notNull().default(false),
+  showMinifigs: integer('show_minifigs', { mode: 'boolean' }).notNull().default(true),
+  expiresAt: text('expires_at'), // ISO time; null = never
+  createdAt: text('created_at').notNull().default(now),
+  lastViewedAt: text('last_viewed_at'),
+  views: integer('views').notNull().default(0),
+});
+
 export const settings = sqliteTable('settings', {
   key: text('key').primaryKey(),
   value: text('value').notNull(),
@@ -176,12 +221,14 @@ export const setMissingParts = sqliteTable(
   {
     id: integer('id').primaryKey({ autoIncrement: true }),
     setId: integer('set_id').notNull().references(() => sets.id, { onDelete: 'cascade' }),
+    // The copy the parts are missing from. Nullable in SQL (added by ALTER TABLE), always set by the service.
+    copyId: integer('copy_id').references(() => setCopies.id, { onDelete: 'cascade' }),
     partNo: text('part_no').notNull(),
     colorId: integer('color_id').notNull().default(-1), // -1 = no color (minifigs, gear), so the unique key works
     type: text('type').notNull(),
     qty: integer('qty').notNull(),
   },
-  (t) => [uniqueIndex('set_missing_parts_key').on(t.setId, t.type, t.partNo, t.colorId)],
+  (t) => [uniqueIndex('set_missing_parts_copy_key').on(t.copyId, t.type, t.partNo, t.colorId)],
 );
 
 /** BrickLink color names (the parts list only gives an ID). Filled from GET /colors once. */
@@ -375,28 +422,27 @@ export const designerProjects = sqliteTable('designer_projects', {
   updatedAt: text('updated_at').notNull().default(now),
 });
 
+/** Kinds of item an ID can name, and the catalogs (schemes) that number them. See lib/identifiers. */
+export const ID_KINDS = ['set', 'minifig', 'part', 'color', 'element'] as const;
+export const ID_SCHEMES = ['lego', 'bricklink', 'rebrickable', 'brickset', 'brickowl', 'brickeconomy', 'ldraw', 'gtin', 'lego_element'] as const;
+
 /**
- * Which set a retail barcode (UPC/EAN) belongs to. One set can have several barcodes (regions, packaging), and in
- * rare cases one barcode can point to more than one set, so `gtin` alone is not unique: (gtin, set, source) is.
- * `source` keeps your own confirmations ('user') apart from barcodes copied from a provider: provider rows are a
- * local cache for this installation and are never exported.
+ * Every ID from every catalog, mapped to one canonical key: the BrickLink ID (75192-1, sw0001, 3001, colour 5, and
+ * "3001:5" for an element). Not one-to-one: a barcode can cover regional boxes, and BrickLink merges part molds that
+ * Rebrickable splits, so the key includes the canonical ID and the source. Read and written only through lib/identifiers.
  */
-export const setBarcodes = sqliteTable(
-  'set_barcodes',
+export const identifiers = sqliteTable(
+  'identifiers',
   {
     id: integer('id').primaryKey({ autoIncrement: true }),
-    barcode: text('barcode').notNull(), // as scanned or typed, e.g. 673419264150
-    format: text('format', { enum: ['UPC_A', 'EAN_13', 'EAN_8', 'UPC_E'] }).notNull(),
-    gtin: text('gtin').notNull(), // lookup form: UPC-A with a leading 0, EAN-13 as is (lib/barcode/gtin.ts)
-    setNo: text('set_no').notNull(), // with suffix: 75192-1
-    source: text('source', { enum: ['user', 'community', 'brickset', 'comparethebricks', 'brickeconomy'] }).notNull(),
+    kind: text('kind', { enum: ID_KINDS }).notNull(),
+    scheme: text('scheme', { enum: ID_SCHEMES }).notNull(),
+    value: text('value').notNull(), // normalised by normalize() in lib/identifiers: GTIN lookup form, lowercase part numbers, set numbers with suffix
+    canonical: text('canonical').notNull(), // the BrickLink ID
+    source: text('source', { enum: ['user', 'community', 'rebrickable', 'brickset', 'brickowl', 'brickeconomy', 'comparethebricks', 'bricklink'] }).notNull(),
     verified: integer('verified', { mode: 'boolean' }).notNull().default(false), // you confirmed it
     region: text('region'),
     sourceRef: text('source_ref'), // the provider's id for the record
-    name: text('name'), // what the provider called the set, until it's in the collection
-    year: integer('year'),
-    pieces: integer('pieces'),
-    imageUrl: text('image_url'),
     firstSeenAt: text('first_seen_at').notNull().default(now),
     lastSeenAt: text('last_seen_at').notNull().default(now),
     verifiedAt: text('verified_at'),
@@ -404,11 +450,22 @@ export const setBarcodes = sqliteTable(
     updatedAt: text('updated_at').notNull().default(now),
   },
   (t) => [
-    uniqueIndex('set_barcodes_key').on(t.gtin, t.setNo, t.source),
-    index('set_barcodes_gtin').on(t.gtin),
-    index('set_barcodes_set').on(t.setNo),
+    uniqueIndex('identifiers_key').on(t.kind, t.scheme, t.value, t.canonical, t.source),
+    index('identifiers_lookup').on(t.kind, t.scheme, t.value),
+    index('identifiers_canonical').on(t.kind, t.canonical),
   ],
 );
+
+/** What a barcode provider said about a box (scheme 'gtin' rows only): the barcode as scanned, and the set's name and photo. */
+export const barcodeDetails = sqliteTable('barcode_details', {
+  identifierId: integer('identifier_id').primaryKey().references(() => identifiers.id, { onDelete: 'cascade' }),
+  barcode: text('barcode').notNull(), // as scanned or typed, e.g. 673419264150
+  format: text('format', { enum: ['UPC_A', 'EAN_13', 'EAN_8', 'UPC_E'] }).notNull(),
+  name: text('name'), // what the provider called the set, until it's in the collection
+  year: integer('year'),
+  pieces: integer('pieces'),
+  imageUrl: text('image_url'),
+});
 
 /**
  * Codes on Collectible Minifigures boxes (the square Data Matrix): a 7-digit code, plus the factory letter and year digit

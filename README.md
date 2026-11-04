@@ -67,7 +67,8 @@ In Sheets, use **File → Download → Comma-separated values** on the Sets, His
 
 - **Add Set:** looks the set up on BrickLink right away. Adding a set you already own asks before adding another copy.
 - **Paste a list:** next to Add set. Up to 10 new items are looked up right away; longer lists are looked up at the next sync.
-- **Remove:** takes away one copy. On the last copy it deletes the set.
+- **Remove:** takes away the newest copy. On the last copy it deletes the set.
+- **Copies:** a set's page lists each copy: sealed, built, in progress or parted out, with its own condition, location, dates, what it cost and its value. **Add a copy**, or tick **Gift with purchase** for one that cost nothing. Cards show "2 sealed · 1 built", the total value and, when you've recorded prices paid, your gain.
 - **Sync BrickLink:** refreshes every set, then your store inventory and orders (it also runs daily at `SYNC_HOUR`). Progress shows on the button.
 - **Set page:** click a set number or name for its photo, value history, parts list and notes.
 - **Parts:** open a set's parts list from its card, or search every set's parts on the Parts page (e.g. which sets have a given part).
@@ -79,10 +80,11 @@ In Sheets, use **File → Download → Comma-separated values** on the Sets, His
 - **Scan:** **Scan** on the Sets page (or the barcode icon in the header on a phone). **One at a time** to check each box, **Many in a row** to work through a shelf and add the list at once. **Minifigures** reads the square code on Collectible Minifigures boxes. **Read the set number** reads it off the box front. An unknown box asks for its set number once. Offline, scans and adds wait on the phone. See [the install guide](docs/install.md#optional-barcode-scanning).
 - **Wishlist:** add a set with the price you'd pay. Sets under your target go to the top; **Got it** moves one into your collection.
 - **3D model:** on a set's page, upload its LDraw model (many are in the LDraw Official Model Repository) to orbit it or step through the build. Needs the LDraw parts library; see [the install guide](docs/install.md#optional-3d-models-of-your-sets).
-- **Missing parts:** on a set's page, **Mark missing parts** and type how many of each are gone. The set becomes Partial, Missing % is worked out from the pieces, and **Wanted List** downloads them for BrickLink (Want → Upload). Refreshing the parts list keeps your marks.
+- **Missing parts:** on a set's page, **Mark missing parts** and type how many of each are gone (pick the copy first when you have several). That copy becomes Partial, Missing % is worked out from the pieces, and **Wanted List** downloads them for BrickLink (Want → Upload). Refreshing the parts list keeps your marks.
 - **What can I build?:** under Parts. Each build can download its missing parts as a BrickLink Wanted List.
 - **Store** and **Orders:** your BrickLink store as of the last sync. Search and filter lots; switch between orders sold and bought.
-- **Settings:** locations, currency, CSV import/export and API tokens.
+- **Share a link:** **Settings → Share links** makes a read-only page of your sets for family, friends or an insurer, with values, locations and notes only if you choose. See [the install guide](docs/install.md#share-a-read-only-link) to reach it from outside.
+- **Settings:** locations, currency, CSV import/export, share links and API tokens.
 - Search, filters and view are kept in the URL, so you can bookmark a view (e.g. your Sell list).
 
 ## Data and backups

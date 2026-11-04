@@ -47,6 +47,15 @@ export async function identify(h: Headers): Promise<Identity | null> {
   return user && allowed(user) ? { user, via: 'cloudflare-access' } : null;
 }
 
+/**
+ * Requests that skip login: GET and HEAD of a read-only share page (/share/<token>/…). The page checks its own token.
+ * Anything else under /share (a POST, including a server action's) is refused by the proxy with 405.
+ */
+export function isPublicShareRequest(pathname: string, method: string): boolean {
+  return isSharePath(pathname) && (method === 'GET' || method === 'HEAD');
+}
+export const isSharePath = (pathname: string) => pathname === '/share' || pathname.startsWith('/share/');
+
 /** Bearer token from the Authorization header, if any. */
 export const bearer = (h: Headers) => h.get('authorization')?.match(/^Bearer\s+(\S+)$/i)?.[1] ?? null;
 

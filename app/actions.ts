@@ -1,11 +1,14 @@
 'use server';
 // Server actions for the dashboard: check the user, validate, call the service layer, refresh the page.
 import { refresh } from 'next/cache';
+import { headers } from 'next/headers';
 import { after } from 'next/server';
 import { getDb } from '@/lib/db';
-import { parseQuickList, parseSetInput } from '@/lib/sets';
+import { parseCopyInput, parseQuickList, parseSetWithCopy } from '@/lib/sets';
+import * as copies from '@/lib/service/copies';
 import * as svc from '@/lib/service/sets';
 import * as tokens from '@/lib/service/tokens';
+import * as share from '@/lib/service/share';
 import { importCsv } from '@/lib/service/csv';
 import { barcodeProviders, brickColors, brickMinifig, brickPartPrice, brickStore, bricklink, brickset, currentUser, rebrickable } from '@/lib/session';
 import * as barcodes from '@/lib/service/barcodes';
@@ -29,7 +32,7 @@ import { rebrickableStats, type RebrickableStats } from '@/lib/service/catalog';
 import { retailStats, syncRetail, type RetailStats } from '@/lib/service/retail';
 import { rebrickableRun, startRebrickableSync, type RebrickableRun } from '@/lib/rebrickable/run';
 
-export type Result = svc.Result<{ token?: string }>;
+export type Result = svc.Result<{ token?: string; url?: string }>;
 
 /** Runs `fn` for a signed-in user, turns thrown errors into a Result, and refreshes the page on success. */
 async function act(fn: () => Promise<svc.Result<object>>): Promise<Result> {
@@ -38,12 +41,12 @@ async function act(fn: () => Promise<svc.Result<object>>): Promise<Result> {
   try {
     const r = await fn();
     if (r.ok) refresh();
-    return r.ok ? { ok: true, ...('token' in r ? { token: String(r.token) } : {}) } : r;
+    return r.ok ? { ok: true, ...('token' in r ? { token: String(r.token) } : {}), ...('url' in r ? { url: String(r.url) } : {}) } : r;
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }
 }
-const input = async (form: Record<string, unknown>, partial: boolean) => parseSetInput(form, partial, await svc.listLocations(await getDb()));
+const input = async (form: Record<string, unknown>, partial: boolean) => parseSetWithCopy(form, partial, await svc.listLocations(await getDb()));
 
 /** `another` = the user confirmed adding one more copy of a set already in stock. */
 export async function addSet(form: Record<string, unknown>, another = false): Promise<Result> {
@@ -66,6 +69,28 @@ export async function removeSet(setNo: string): Promise<Result> {
     const p = await input({ setNo }, true);
     return p.ok ? svc.removeOne(await getDb(), p.value.setNo) : p;
   });
+}
+
+/** Adds a copy to a set you have. Same fields as the copy form. */
+export async function addCopy(setNo: string, form: Record<string, unknown>): Promise<Result> {
+  return act(async () => {
+    const db = await getDb();
+    const p = parseCopyInput(form, false, await svc.listLocations(db));
+    return p.ok ? copies.addCopy(db, setNo, p.value, bricklink()) : p;
+  });
+}
+
+export async function editCopy(copyId: number, form: Record<string, unknown>): Promise<Result> {
+  return act(async () => {
+    const db = await getDb();
+    const p = parseCopyInput(form, true, await svc.listLocations(db));
+    return p.ok ? copies.editCopy(db, copyId, p.value, bricklink()) : p;
+  });
+}
+
+/** Removes a copy; the set goes with its last one. */
+export async function removeCopy(copyId: number): Promise<Result> {
+  return act(async () => copies.removeCopy(await getDb(), copyId));
 }
 
 export async function relookupSet(setNo: string): Promise<Result> {
@@ -98,6 +123,30 @@ export async function renameLocation(from: string, to: string) { return act(asyn
 export async function deleteLocation(name: string) { return act(async () => svc.deleteLocation(await getDb(), name)); }
 export async function setCurrency(code: string) { return act(async () => svc.setCurrency(await getDb(), code)); }
 export async function createToken(name: string) { return act(async () => tokens.createToken(await getDb(), name)); }
+/** Public origin for share links: SHARE_BASE_URL, else APP_URL, else this request's host. */
+async function shareBase(): Promise<string> {
+  const env = process.env.SHARE_BASE_URL || process.env.APP_URL;
+  if (env) return env.replace(/\/$/, '');
+  const h = await headers();
+  const host = (h.get('x-forwarded-host') ?? h.get('host') ?? 'localhost').split(',')[0].trim();
+  const proto = h.get('x-forwarded-proto')?.split(',')[0].trim() || (/^(localhost|127\.|\[::1\])/.test(host) ? 'http' : 'https');
+  return `${proto}://${host}`;
+}
+
+/** Creates a read-only share link. The full URL comes back once; only its hash is stored. */
+export async function createShareLink(form: Record<string, unknown>): Promise<Result> {
+  return act(async () => {
+    const p = share.parseShareInput(form);
+    if (!p.ok) return p;
+    const r = await share.createShareLink(await getDb(), p.value);
+    return r.ok ? { ok: true, url: `${await shareBase()}/share/${r.token}` } : r;
+  });
+}
+
+export async function revokeShareLink(id: number): Promise<Result> {
+  return act(async () => share.revokeShareLink(await getDb(), id));
+}
+
 export async function revokeToken(id: number) {
   return act(async () => { await tokens.revokeToken(await getDb(), id); return { ok: true }; });
 }
@@ -176,8 +225,8 @@ export async function removeWish(setNo: string): Promise<Result> {
 }
 
 /** You got it: moves the set from the wishlist into the collection. */
-export async function acquireWish(setNo: string): Promise<Result> {
-  return act(async () => wish.acquireWish(await getDb(), setNo, bricklink()));
+export async function acquireWish(setNo: string, pricePaid: number | null = null): Promise<Result> {
+  return act(async () => wish.acquireWish(await getDb(), setNo, bricklink(), { pricePaid }));
 }
 
 // ---- 3D models ----
@@ -287,11 +336,11 @@ export async function syncBricksetNow(): Promise<Result> {
   return { ok: true };
 }
 
-/** Saves the parts marked missing from a set (Missing % and Partial follow). */
-export async function saveMissingParts(setNo: string, items: MissingItem[]): Promise<Result> {
+/** Saves the parts marked missing from one copy of a set (Missing % and Partial follow). */
+export async function saveMissingParts(setNo: string, copyId: number | null, items: MissingItem[]): Promise<Result> {
   return act(async () => {
     const p = await input({ setNo }, true);
-    return p.ok ? missing.saveMissing(await getDb(), p.value.setNo, items, bricklink()) : p;
+    return p.ok ? missing.saveMissing(await getDb(), p.value.setNo, copyId, items, bricklink()) : p;
   });
 }
 

@@ -10,7 +10,7 @@ export class BricksetError extends Error {}
 
 /** Retail price by currency, from Brickset's LEGO.com regions. */
 export type Retail = Partial<Record<'USD' | 'GBP' | 'CAD' | 'EUR', number>>;
-export type BsSet = { setNo: string; retail: Retail; launchDate: string | null; exitDate: string | null; retired: boolean; ean?: string | null; upc?: string | null };
+export type BsSet = { setNo: string; retail: Retail; launchDate: string | null; exitDate: string | null; retired: boolean; ean?: string | null; upc?: string | null; /** Brickset's own id for the set (setID) */ bricksetId?: number | null };
 
 export type RetailSource = {
   /** One call that throws a readable error when the key is wrong or Brickset is unreachable. */
@@ -25,7 +25,7 @@ export type RetailSource = {
 const REGIONS = { US: 'USD', UK: 'GBP', CA: 'CAD', DE: 'EUR' } as const;
 type Region = { retailPrice?: number | null; dateFirstAvailable?: string | null; dateLastAvailable?: string | null };
 export type ApiSet = {
-  number: string; numberVariant?: number; availability?: string | null;
+  setID?: number; number: string; numberVariant?: number; availability?: string | null;
   launchDate?: string | null; exitDate?: string | null;
   LEGOCom?: Partial<Record<keyof typeof REGIONS, Region>>;
   barcode?: { EAN?: string | null; UPC?: string | null } | null; // the box's barcodes, saved for the scanner
@@ -55,6 +55,7 @@ export function toBsSet(s: ApiSet, today = new Date().toISOString().slice(0, 10)
     retired: /retired/i.test(s.availability ?? '') || (!!exitDate && exitDate < today),
     ean: code(s.barcode?.EAN),
     upc: code(s.barcode?.UPC),
+    bricksetId: Number.isInteger(s.setID) && s.setID! > 0 ? s.setID! : null,
   };
 }
 

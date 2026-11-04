@@ -1,12 +1,13 @@
 // Part-out value: what a set would fetch sold as separate parts, priced with BrickLink's per-part sold price guide.
 // Part prices are shared across sets and cached for 30 days. Each one costs a BrickLink call, so the daily sync
 // fetches at most PARTOUT_DAILY_CALLS of them, and fewer when the rest of the sync has used the budget.
-import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import type { PartPriceLookup } from '../bricklink/client';
 import { partKey } from '../bricklink/wanted';
 import { partPrices, setMissingParts, setParts, sets } from '../db/schema';
 import type { DB } from '../db/types';
-import { priceGuide, type Condition } from '../sets';
+import { isActive, priceGuide, setGuide, type Condition } from '../sets';
+import { copiesBySet } from './sets';
 
 const NO_COLOR = -1;
 const TTL_DAYS = 30;
@@ -72,7 +73,8 @@ export type Partout = {
 export const WEIGHTED_COVERAGE = 90;
 
 /** Part-out value of one set from cached part prices. Makes no API calls. */
-export async function partout(db: DB, setId: number, condition: Condition | null, currency: string): Promise<Partout> {
+/** Part-out value of a set. Missing value counts the parts marked on `copyId` (all copies' marks when not given). */
+export async function partout(db: DB, setId: number, condition: Condition | null, currency: string, copyId?: number | null): Promise<Partout> {
   const guide = priceGuide(condition);
   const ls = await lines(db, setId);
   const cache = await pricesFor(db, ls, guide, currency);
@@ -87,7 +89,7 @@ export async function partout(db: DB, setId: number, condition: Condition | null
   const pieces = ls.reduce((t, l) => t + l.qty, 0);
   const coverage = pieces ? Math.round((pricedPieces / pieces) * 1000) / 10 : 0;
 
-  const marked = await db.select().from(setMissingParts).where(eq(setMissingParts.setId, setId)).all();
+  const marked = await db.select().from(setMissingParts).where(copyId == null ? eq(setMissingParts.setId, setId) : and(eq(setMissingParts.setId, setId), eq(setMissingParts.copyId, copyId))).all();
   let missingValue: number | null = null;
   if (marked.length) {
     missingValue = 0;
@@ -109,13 +111,16 @@ export async function refreshPartPrices(
   db: DB, lookup: PartPriceLookup, currency: string, opts: { setIds?: number[]; maxCalls: number },
 ): Promise<{ fetched: number; errors: number; remaining: number }> {
   if (opts.maxCalls <= 0) return { fetched: 0, errors: 0, remaining: 0 };
-  const owned = await db.select({ id: sets.id, condition: sets.condition }).from(sets)
-    .where(opts.setIds ? inArray(sets.id, opts.setIds) : sql`1 = 1`).orderBy(desc(sets.estValue), asc(sets.id)).all();
+  const copies = await copiesBySet(db, opts.setIds);
+  // Most valuable first, each in the guide most of its copies need.
+  const owned = (await db.select({ id: sets.id }).from(sets).where(opts.setIds ? inArray(sets.id, opts.setIds) : sql`1 = 1`).orderBy(asc(sets.id)).all())
+    .map((s) => { const cs = copies.get(s.id) ?? []; return { id: s.id, guide: setGuide(cs), value: cs.filter(isActive).reduce((t, c) => t + (c.estValue ?? 0), 0) }; })
+    .sort((a, b) => b.value - a.value || a.id - b.id);
   const stale = new Date(Date.now() - TTL_DAYS * 86_400_000).toISOString();
   const todo: { line: Line; guide: 'N' | 'U' }[] = [];
   const seen = new Set<string>();
   for (const s of owned) {
-    const guide = priceGuide(s.condition);
+    const guide = s.guide;
     const ls = await lines(db, s.id);
     const cache = await pricesFor(db, ls, guide, currency);
     for (const l of ls) {

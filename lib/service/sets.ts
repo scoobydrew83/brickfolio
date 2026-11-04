@@ -1,17 +1,18 @@
 // Collection logic shared by server actions, the REST API and the scheduler.
 // Every function takes the database (and BrickLink lookup) as arguments, so tests can pass an in-memory one.
-import { and, asc, desc, eq, gt, lt, lte, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, lt, sql } from 'drizzle-orm';
 import type { Lookup, MinifigLookup, PartPriceLookup, Store } from '../bricklink/client';
-import type { BuildSource, Catalog } from '../rebrickable/client';
+import type { BuildSource, Catalog, IdCatalog } from '../rebrickable/client';
 import type { DB } from '../db/types';
-import { history, locations, minifigs, priceSnapshots, sets, settings, syncRuns, wishlist } from '../db/schema';
+import { history, locations, minifigs, priceSnapshots, setCopies, sets, settings, syncRuns, wishlist } from '../db/schema';
 import { hasParts, replaceParts } from './parts';
 import { syncStore } from './store';
 import { syncCatalog, themeMap, themeNames } from './catalog';
 import { syncWishlist } from './wishlist';
 import { syncBuilds } from './builds';
+import { syncIdentifiers } from './identifiers';
 import { syncRetail } from './retail';
-import { hasMissing, reapplyMissing } from './missing';
+import { reapplyMissing } from './missing';
 import { partoutBudget, refreshPartPrices } from './partout';
 import type { RetailSource } from '../brickset/client';
 import { syncOmrModels } from './models';
@@ -20,7 +21,8 @@ import { notifyRetiring } from './radar';
 import { notifyDesigner } from './designer';
 import { addMinifig, syncMinifigs } from './minifigs';
 import { syncCommunity } from '../barcode/community';
-import { estValue, parseLocation, placeholderName, priceGuide, totals, type Condition, type HistoryRow, type QuickList, type SetInput, type SetRow } from '../sets';
+import { estValue, parseLocation, placeholderName, setGuide, totals, withCopies, type Condition, type CopyInput, type CopyRow, type HistoryRow, type QuickList, type SetInput, type SetRow } from '../sets';
+import { editCopy, insertCopies, repriceCopies } from './copies';
 
 /** `status` lets the REST API pick an HTTP code. `existing` = already in stock, so the UI asks before adding. */
 export type Result<T extends object = object> =
@@ -37,9 +39,9 @@ export const today = () => new Date().toLocaleDateString('en-CA', { timeZone: pr
 
 const columns = {
   id: sets.id, setNo: sets.setNo, name: sets.name, blName: sets.blName, year: sets.year, categoryId: sets.categoryId,
-  imageUrl: sets.imageUrl, pieces: sets.pieces, partLots: sets.partLots, location: sets.location, condition: sets.condition,
-  registered: sets.registered, missingPct: sets.missingPct, qty: sets.qty, avgSold: sets.avgSold, minSold: sets.minSold,
-  maxSold: sets.maxSold, qtySold: sets.qtySold, estValue: sets.estValue, blError: sets.blError, lastUpdated: sets.lastUpdated, notes: sets.notes,
+  imageUrl: sets.imageUrl, pieces: sets.pieces, partLots: sets.partLots,
+  registered: sets.registered, avgSold: sets.avgSold, minSold: sets.minSold,
+  maxSold: sets.maxSold, qtySold: sets.qtySold, blError: sets.blError, lastUpdated: sets.lastUpdated, notes: sets.notes,
   themeId: sets.themeId, minifigs: sets.minifigs,
   retailPrice: sets.retailPrice, retailCurrency: sets.retailCurrency, launchDate: sets.launchDate, exitDate: sets.exitDate, retired: sets.retired,
   // Table-qualified on purpose: inside a subquery an unqualified "id" would mean the subquery table's own id.
@@ -47,10 +49,35 @@ const columns = {
   missingMarked: sql<number>`(select coalesce(sum(mp."qty"), 0) from "set_missing_parts" mp where mp."set_id" = "sets"."id")`,
 };
 
-/** Swaps the Rebrickable theme id for readable theme and subtheme names. */
-async function withThemes(db: DB, rows: (Omit<SetRow, 'theme' | 'subtheme' | 'hasModel' | 'missingMarked'> & { themeId: number | null; hasModel: number | boolean; missingMarked: number | null })[]): Promise<SetRow[]> {
+type BaseRow = { [K in keyof typeof columns]: K extends 'hasModel' | 'missingMarked' ? number : unknown } & { id: number; themeId: number | null };
+
+const copyColumns = {
+  id: setCopies.id, setId: setCopies.setId, collectionId: setCopies.collectionId, status: setCopies.status, condition: setCopies.condition,
+  missingPct: setCopies.missingPct, location: setCopies.location, acquiredDate: setCopies.acquiredDate, buildDate: setCopies.buildDate,
+  pricePaid: setCopies.pricePaid, tax: setCopies.tax, shipping: setCopies.shipping, gwp: setCopies.gwp, estValue: setCopies.estValue,
+  estGuide: setCopies.estGuide, notes: setCopies.notes,
+  missingMarked: sql<number>`(select coalesce(sum(mp."qty"), 0) from "set_missing_parts" mp where mp."copy_id" = "set_copies"."id")`,
+};
+
+/** Copies per set id, oldest first. Without `setIds`, every copy (one query either way, no N+1). */
+export async function copiesBySet(db: DB, setIds?: number[]): Promise<Map<number, CopyRow[]>> {
+  if (setIds && !setIds.length) return new Map();
+  const q = db.select(copyColumns).from(setCopies);
+  const rows = await (setIds ? q.where(inArray(setCopies.setId, setIds)) : q).orderBy(asc(setCopies.setId), asc(setCopies.id)).all();
+  const map = new Map<number, CopyRow[]>();
+  for (const r of rows) {
+    const c: CopyRow = { ...r, gwp: Boolean(r.gwp), missingMarked: Number(r.missingMarked ?? 0) };
+    map.set(r.setId, [...(map.get(r.setId) ?? []), c]);
+  }
+  return map;
+}
+
+/** Swaps the Rebrickable theme id for readable theme and subtheme names, and attaches each set's copies. */
+async function withThemes(db: DB, rows: BaseRow[], all = false): Promise<SetRow[]> {
   const map = rows.some((r) => r.themeId !== null) ? await themeMap(db) : new Map();
-  return rows.map(({ themeId, hasModel, missingMarked, ...r }) => ({ ...r, hasModel: Boolean(hasModel), missingMarked: Number(missingMarked ?? 0), ...themeNames(map, themeId) }));
+  const copies = await copiesBySet(db, all ? undefined : rows.map((r) => r.id));
+  return rows.map(({ themeId, hasModel, missingMarked, ...r }) =>
+    withCopies({ ...(r as unknown as Omit<SetRow, 'theme' | 'subtheme'>), hasModel: Boolean(hasModel), missingMarked: Number(missingMarked ?? 0), ...themeNames(map, themeId) }, copies.get(r.id) ?? []));
 }
 
 // ---- reads ----
@@ -65,12 +92,12 @@ export async function listLocations(db: DB): Promise<string[]> {
 }
 
 export async function listSets(db: DB): Promise<SetRow[]> {
-  return withThemes(db, await db.select(columns).from(sets).orderBy(asc(sets.setNo)).all());
+  return withThemes(db, (await db.select(columns).from(sets).orderBy(asc(sets.setNo)).all()) as BaseRow[], true);
 }
 
 export async function getSet(db: DB, no: string): Promise<SetRow | undefined> {
   const row = await db.select(columns).from(sets).where(eq(sets.setNo, no)).get();
-  return row && (await withThemes(db, [row]))[0];
+  return row && (await withThemes(db, [row as BaseRow]))[0];
 }
 
 export async function listHistory(db: DB): Promise<HistoryRow[]> {
@@ -96,17 +123,18 @@ export async function getCollection(db: DB) {
 // ---- writes ----
 
 /**
- * Runs the BrickLink lookup for one set and stores the result (or the error) on it. Returns the error, if any.
+ * Runs the BrickLink lookup for one set and stores the result (or the error) on it, then re-prices its copies.
+ * Until both guides are fetched (roadmap #4), one guide per set: the one most of its copies need (setGuide).
  * The parts list is only fetched while the set has no piece count, since it rarely changes on BrickLink.
  */
-export async function lookupInto(db: DB, s: Pick<SetRow, 'id' | 'setNo' | 'condition' | 'missingPct'>, lookup: Lookup, currency: string): Promise<string | null> {
-  const guide = priceGuide(s.condition);
+export async function lookupInto(db: DB, s: Pick<SetRow, 'id' | 'setNo'> & { copies?: Pick<CopyRow, 'status' | 'condition'>[] }, lookup: Lookup, currency: string): Promise<string | null> {
+  const guide = setGuide(s.copies ?? (await copiesBySet(db, [s.id])).get(s.id) ?? []);
   try {
     const { parts, pieces: _p, partLots: _l, ...r } = await lookup(s.setNo, guide, currency, { parts: !(await hasParts(db, s.id)) });
     if (parts) await replaceParts(db, s.id, parts); // also sets pieces and part lots
     await db.update(sets)
       .set({
-        ...r, estValue: estValue(r.avgSold, s.missingPct), blError: null, lastUpdated: nowIso(), updatedAt: nowIso(),
+        ...r, estValue: estValue(r.avgSold, null), blError: null, lastUpdated: nowIso(), updatedAt: nowIso(),
         // A pasted set keeps its placeholder name until BrickLink answers.
         name: sql`case when ${sets.name} = ${placeholderName(s.setNo)} then ${r.blName} else ${sets.name} end`,
       })
@@ -114,6 +142,7 @@ export async function lookupInto(db: DB, s: Pick<SetRow, 'id' | 'setNo' | 'condi
     const snap = { guide, avgSold: r.avgSold, minSold: r.minSold, maxSold: r.maxSold, qtySold: r.qtySold };
     await db.insert(priceSnapshots).values({ setId: s.id, date: today(), ...snap })
       .onConflictDoUpdate({ target: [priceSnapshots.setId, priceSnapshots.date], set: snap });
+    await repriceCopies(db, s.id, guide);
     return null;
   } catch (e) {
     const error = (e instanceof Error ? e.message : String(e)).slice(0, 300);
@@ -121,6 +150,17 @@ export async function lookupInto(db: DB, s: Pick<SetRow, 'id' | 'setNo' | 'condi
     return error;
   }
 }
+
+/** The copy fields a set-level input carries (condition, location, Missing %, plus `copy`). */
+const copyFields = (input: SetInput): CopyInput => {
+  const c: CopyInput = { ...input.copy };
+  if (input.condition !== undefined) c.condition ??= input.condition;
+  if (input.location !== undefined) c.location ??= input.location;
+  if (input.missingPct !== undefined) c.missingPct ??= input.missingPct;
+  if (c.condition === 'New' && !c.status) c.status = 'sealed';
+  if (c.status === 'sealed') c.condition = 'New';
+  return c;
+};
 
 /**
  * Adds a set and looks it up on BrickLink. If it's already in stock, returns `existing` unless `another`
@@ -132,18 +172,18 @@ export async function addSet(db: DB, input: SetInput, opts: { another?: boolean;
     return { ok: false, status: 409, error: `You already have ${have.qty} of #${have.setNo} (${have.name}).`, existing: { name: have.name, qty: have.qty } };
   }
   if (have) {
-    await db.update(sets).set({ qty: sql`${sets.qty} + 1`, updatedAt: nowIso() }).where(eq(sets.id, have.id));
+    await insertCopies(db, have.id, copyFields(input), 1);
+    await db.update(sets).set({ updatedAt: nowIso() }).where(eq(sets.id, have.id));
+    await repriceCopies(db, have.id);
     return { ok: true, set: (await getSet(db, input.setNo))! };
   }
   const inserted = await db.insert(sets)
-    .values({
-      setNo: input.setNo, name: input.name!, location: input.location ?? null, condition: input.condition ?? 'Used',
-      registered: input.registered ?? null, missingPct: input.missingPct ?? null, qty: input.qty ?? 1, notes: input.notes ?? null,
-    })
+    .values({ setNo: input.setNo, name: input.name!, registered: input.registered ?? null, notes: input.notes ?? null })
     .onConflictDoNothing()
     .returning({ id: sets.id })
     .all();
   if (!inserted.length) return { ok: false, status: 409, error: `#${input.setNo} was just added by someone else.` };
+  await insertCopies(db, inserted[0].id, copyFields(input), input.qty ?? 1);
   const row = (await getSet(db, input.setNo))!;
   if (opts.lookup) await lookupInto(db, row, opts.lookup, await getCurrency(db));
   return { ok: true, set: (await getSet(db, input.setNo))! };
@@ -169,12 +209,16 @@ export async function quickAdd(
   const currency = await getCurrency(db);
   for (const { setNo: no, qty } of list.sets) {
     const have = await getSet(db, no);
+    const copy = copyFields({ setNo: no, condition: opts.condition ?? 'Used', location: opts.location ?? null });
     if (have) {
-      await db.update(sets).set({ qty: sql`${sets.qty} + ${qty}`, updatedAt: nowIso() }).where(eq(sets.id, have.id));
+      await insertCopies(db, have.id, copy, qty);
+      await db.update(sets).set({ updatedAt: nowIso() }).where(eq(sets.id, have.id));
+      await repriceCopies(db, have.id);
       out.merged++;
       continue;
     }
-    await db.insert(sets).values({ setNo: no, name: placeholderName(no), qty, condition: opts.condition ?? 'Used', location: opts.location ?? null }).onConflictDoNothing();
+    const ins = await db.insert(sets).values({ setNo: no, name: placeholderName(no) }).onConflictDoNothing().returning({ id: sets.id }).all();
+    if (ins.length) await insertCopies(db, ins[0].id, copy, qty);
     out.added++;
     const row = await getSet(db, no);
     if (row && now && opts.lookup) await lookupInto(db, row, opts.lookup, currency);
@@ -188,31 +232,55 @@ export async function quickAdd(
   return { ok: true, ...out };
 }
 
-/** Updates the given fields. A condition change that switches new/used prices triggers a fresh lookup. */
+/**
+ * Updates the given fields. Name, notes and registered belong to the set. Condition, location and Missing % belong
+ * to copies: they're applied when the set has one copy, and refused (409) with several unless they're unchanged.
+ * `qty` adds copies (cloned from the newest, without cost) or removes the newest ones.
+ */
 export async function editSet(db: DB, input: SetInput, lookup: Lookup | null): Promise<Result<{ set: SetRow }>> {
   const before = await getSet(db, input.setNo);
   if (!before) return { ok: false, status: 404, error: `#${input.setNo} isn't in the collection.` };
-  const { setNo: _no, ...fields } = input;
-  // With parts marked missing, Missing % comes from them (lib/service/missing.ts), not from the form.
-  if (fields.missingPct !== undefined && (await hasMissing(db, before.id))) delete fields.missingPct;
-  const after = { ...before, ...fields };
-  const guideChanged = priceGuide(before.condition) !== priceGuide(after.condition);
-  await db.update(sets)
-    .set({ ...fields, estValue: guideChanged ? before.estValue : estValue(after.avgSold, after.missingPct), updatedAt: nowIso() })
-    .where(eq(sets.id, before.id));
-  if (guideChanged && lookup) await lookupInto(db, after, lookup, await getCurrency(db));
+  const { setNo: _no, qty, condition, location, missingPct, copy: _c, ...fields } = input;
+  const active = before.copies.filter((c) => c.status !== 'parted_out');
+  const changes: CopyInput = {};
+  if (condition !== undefined && (before.mixed.condition || condition !== before.condition)) changes.condition = condition;
+  if (location !== undefined && (before.mixed.location || location !== before.location)) changes.location = location;
+  if (missingPct !== undefined && missingPct !== before.missingPct) changes.missingPct = missingPct;
+  if (Object.keys(changes).length && active.length > 1) {
+    return { ok: false, status: 409, error: `#${input.setNo} has ${active.length} copies. Edit the copies instead.` };
+  }
+  if (Object.keys(fields).length) await db.update(sets).set({ ...fields, updatedAt: nowIso() }).where(eq(sets.id, before.id));
+  if (Object.keys(changes).length && active.length === 1) {
+    const r = await editCopy(db, active[0].id, changes, lookup);
+    if (!r.ok) return r;
+  }
+  if (qty !== undefined && qty !== active.length) {
+    if (qty > active.length) {
+      const src = active.at(-1) ?? before.copies.at(-1);
+      await insertCopies(db, before.id, src ? { status: src.status === 'parted_out' ? 'built' : src.status, condition: src.condition, location: src.location, missingPct: src.missingPct } : copyFields(input), qty - active.length);
+      await repriceCopies(db, before.id);
+    } else {
+      const drop = active.slice(qty).map((c) => c.id);
+      await db.delete(setCopies).where(inArray(setCopies.id, drop));
+    }
+  }
   return { ok: true, set: (await getSet(db, input.setNo))! };
 }
 
-/** Removes one copy: lowers qty when there are several, deletes the set on the last one. */
+/** Removes the newest copy that isn't parted out; deletes the set when its last copy goes. */
 export async function removeOne(db: DB, no: string): Promise<Result<{ remaining: number }>> {
-  const lowered = await db.update(sets).set({ qty: sql`${sets.qty} - 1`, updatedAt: nowIso() })
-    .where(and(eq(sets.setNo, no), gt(sets.qty, 1)))
-    .returning({ qty: sets.qty })
-    .all();
-  if (lowered.length) return { ok: true, remaining: lowered[0].qty };
-  const deleted = await db.delete(sets).where(and(eq(sets.setNo, no), lte(sets.qty, 1))).returning({ id: sets.id }).all();
-  return deleted.length ? { ok: true, remaining: 0 } : { ok: false, status: 404, error: `#${no} isn't in the collection.` };
+  const s = await getSet(db, no);
+  if (!s) return { ok: false, status: 404, error: `#${no} isn't in the collection.` };
+  const victim = s.copies.filter((c) => c.status !== 'parted_out').at(-1) ?? s.copies.at(-1);
+  if (victim) await db.delete(setCopies).where(eq(setCopies.id, victim.id));
+  const [{ left, active }] = await db.select({ left: sql<number>`count(*)`, active: sql<number>`coalesce(sum(case when ${setCopies.status} <> 'parted_out' then 1 else 0 end), 0)` })
+    .from(setCopies).where(eq(setCopies.setId, s.id)).all();
+  if (!Number(left)) {
+    await db.delete(sets).where(eq(sets.id, s.id));
+    return { ok: true, remaining: 0 };
+  }
+  await db.update(sets).set({ updatedAt: nowIso() }).where(eq(sets.id, s.id));
+  return { ok: true, remaining: Number(active) };
 }
 
 /** Throws away a set's parts list and fetches it again (and its prices). */
@@ -253,10 +321,11 @@ export async function startSync(db: DB): Promise<Result<{ runId: number }>> {
 /** Optional BrickLink extras for the sync: minifigure prices and part prices for part-out value. */
 export type SyncExtras = { minifig?: MinifigLookup; partPrice?: PartPriceLookup };
 
-export async function runSync(db: DB, runId: number, lookup: Lookup, store?: Store, catalog?: Catalog & Partial<BuildSource>, retail?: RetailSource, extras: SyncExtras = {}): Promise<void> {
+export async function runSync(db: DB, runId: number, lookup: Lookup, store?: Store, catalog?: Catalog & Partial<BuildSource> & Partial<IdCatalog>, retail?: RetailSource, extras: SyncExtras = {}): Promise<void> {
   try {
     const currency = await getCurrency(db);
-    const all = await db.select({ id: sets.id, setNo: sets.setNo, condition: sets.condition, missingPct: sets.missingPct }).from(sets).all();
+    const copies = await copiesBySet(db);
+    const all = (await db.select({ id: sets.id, setNo: sets.setNo }).from(sets).all()).map((r) => ({ ...r, copies: copies.get(r.id) ?? [] }));
     let errors = 0;
     for (const [i, s] of all.entries()) {
       if (await lookupInto(db, s, lookup, currency)) errors++;
@@ -271,6 +340,7 @@ export async function runSync(db: DB, runId: number, lookup: Lookup, store?: Sto
     const alertError = send ? await notifyUnderTarget(db, send) : null;
     const storeErrors = store ? await syncStore(db, store) : [];
     const catalogErrors = catalog ? await syncCatalog(db, catalog) : [];
+    if (catalog?.colors && catalog.partsPage) catalogErrors.push(...(await syncIdentifiers(db, { colors: catalog.colors, partsPage: catalog.partsPage })));
     if (catalog?.alternates && catalog.buildParts) catalogErrors.push(...(await syncBuilds(db, { alternates: catalog.alternates, buildParts: catalog.buildParts })));
     if (retail) catalogErrors.push(...(await syncRetail(db, retail)));
     // The shared community barcode list (one small request; unchanged lists cost almost nothing).
@@ -314,21 +384,21 @@ export async function addLocation(db: DB, raw: unknown): Promise<Result> {
   return r.length ? { ok: true } : { ok: false, status: 409, error: `${p.value} already exists.` };
 }
 
-/** Renames a location and moves its sets along with it. */
+/** Renames a location and moves its copies along with it. */
 export async function renameLocation(db: DB, from: string, raw: unknown): Promise<Result> {
   const p = parseLocation(raw);
   if (!p.ok) return { ...p, status: 400 };
   if ((await listLocations(db)).includes(p.value)) return { ok: false, status: 409, error: `${p.value} already exists.` };
   const r = await db.update(locations).set({ name: p.value }).where(eq(locations.name, from)).returning().all();
   if (!r.length) return { ok: false, status: 404, error: `${from} doesn't exist.` };
-  await db.update(sets).set({ location: p.value }).where(eq(sets.location, from));
+  await db.update(setCopies).set({ location: p.value }).where(eq(setCopies.location, from));
   return { ok: true };
 }
 
-/** Deletes a location only when no set uses it, so nothing is silently moved. */
+/** Deletes a location only when no copy uses it, so nothing is silently moved. */
 export async function deleteLocation(db: DB, name: string): Promise<Result> {
-  const [{ n }] = await db.select({ n: sql<number>`count(*)` }).from(sets).where(eq(sets.location, name)).all();
-  if (n) return { ok: false, status: 409, error: `${n} set${n === 1 ? '' : 's'} still use ${name}. Move them first.` };
+  const [{ n }] = await db.select({ n: sql<number>`count(*)` }).from(setCopies).where(eq(setCopies.location, name)).all();
+  if (n) return { ok: false, status: 409, error: `${n} cop${n === 1 ? 'y' : 'ies'} still use ${name}. Move them first.` };
   await db.delete(locations).where(eq(locations.name, name));
   return { ok: true };
 }

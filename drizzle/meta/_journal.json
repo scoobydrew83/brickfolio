@@ -127,6 +127,48 @@
       "when": 1793749666467,
       "tag": "0017_build_parts_error",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "6",
+      "when": 1793764631493,
+      "tag": "0018_identifiers",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "6",
+      "when": 1793764640022,
+      "tag": "0019_identifiers_backfill",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "6",
+      "when": 1793764653891,
+      "tag": "0020_drop_set_barcodes",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "6",
+      "when": 1793766675883,
+      "tag": "0021_set_copies",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "6",
+      "when": 1793766676882,
+      "tag": "0022_copies_backfill",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "6",
+      "when": 1793766912490,
+      "tag": "0023_share_links",
+      "breakpoints": true
     }
   ]
 }

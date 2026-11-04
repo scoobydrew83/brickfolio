@@ -2,7 +2,7 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { useState } from 'react';
 import { Box, ExternalLink, Pencil, Puzzle, Trash2 } from 'lucide-react';
-import { displayNo, num, type SetRow } from '@/lib/sets';
+import { copiesSummary, displayNo, num, type SetRow } from '@/lib/sets';
 import { retailGain, retirement } from '@/lib/retail';
 import { blLink, type Money } from './ui';
 import { Button, Callout, CONDITION_TONE, Chip, IconButton, buttonClass, cx } from '../ui';
@@ -36,7 +36,7 @@ export function SetCard({ s, onEdit, onParts, onRemove, onRetry, pending, money,
             <Link href={href} className="rounded-chip text-sm font-bold tabular-nums text-fg-3 hover:text-link">#{displayNo(s.setNo)}</Link>
             <span className="flex items-center gap-1">
               {ret && <RetireChip ret={ret} />}
-              {s.condition && <Chip tone={CONDITION_TONE[s.condition] ?? 'neutral'}>{s.condition}</Chip>}
+              {s.condition ? <Chip tone={CONDITION_TONE[s.condition] ?? 'neutral'}>{s.condition}</Chip> : s.mixed.condition ? <Chip>Mixed</Chip> : null}
             </span>
           </div>
           {/* Two lines reserved for the name on multi-column layouts, so cards in a row line up. */}
@@ -54,12 +54,15 @@ export function SetCard({ s, onEdit, onParts, onRemove, onRetry, pending, money,
 
         <Callout className="mt-auto px-3 pt-2.5 pb-2">
           <div className="flex items-end justify-between gap-3">
-            <p className="text-2xl font-extrabold leading-none tabular-nums [font-stretch:112%]" title={`${s.qty} ${s.qty === 1 ? 'copy' : 'copies'}`}>
-              {s.qty}x
-            </p>
+            <div>
+              <p className="text-2xl font-extrabold leading-none tabular-nums [font-stretch:112%]" title={`${s.qty} ${s.qty === 1 ? 'copy' : 'copies'}`}>
+                {s.qty}x
+              </p>
+              <p className="mt-1 text-xs text-fg-3">{copiesSummary(s.copies)}</p>
+            </div>
             <div className="text-right">
-              <p className="text-xs text-fg-3">Est. Value{s.qty > 1 ? ' each' : ''}</p>
-              <p className="text-2xl font-extrabold leading-tight tracking-tight tabular-nums [font-stretch:112%]">{money(s.estValue)}</p>
+              <p className="text-xs text-fg-3">Est. Value{s.qty > 1 ? ` (${money(s.estValue)} each)` : ''}</p>
+              <p className="text-2xl font-extrabold leading-tight tracking-tight tabular-nums [font-stretch:112%]">{money(s.valueTotal)}</p>
             </div>
           </div>
           <dl className="mt-2 grid grid-cols-3 gap-1 border-t border-line pt-1.5 text-xs tabular-nums">
@@ -73,10 +76,16 @@ export function SetCard({ s, onEdit, onParts, onRemove, onRetry, pending, money,
               : s.qtySold ? `From ${s.qtySold} recent BrickLink sales` : 'No recent BrickLink sales'}
             {s.missingPct ? <span className="font-semibold text-warn" title={s.missingMarked ? `From ${s.missingMarked} marked missing piece${s.missingMarked === 1 ? '' : 's'}` : 'Typed in by hand'}> · {s.missingPct}% missing</span> : null}
           </p>
+          {s.gain !== null && (
+            <p className="text-xs text-fg-3" title={s.costCovered < s.qty ? `Cost known for ${s.costCovered} of ${s.qty} copies` : undefined}>
+              Cost {money(s.costBasis)} · <b className={s.gain >= 0 ? 'text-ok' : 'text-danger'}>{s.gain >= 0 ? '+' : '−'}{money(Math.abs(s.gain))}</b>
+              {s.costCovered < s.qty ? ` (${s.costCovered} of ${s.qty})` : ''}
+            </p>
+          )}
         </Callout>
 
         <div className="flex items-center gap-0.5 text-sm">
-          <span className="mr-auto truncate text-xs text-fg-3" title="Location">{s.location || 'No location'}</span>
+          <span className="mr-auto truncate text-xs text-fg-3" title="Location">{locationLabel(s)}</span>
           <a href={blLink(s.setNo)} target="_blank" rel="noreferrer" aria-label="Open on BrickLink" title="Open on BrickLink" className={cx(buttonClass('ghost', 'sm'), 'size-8 px-0')}><ExternalLink aria-hidden className="size-4" /></a>
           <IconButton icon={Puzzle} label="Parts list" onClick={() => onParts(s)} />
           <IconButton icon={Pencil} label="Edit" onClick={() => onEdit(s)} />
@@ -87,7 +96,14 @@ export function SetCard({ s, onEdit, onParts, onRemove, onRetry, pending, money,
   );
 }
 
-/** Two-step remove. With several copies it removes one. */
+/** The shared location, "2 locations" when copies differ, or "No location". */
+export function locationLabel(s: Pick<SetRow, 'location' | 'mixed' | 'copies'>): string {
+  if (s.location) return s.location;
+  if (!s.mixed.location) return 'No location';
+  return `${new Set(s.copies.filter((c) => c.status !== 'parted_out').map((c) => c.location ?? '')).size} locations`;
+}
+
+/** Two-step remove. With several copies it removes the newest one. */
 export function RemoveButton({ s, onRemove, busy, compact = true }: { s: SetRow; onRemove: () => void; busy: boolean; compact?: boolean }) {
   const [confirming, setConfirming] = useState(false);
   const label = s.qty > 1 ? 'Remove one' : 'Remove';

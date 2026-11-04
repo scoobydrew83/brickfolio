@@ -237,7 +237,7 @@ All shared UI lives in `components/ui` (`import { Button, Callout, … } from '@
 - ~~Value vs. retail~~ Shipped (Brickset): retail price and gain % per set and for the collection.
 - ~~Retirement watch~~ Shipped (Brickset): Retiring/Retired chips on sets and wishlist items, and an Availability filter.
 - ~~Quick add~~ Shipped (0.5.0): **Paste a list** and `POST /api/v1/sets/bulk`. ~~Barcode scan~~ Shipped (0.7.0): `/scan`, one at a time or many in a row, saved barcodes, optional CompareTheBricks and BrickEconomy lookups. Shipped (0.8.0): offline scanning (service worker, saved barcodes on the device, an outbox), the community barcode list (CC0 file in the repo, reviewed by PR), minifigure box codes (Data Matrix, L-Scan table), and reading the set number from the box (OCR). Still to do: USB/Bluetooth barcode scanners, minifigure codes resolved offline, and automatic trust rules for community submissions.
-- **Read-only share link** for showing a collection without giving out access.
+- ~~**Read-only share link**~~ for showing a collection without giving out access (shipped, see Next ideas #1).
 
 ### P2: bigger bets
 - ~~What can I build~~ Shipped (`/build`): alternate builds of owned sets matched against all owned parts, with a Wanted List export. Still to do: official sets and community MOCs beyond alternates.
@@ -249,17 +249,46 @@ All shared UI lives in `components/ui` (`import { Button, Callout, … } from '@
 - ~~Retirement Radar~~ Shipped (0.5.0): `/radar`, retiring timeline, growth per year since retiring, Designer Program and SMART Play flags, and retire-soon alerts. Still to do: sealed vs. used value gap (needs both price guides per set, which costs BrickLink calls).
 
 ### Next ideas (ranked, November 2026)
-Trends behind them: the BrickLink Designer Program is the fastest-growing area of the resale market (about 16% a year against about 6% overall, BrickEconomy mid-2026); 2026 retirement dates were reshuffled across many themes; some SMART Play sets retire early.
-1. **Read-only share link** for showing a collection without giving out access.
-2. ~~Designer Program tracker~~ Shipped (0.6.0): on the Radar page, with pre-order alerts. Still to do: fill projects automatically if BrickLink ever offers a feed.
-3. **Sealed vs. built backlog** ("pile of shame"): built/unbuilt per copy, build dates, and the new-vs-used value gap.
-4. ~~MCP server~~ Shipped (0.6.0): `/api/mcp`, read-only tools. Still to do: OAuth so it can be added as a claude.ai connector, and opt-in write tools (add a set, edit the wishlist).
-5. **Brickognize photo scan** to add minifigs and loose parts from a phone (sets: barcode scan shipped in 0.7.0).
-6. ~~Insurance and valuation report~~ Shipped (0.6.0): **Settings → Valuation report**. Still to do: photos in the report.
-7. **Retailer deal alerts** for wishlist sets via the n8n flows in `docs/n8n/`.
-8. **Loose-parts bins:** storage locations for parts outside sets, feeding "What can I build?".
-9. **BrickOwl** as a second marketplace.
-10. **Multiple collections or users.**
+Trends behind them: the BrickLink Designer Program is the fastest-growing area of the resale market (about 16% a year against about 6% overall, BrickEconomy mid-2026); 2026 retirement dates were reshuffled across many themes; some SMART Play sets retire early. The order below also follows a gap review: the biggest trust problem in the number is condition blindness (sealed vs. built), and the biggest technical limit is the BrickLink call budget.
+
+Already shipped from earlier lists: ~~Designer Program tracker~~ (0.6.0, still to do: fill projects automatically if BrickLink offers a feed), ~~MCP server~~ (0.6.0, still to do: OAuth for a claude.ai connector and opt-in write tools), ~~Insurance and valuation report~~ (0.6.0, still to do: photos in the report).
+
+1. ~~**Read-only share link**~~ Shipped: `/share/<token>`, hashed tokens, opt-in values, locations and notes, a Funnel overlay and Access bypass rules. Still to do: the image cache (#34), so the page doesn't load photos from BrickLink.
+2. ~~**Copies, not just quantities.**~~ Shipped: a `set_copies` table (status, condition, location, dates, cost basis, gift with purchase, per-copy value, `collection_id` for step 10), with missing parts per copy. `sets.qty`, `condition`, `location` and `missing_pct` are legacy: no longer read or written, and dropped (with `ALTER TABLE DROP COLUMN`) once every installation has run the backfill.
+3. **One identifier table and a local catalog.** See [Identifiers](#identifiers). Ingest Rebrickable's daily CSVs (themes, sets, inventories, parts, elements) and move set parts lists from BrickLink to Rebrickable. On Cloudflare D1, ingest only the inventories for owned, wishlisted and alternate-build sets; `inventory_parts` has over a million rows.
+4. **Prices from several sources, and the sealed vs. used gap.** See [Prices from several sources](#prices-from-several-sources). Fetch both BrickLink guides per set (the second one weekly, paid for by the calls freed in step 3) and show the gap on the set page and Radar.
+5. **Loose-parts lots and build allocations.** Storage locations for parts outside sets (a `part_lots` table: part, color, qty, location, source bin or set copy), filled by BrickLink XML or Rebrickable CSV import and by marking a copy "parted out". Builds reserve parts from it, so parts set aside for a MOC don't count as free in "What can I build?".
+6. **Brickognize photo scan** to add minifigs (now) and loose parts (after step 5) from a phone. Off unless turned on, since photos go to a third party.
+7. **Retailer deal alerts:** the n8n flows in `docs/n8n/` post `offer` prices to `POST /api/v1/prices`; the wishlist's "under target" alert reads the lowest recent offer. No scraping inside the app.
+8. **BrickOwl and BrickEconomy as value sources:** clients in `lib/brickowl/` and `lib/brickeconomy/` writing price rows, shown next to the primary value. BrickOwl store and orders support comes later. Check BrickEconomy's API terms and quotas first.
+9. **MILS / layout planner:** a 2D baseplate grid (32×32 modules), modules placed on it and linked to set copies or builds, and a combined "what I still need" parts list from step 5's allocations. A layout is a group of builds plus a grid, so it needs steps 2 and 5. 3D rendering of the layout comes later, if at all.
+10. **Multiple collections, then users.** Collections first (copies already carry `collection_id`); users need per-user permissions on top of today's login.
+
+### Identifiers
+One `identifiers` table maps every ID scheme to one item, replacing `set_barcodes` and the inline Rebrickable → BrickLink mapping in `lib/rebrickable/client.ts`.
+- **Kinds:** set, minifig, part, color, element.
+- **Schemes:** `lego` (75192), `bricklink` (75192-1, sw0001, 3001), `rebrickable` (fig-000123), `brickset`, `brickowl`, `brickeconomy`, `ldraw` (3001.dat), `gtin` (UPC/EAN), `lego_element` (element ID = part + color).
+- **Canonical key:** the BrickLink ID, because prices and missing parts use it. Every other ID maps to it.
+- **Other columns:** source (user, community, rebrickable, brickset, …), verified, region, source ref, timestamps.
+- **Not one-to-one:** a UPC can cover regional boxes, parts are many-to-many (BrickLink merges molds Rebrickable splits), and element IDs map to a part + color pair. So the unique key is (kind, scheme, value, canonical ID, source), as in `set_barcodes` today.
+- **Filled from:**
+  - Rebrickable API `external_ids` (colors in one call, parts in about 60 pages). Rebrickable's CSVs carry no BrickLink IDs (checked November 2026).
+  - Rebrickable `elements.csv` for element IDs.
+  - Brickset.
+  - BrickOwl's ID lookup.
+  - Your scans.
+- **Barcode details and the community list:** provider details for barcodes (name, year, image) go in a small side table. The community barcode file and its review by PR don't change.
+- **Box codes:** minifigure box codes stay in `minifig_codes`; they need the factory letter and year digit.
+- **One lookup:** every import, export and scan resolves IDs through one function.
+
+### Prices from several sources
+One `price_observations` table holds every price the app knows.
+- **Row:** the item (kind + canonical ID), source, type, condition (N/U), currency, amount, sample size, date and link.
+  - **Sources:** bricklink, brickowl, brickeconomy, brickset, retailer:<name>, manual.
+  - **Types:** sold average, asking, estimate, retail, offer.
+- **Est. Value:** comes from one primary source, chosen in Settings (BrickLink by default). The set page lists the other sources next to it, each with its label, sample size and date. Sources are never blended.
+- **Migration:** `price_snapshots` and `minifig_price_snapshots` move in as BrickLink sold rows. `part_prices` stays as it is (a high-volume cache, not history).
+- **What's then just a query:** the sealed vs. used gap, deal alerts and a second marketplace.
 
 ## Integrations
 
@@ -271,17 +300,18 @@ Trends behind them: the BrickLink Designer Program is the fastest-growing area o
 | **Brickset** | Retail prices by region, launch and retirement dates, instructions links, owned/wanted sync | Free API key, user hash for collection sync | Powers value vs. retail and retirement watch. |
 | BrickOwl | Second marketplace for prices and store inventory | API key | Later: lets non-BrickLink sellers use the Store and Orders pages. |
 | Brickognize | Recognize a part, set or minifig from a photo | Public API | Later: phone "scan to add". |
+| BrickEconomy | Value estimates and growth; already an optional barcode lookup | API key | Later: a second value source, shown next to the primary value, never blended into it. |
 
 ### How Rebrickable works with BrickLink
 - **BrickLink = money.** Sold prices, Est. Value, value history, store and orders come only from BrickLink. Rebrickable has no price data.
 - **Rebrickable = catalog.** Phase 1 (shipped): with `REBRICKABLE_API_KEY` set, the daily sync stores the theme list and each set's theme and minifigure count (`lib/rebrickable/client.ts`, `lib/service/catalog.ts`). A set is matched once; later syncs only check new sets. Set numbers are the same format on both sites (`10280-1`).
 - **Next phases**, each improving values indirectly:
   1. Parts lists from Rebrickable instead of BrickLink, saving BrickLink calls from the 5,000/day limit.
-  2. A part and color ID map (Rebrickable `external_ids` → BrickLink and LDraw), needed for the 3D viewer and part-out pricing.
+  2. ~~A part and color ID map~~ Shipped: Rebrickable `external_ids` → BrickLink and LDraw, stored in the `identifiers` table (`lib/identifiers/`). The daily sync maps every colour in one call and walks the parts catalog `REBRICKABLE_ID_PAGES_PER_SYNC` pages at a time (`lib/service/identifiers.ts`); each alternate build's parts list adds the mappings it came with. Needed for the 3D viewer and part-out pricing.
   3. Missing parts for Partial sets: price the parts that are actually missing instead of a flat Missing %.
   4. Part-out value: Rebrickable parts list priced with BrickLink's per-part price guide (cached; watch the daily limit).
   5. Set-list sync with a Rebrickable user token, and "what can I build" from the parts you own.
-- For large collections, Rebrickable's free daily CSV downloads (themes, sets, inventories) can replace API calls entirely.
+- For large collections, Rebrickable's free daily CSV downloads (themes, sets, inventories) can replace API calls entirely. They have no BrickLink IDs, so part and color ID maps still come from the API (see [Identifiers](#identifiers)).
 
 Integration rules: each one is optional and turned on by env vars (like the BrickLink keys today), sits behind its own client in `lib/<service>/`, respects rate limits in the daily sync, and shows its source next to any number it supplies.
 

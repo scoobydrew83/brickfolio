@@ -45,10 +45,10 @@ it('prices parts once, caps calls, and works out part-out value and coverage', a
 });
 
 it('weights Missing % by part price once the set is priced', async () => {
-  await saveMissing(db, '10497-1', [{ partNo: 'sw0001', colorId: null, type: 'MINIFIG', qty: 1 }]);
+  await saveMissing(db, '10497-1', null, [{ partNo: 'sw0001', colorId: null, type: 'MINIFIG', qty: 1 }]);
   expect((await svc.getSet(db, '10497-1'))!.missingPct).toBe(6.7); // 1 of 15 pieces, before part prices
   await refreshPartPrices(db, price, 'USD', { maxCalls: 10 });
-  await saveMissing(db, '10497-1', [{ partNo: 'sw0001', colorId: null, type: 'MINIFIG', qty: 1 }]);
+  await saveMissing(db, '10497-1', null, [{ partNo: 'sw0001', colorId: null, type: 'MINIFIG', qty: 1 }]);
   expect((await svc.getSet(db, '10497-1'))!.missingPct).toBe(80); // the minifig is $20 of $25
 });
 

@@ -2,11 +2,12 @@
 // These sets are made once and retire as soon as the window closes, which is why the window gets alerts.
 import { and, asc, eq, isNotNull, isNull } from 'drizzle-orm';
 import type { DB } from '../db/types';
-import { designerProjects, sets, wishlist } from '../db/schema';
+import { designerProjects, wishlist } from '../db/schema';
 import { displayNo, money, setNo as fullSetNo } from '../sets';
 import { daysUntil } from '../radar';
 import type { Send } from './alerts';
 import { getCurrency, type Result } from './sets';
+import { ownedSummary } from './copies';
 
 import { STAGES, type Stage } from '../designer';
 
@@ -82,7 +83,7 @@ export function windowOf(p: { preorderStart: string | null; preorderEnd: string 
 export async function listProjects(db: DB, today = new Date().toISOString().slice(0, 10)): Promise<ProjectRow[]> {
   const rows = await db.select().from(designerProjects).orderBy(asc(designerProjects.createdAt), asc(designerProjects.id)).all();
   const nos = rows.flatMap((r) => (r.setNo ? [r.setNo] : []));
-  const owned = new Map(nos.length ? (await db.select({ setNo: sets.setNo, qty: sets.qty }).from(sets).all()).map((s) => [fullSetNo(s.setNo), s.qty]) : []);
+  const owned = new Map(nos.length ? [...(await ownedSummary(db))].map(([no, o]) => [fullSetNo(no), o.qty]) : []);
   const wished = new Set(nos.length ? (await db.select({ setNo: wishlist.setNo }).from(wishlist).all()).map((w) => fullSetNo(w.setNo)) : []);
   const rank = { open: 0, upcoming: 1, none: 2, closed: 3 } as const;
   return rows

@@ -6,7 +6,8 @@
 // about your collection) for a pull request or issue. See CONTRIBUTING.md → Community barcodes.
 import { and, eq, notInArray, sql } from 'drizzle-orm';
 import type { DB } from '../db/types';
-import { minifigCodes, setBarcodes, settings } from '../db/schema';
+import { minifigCodes, settings } from '../db/schema';
+import { barcodeCounts, barcodeRows, pruneBarcodes, saveBarcode } from '../identifiers/barcodes';
 import { parseBarcode } from './gtin';
 import { parseFigCode } from './figcodes';
 import shipped from './data/community.json';
@@ -74,7 +75,7 @@ export function communityConfig(env: Record<string, string | undefined> = proces
 
 export async function communityStatus(db: DB, env: Record<string, string | undefined> = process.env): Promise<CommunityStatus> {
   const c = communityConfig(env);
-  const [s] = await db.select({ n: sql<number>`count(*)` }).from(setBarcodes).where(eq(setBarcodes.source, 'community')).all();
+  const s = { n: (await barcodeCounts(db)).community ?? 0 };
   const [m] = await db.select({ n: sql<number>`count(*)` }).from(minifigCodes).where(eq(minifigCodes.source, 'community')).all();
   return { ...c, syncedAt: await getSetting(db, 'community_synced_at'), sets: Number(s.n), minifigs: Number(m.n) };
 }
@@ -88,11 +89,9 @@ export async function applyCommunity(db: DB, file: unknown): Promise<{ sets: num
   const figs = p.minifigs.filter((m) => !disputed.has(`${m.code}|${m.factory}|${m.year}`));
   const t = new Date().toISOString();
   for (const s of sets) {
-    await db.insert(setBarcodes).values({ barcode: s.barcode, format: s.format, gtin: s.gtin, setNo: s.setNo, source: 'community', verified: false })
-      .onConflictDoUpdate({ target: [setBarcodes.gtin, setBarcodes.setNo, setBarcodes.source], set: { lastSeenAt: t } });
+    await saveBarcode(db, { barcode: s.barcode, format: s.format, gtin: s.gtin, setNo: s.setNo, source: 'community', verified: false }, 'seen');
   }
-  const keepSets = sets.map((s) => `${s.gtin}|${s.setNo}`);
-  await db.delete(setBarcodes).where(and(eq(setBarcodes.source, 'community'), keepSets.length ? notInArray(sql`${setBarcodes.gtin} || '|' || ${setBarcodes.setNo}`, keepSets) : sql`1 = 1`));
+  await pruneBarcodes(db, 'community', sets.map((s) => `${s.gtin}|${s.setNo}`));
   for (const m of figs) {
     const row = { name: m.name, series: m.series, rbFigNo: m.rbFigNo, updatedAt: t };
     await db.insert(minifigCodes).values({ code: m.code, factory: m.factory, year: m.year, source: 'community', ...row })
@@ -140,8 +139,8 @@ export async function ensureCommunity(db: DB, env: Record<string, string | undef
  * figure. Nothing else from the collection.
  */
 export async function shareable(db: DB): Promise<CommunityFile> {
-  const sets = await db.select({ barcode: setBarcodes.barcode, setNo: setBarcodes.setNo }).from(setBarcodes)
-    .where(and(eq(setBarcodes.source, 'user'), eq(setBarcodes.verified, true))).orderBy(setBarcodes.setNo).all();
+  const sets = (await barcodeRows(db, { source: 'user', verified: true })).map((r) => ({ barcode: r.barcode, setNo: r.setNo }))
+    .sort((a, b) => (a.setNo < b.setNo ? -1 : a.setNo > b.setNo ? 1 : 0));
   const figs = await db.select().from(minifigCodes).where(and(eq(minifigCodes.source, 'user'), eq(minifigCodes.verified, true))).orderBy(minifigCodes.series, minifigCodes.name).all();
   return {
     license: 'CC0-1.0',

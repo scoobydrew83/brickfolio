@@ -23,6 +23,7 @@ services:
       - ALERT_WEBHOOK_URL
       - ALERT_WEBHOOK_FORMAT
       - APP_URL
+      - SHARE_BASE_URL
       # The LDraw parts library for the 3D view lives in the data volume; download it from Settings.
       - LDRAW_LIBRARY_DIR=${LDRAW_LIBRARY_DIR:-/data/ldraw}
       - LDRAW_LIBRARY_URL

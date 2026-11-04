@@ -57,6 +57,8 @@ The Rebrickable part runs at the end of each BrickLink sync. It matches every se
 
 If nothing fills in, use **Test key** first. "Invalid token" means the key is wrong. "Couldn't reach rebrickable.com" means the container has no internet access or DNS. "Key not set" means the variable isn't reaching the container: in Coolify, add `REBRICKABLE_API_KEY` in the Environment Variables tab and redeploy.
 
+With the same key, each sync also maps Rebrickable's part and colour numbers to BrickLink and LDraw ones: every colour in one call (monthly), and 20 pages of the parts catalog (1,000 parts a page, about a second each) per sync. A full pass is about 60 pages, so it takes three syncs, and is redone every 30 days. `REBRICKABLE_ID_PAGES_PER_SYNC` changes the number of pages; `0` turns it off.
+
 With the same key, each sync also looks up alternate builds of your sets and their parts (at most 40 Rebrickable calls per sync), and **Parts → What can I build?** ranks them by how many of their parts you already own. Each build can export its missing parts as a BrickLink Wanted List (Wanted → Upload on BrickLink).
 
 Rebrickable doesn't share every build's parts list through its API: designers can keep one private or sell it with the instructions, and Rebrickable answers "You do not have permission" for those. Brickfolio notes each such build, skips it, and asks again after 90 days. **Settings → Rebrickable** shows how many there are, and **What can I build?** lists them with a link to each on Rebrickable. If none of your builds' lists come through, the sync stops asking after five refusals, so it doesn't spend calls.
@@ -243,7 +245,7 @@ docker compose logs -f tailscale     # wait for it to sign in, then Ctrl+C
 
 Open `https://brickfolio.<your-tailnet>.ts.net` from any device signed in to your tailnet. The first visit can take a few seconds while Tailscale gets the HTTPS certificate.
 
-The app sees who you are from the `Tailscale-User-Login` header that `tailscale serve` adds. Funnel is off, and the app only listens inside the Tailscale container, so the header can't be faked by another device.
+The app sees who you are from the `Tailscale-User-Login` header that `tailscale serve` adds. Funnel is off for the app, and the app only listens inside the Tailscale container, so the header can't be faked by another device. If you [share read-only links](#share-a-read-only-link) with the Funnel overlay, Funnel only reaches the share pages on a second port. Those pages ignore identity headers and refuse anything but GET.
 
 ## Docker + Cloudflare Tunnel
 
@@ -297,6 +299,20 @@ docker compose logs -f cloudflared   # look for "Registered tunnel connection", 
 Open `https://bricks.example.com` and sign in through Access.
 
 The app checks Access's signed JWT on every request, so knowing the hostname or the tunnel isn't enough to get in.
+
+## Share a read-only link
+
+**Settings → Share links** creates a link like `https://<host>/share/bfs_…` that shows your sets (and, if you choose, minifigures, values, locations and notes) to anyone who has it. There's no editing, no settings and no API. The link is shown once; revoke it in Settings and it stops working at once. Unknown, revoked and expired links all get the same 404.
+
+The share pages need no login, but your app may not be reachable from the internet. To open only `/share`:
+
+- **Tailscale:** add the Funnel overlay. It funnels a second port, 8443, which proxies only `/share/`, the static files and images. Port 443 stays on your tailnet.
+  1. In the tailnet policy, allow Funnel for the tag: `"nodeAttrs": [{ "target": ["tag:brickfolio"], "attr": ["funnel"] }]`.
+  2. Put `COMPOSE_FILE=docker-compose.yml:compose.tailscale.yml:compose.tailscale-funnel.yml` and `SHARE_BASE_URL=https://brickfolio.<tailnet>.ts.net:8443` in `.env`.
+  3. Restart. Settings now shows links on port 8443.
+- **Cloudflare Access** (Docker tunnel or Workers): in Zero Trust → Access → Applications, add self-hosted applications for the same hostname with paths `share`, `_next/static` and `_next/image`, each with one policy: **Action: Bypass, Include: Everyone**. The more specific path wins over the main application. Without the static files the page loads without styles, and photos go through `/_next/image`.
+
+`SHARE_BASE_URL` sets the address used in new links. It defaults to `APP_URL`, then to the address you opened Settings on.
 
 ## Portainer, Dockge, Synology and other Docker GUIs
 

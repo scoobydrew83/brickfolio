@@ -7,7 +7,8 @@ import type { DB } from '../db/types';
 import { setNo as fullSetNo } from '../sets';
 import { SOON_DAYS } from '../retail';
 import { getCurrency } from './sets';
-import { saveBricksetBarcodes } from './barcodes';
+import { saveBarcodesFromBrickset } from './barcodes';
+import { remember } from '../identifiers/resolve';
 
 export { collectionGain, retailGain, retirement } from '../retail';
 
@@ -54,7 +55,9 @@ export async function syncRetail(db: DB, src: RetailSource, opts: { maxCalls?: n
     await db.update(wishlist).set(row).where(or(eq(wishlist.setNo, no), eq(wishlist.setNo, short)));
   }
   // Brickset's EAN and UPC for these sets, so scanning a box you own or want needs no outside lookup.
-  await saveBricksetBarcodes(db, result.found);
+  await saveBarcodesFromBrickset(db, result.found);
+  // And Brickset's own id for each set, for links and imports from Brickset.
+  await remember(db, result.found.filter((s) => s.bricksetId).map((s) => ({ kind: 'set', scheme: 'brickset', value: s.bricksetId, canonical: s.setNo, source: 'brickset', sourceRef: String(s.bricksetId) })));
   return [];
 }
 

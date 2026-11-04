@@ -1,0 +1,24 @@
+# Overlay on compose.tailscale.yml: share read-only links (/share/…) on the public internet with Tailscale Funnel,
+# while the app itself stays on your tailnet. Funnel can't be limited to a path on one port, so a second HTTPS port
+# (8443) is funneled and proxies only the share pages and the static files they need. Port 443 is unchanged.
+#   COMPOSE_FILE=docker-compose.yml:compose.tailscale.yml:compose.tailscale-funnel.yml
+# The tailnet policy must allow Funnel for the tag: "nodeAttrs": [{ "target": ["tag:brickfolio"], "attr": ["funnel"] }]
+# Set SHARE_BASE_URL=https://<TS_HOSTNAME>.<tailnet>.ts.net:8443 so Settings shows the public link.
+configs:
+  serve:
+    content: |
+      {
+        "TCP": { "443": { "HTTPS": true }, "8443": { "HTTPS": true } },
+        "Web": {
+          "$${TS_CERT_DOMAIN}:443": { "Handlers": { "/": { "Proxy": "http://127.0.0.1:3000" } } },
+          "$${TS_CERT_DOMAIN}:8443": { "Handlers": {
+            "/share/": { "Proxy": "http://127.0.0.1:3000/share/" },
+            "/_next/static/": { "Proxy": "http://127.0.0.1:3000/_next/static/" },
+            "/_next/image": { "Proxy": "http://127.0.0.1:3000/_next/image" },
+            "/favicon.ico": { "Proxy": "http://127.0.0.1:3000/favicon.ico" },
+            "/icon": { "Proxy": "http://127.0.0.1:3000/icon" },
+            "/apple-icon": { "Proxy": "http://127.0.0.1:3000/apple-icon" }
+          } }
+        },
+        "AllowFunnel": { "$${TS_CERT_DOMAIN}:443": false, "$${TS_CERT_DOMAIN}:8443": true }
+      }

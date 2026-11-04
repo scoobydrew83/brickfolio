@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { crossSite } from './auth';
+import { crossSite, isPublicShareRequest } from './auth';
 
 const h = (o: Record<string, string>) => new Headers(o);
 
@@ -17,4 +17,13 @@ it('blocks requests from other sites', () => {
   expect(crossSite(h({ host: 'brickfolio.tail1.ts.net', 'sec-fetch-site': 'same-site', origin: 'https://other.tail1.ts.net' }))).toBe(true);
   expect(crossSite(h({ host: '127.0.0.1:3000', origin: 'null' }))).toBe(true); // sandboxed iframe / file://
   expect(crossSite(h({ host: '127.0.0.1:3000', origin: 'http://127.0.0.1:8080' }))).toBe(true); // other port = other origin
+});
+
+it('only GET and HEAD of /share/… skip login', () => {
+  expect(isPublicShareRequest('/share/bfs_abc', 'GET')).toBe(true);
+  expect(isPublicShareRequest('/share/bfs_abc', 'HEAD')).toBe(true);
+  expect(isPublicShareRequest('/share/bfs_abc', 'POST')).toBe(false); // server actions are POSTs
+  expect(isPublicShareRequest('/sharex', 'GET')).toBe(false);
+  expect(isPublicShareRequest('/settings', 'GET')).toBe(false);
+  expect(isPublicShareRequest('/api/v1/share-links', 'GET')).toBe(false);
 });

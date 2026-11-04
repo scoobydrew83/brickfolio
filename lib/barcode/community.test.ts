@@ -1,7 +1,8 @@
 import { beforeEach, expect, it } from 'vitest';
+import { barcodeRows, saveBarcode } from '../identifiers/barcodes';
 import { openNodeDb } from '../db/node';
 import type { DB } from '../db/types';
-import { minifigCodes, setBarcodes } from '../db/schema';
+import { minifigCodes } from '../db/schema';
 import { applyCommunity, communityStatus, ensureCommunity, parseCommunity, shareable, shareIssueUrl, syncCommunity } from './community';
 import { resolveBarcode } from './resolve';
 import { rememberBarcode } from '../service/barcodes';
@@ -37,7 +38,7 @@ it('applies the list, skips disputed codes, and drops entries removed from it', 
   expect(await resolveBarcode(db, '673419264150', { providers: [] })).toMatchObject({ status: 'matched', candidates: [{ setNo: '75192-1', source: 'community' }] });
   expect(await communityStatus(db, {})).toMatchObject({ sets: 2, minifigs: 1 });
   await applyCommunity(db, file([{ barcode: '673419264150', setNo: '75192-1' }, { barcode: '96385074', setNo: '1-1' }, { barcode: '96385074', setNo: '2-1' }]));
-  const rows = await db.select().from(setBarcodes).all();
+  const rows = await barcodeRows(db);
   expect(rows.map((r) => r.setNo)).toEqual(['75192-1']); // 10497 removed; 96385074 disputed
   expect(await db.select().from(minifigCodes).all()).toHaveLength(0);
 });
@@ -81,7 +82,7 @@ it('ensureCommunity loads the shipped list once', async () => {
 
 it('shares only your confirmed codes, with nothing else from the collection', async () => {
   await rememberBarcode(db, '673419264150', '75192');
-  await db.insert(setBarcodes).values({ barcode: '5702015869935', format: 'EAN_13', gtin: '5702015869935', setNo: '10497-1', source: 'comparethebricks' });
+  await saveBarcode(db, { barcode: '5702015869935', format: 'EAN_13', gtin: '5702015869935', setNo: '10497-1', source: 'comparethebricks' });
   await rememberFigCode(db, '6472866 444S3', { name: 'Film Noir Detective', series: 'Series 25', rbFigNo: 'fig-013525' });
   const f = await shareable(db);
   expect(f).toEqual({ license: 'CC0-1.0', sets: [{ barcode: '673419264150', setNo: '75192-1' }], minifigs: [{ code: '6472866', factory: 'S', year: '3', name: 'Film Noir Detective', series: 'Series 25', rbFigNo: 'fig-013525' }] });

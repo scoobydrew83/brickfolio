@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useState, useTransition } from 'react';
-import { shareCodes, syncCommunityNow, bricksetStatus, downloadLdrawLibrary, ldrawLibraryStatus, rebrickableStatus, syncBricksetNow, syncRebrickableNow, testBricksetKey, testRebrickableKey, type BricksetStatus, type RebrickableStatus, addLocation, createToken, deleteLocation, importFile, renameLocation, revokeToken, setCurrency, type Result } from '@/app/actions';
+import { shareCodes, syncCommunityNow, bricksetStatus, downloadLdrawLibrary, ldrawLibraryStatus, rebrickableStatus, syncBricksetNow, syncRebrickableNow, testBricksetKey, testRebrickableKey, type BricksetStatus, type RebrickableStatus, addLocation, createShareLink, createToken, deleteLocation, revokeShareLink, importFile, renameLocation, revokeToken, setCurrency, type Result } from '@/app/actions';
+import { Copy } from 'lucide-react';
 import { Banner, Button, field } from './ui';
 import { PageHeader } from './shell/PageHeader';
 import type { LibraryStatus } from '@/lib/ldraw/download';
@@ -10,13 +11,15 @@ import Link from 'next/link';
 
 type BarcodeStatus = { caps: BarcodeCapabilities; saved: { total: number; user: number; community: number; brickset: number; providers: number }; community: CommunityStatus };
 
+import type { ShareLinkRow } from '@/lib/service/share';
+
 type Token = { id: number; name: string; prefix: string; createdAt: string; lastUsedAt: string | null };
-type Props = { locations: string[]; currency: string; tokens: Token[]; user: string; authMode: string; priced: boolean; alerts: boolean; rebrickable: RebrickableStatus; brickset: BricksetStatus; ldraw: LibraryStatus; barcodes: BarcodeStatus };
+type Props = { locations: string[]; currency: string; tokens: Token[]; shares: ShareLinkRow[]; user: string; authMode: string; priced: boolean; alerts: boolean; rebrickable: RebrickableStatus; brickset: BricksetStatus; ldraw: LibraryStatus; barcodes: BarcodeStatus };
 
 const h2 = 'text-lg font-extrabold [font-stretch:110%]';
 const section = 'space-y-3 border-t border-line pt-6';
 
-export default function Settings({ locations, currency, tokens, user, authMode, priced, alerts, rebrickable, brickset, ldraw, barcodes }: Props) {
+export default function Settings({ locations, currency, tokens, shares, user, authMode, priced, alerts, rebrickable, brickset, ldraw, barcodes }: Props) {
   const [pending, start] = useTransition();
   const [message, setMessage] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
   const [newToken, setNewToken] = useState<string | null>(null);
@@ -78,6 +81,8 @@ export default function Settings({ locations, currency, tokens, user, authMode, 
           <Button type="submit">Download PDF</Button>
         </form>
       </section>
+
+      <ShareSection links={shares} />
 
       <section className={section}>
         <h2 className={h2}>API tokens</h2>
@@ -382,6 +387,81 @@ function Credits() {
         ))}
         . Every bundled package and its license: <a href={`${REPO}/THIRD_PARTY_NOTICES.md`} target="_blank" rel="noreferrer" className={ext}>third-party notices</a> · <a href={`${REPO}/NOTICE`} target="_blank" rel="noreferrer" className={ext}>NOTICE</a>.
       </p>
+    </section>
+  );
+}
+
+/** Read-only links to the collection, for people without access to the app. The URL is shown once. */
+function ShareSection({ links }: { links: ShareLinkRow[] }) {
+  const [pending, start] = useTransition();
+  const [message, setMessage] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
+  const [url, setUrl] = useState<string | null>(null);
+  const [expiry, setExpiry] = useState('never');
+  const opts = (l: ShareLinkRow) => [l.showValues && 'values', l.showLocations && 'locations', l.showNotes && 'notes', l.showMinifigs && 'minifigures'].filter(Boolean).join(', ') || 'sets only';
+  const day = (iso: string | null) => (iso ? iso.slice(0, 10) : null);
+  return (
+    <section className={section} aria-labelledby="share-title">
+      <h2 id="share-title" className={h2}>Share links</h2>
+      <p className="text-sm text-fg-3">
+        A read-only page of your sets for someone without access to the app: no editing, no settings, and no locations, notes or values unless you turn them on.
+        To reach it from outside your tailnet or Access, see <a href="https://github.com/scoobydrew83/brickfolio/blob/main/docs/install.md#share-a-read-only-link" className="text-link hover:underline">Share a read-only link</a>.
+      </p>
+      {message && <Banner kind={message.kind} onDismiss={() => setMessage(null)}>{message.text}</Banner>}
+      {url && (
+        <div className="space-y-1 rounded-control bg-warn-soft p-3 text-sm text-warn ring-1 ring-warn-ring">
+          <p className="font-semibold">Copy this link now. It won&apos;t be shown again.</p>
+          <code className="block break-all rounded-chip bg-surface px-2 py-1 font-mono text-xs">{url}</code>
+          <Button size="sm" icon={Copy} onClick={() => navigator.clipboard.writeText(url).then(() => setMessage({ kind: 'ok', text: 'Link copied.' }), () => {})}>Copy</Button>
+        </div>
+      )}
+      <ul className="divide-y divide-line text-sm">
+        {links.map((l) => (
+          <li key={l.id} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 py-2">
+            <span><b>{l.name}</b> <code className="text-xs text-fg-3">{l.prefix}…</code> <span className="text-xs text-fg-3">· {opts(l)}</span></span>
+            <span className="text-xs text-fg-3">
+              created {day(l.createdAt)} · {l.expiresAt ? (l.expired ? `expired ${day(l.expiresAt)}` : `expires ${day(l.expiresAt)}`) : 'never expires'} · {l.lastViewedAt ? `viewed ${l.views}×, last ${day(l.lastViewedAt)}` : 'not viewed yet'}
+            </span>
+            <Button variant="danger-link" disabled={pending} onClick={() => start(async () => {
+              const r = await revokeShareLink(l.id);
+              setMessage(r.ok ? { kind: 'ok', text: `Revoked ${l.name}. The link stopped working.` } : { kind: 'error', text: r.error });
+            })}>Revoke</Button>
+          </li>
+        ))}
+      </ul>
+      <form
+        className="space-y-3 rounded-control border border-line p-3"
+        onSubmit={(e) => {
+          e.preventDefault();
+          const f = e.currentTarget, d = new FormData(f);
+          const form = {
+            name: d.get('name'), showValues: d.get('showValues') === 'on', showLocations: d.get('showLocations') === 'on', showNotes: d.get('showNotes') === 'on',
+            showMinifigs: d.get('showMinifigs') === 'on', expires: expiry === 'date' ? d.get('expiresOn') : expiry,
+          };
+          start(async () => {
+            const r = await createShareLink(form);
+            if (!r.ok) return setMessage({ kind: 'error', text: r.error });
+            setUrl(r.url ?? null); setMessage(null); f.reset(); setExpiry('never');
+          });
+        }}
+      >
+        <input name="name" required maxLength={60} placeholder="Who it's for, e.g. For Dad" aria-label="Link name" className={`${field} mt-0`} />
+        <fieldset className="flex flex-wrap gap-x-4 gap-y-2 text-sm">
+          <legend className="sr-only">What the link shows</legend>
+          <label className="flex items-center gap-1.5"><input type="checkbox" name="showValues" className="size-4" />Show values</label>
+          <label className="flex items-center gap-1.5"><input type="checkbox" name="showLocations" className="size-4" />Show locations</label>
+          <label className="flex items-center gap-1.5"><input type="checkbox" name="showNotes" className="size-4" />Show notes</label>
+          <label className="flex items-center gap-1.5"><input type="checkbox" name="showMinifigs" defaultChecked className="size-4" />Include minifigures</label>
+        </fieldset>
+        <div className="flex flex-wrap items-end gap-2 text-sm">
+          <label className="block">Expires
+            <select value={expiry} onChange={(e) => setExpiry(e.target.value)} className={field}>
+              <option value="never">Never</option><option value="7">In 7 days</option><option value="30">In 30 days</option><option value="date">On a date</option>
+            </select>
+          </label>
+          {expiry === 'date' && <input type="date" name="expiresOn" required aria-label="Expiry date" className={field} />}
+          <Button type="submit" variant="primary" loading={pending}>Create link</Button>
+        </div>
+      </form>
     </section>
   );
 }

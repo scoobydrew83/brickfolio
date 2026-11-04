@@ -10,7 +10,7 @@ BrickLink API but is not endorsed or certified by BrickLink.
 
 Data sources (each used with the user's own API key and under that service's terms of use)
 - BrickLink (https://www.bricklink.com): set details, images, parts lists and sold prices.
-- Rebrickable (https://rebrickable.com): themes, minifigure counts and alternate builds.
+- Rebrickable (https://rebrickable.com): themes, minifigure counts, alternate builds, and part and colour ID mappings.
 - Brickset (https://brickset.com): original retail prices and launch and retirement dates, and box barcodes.
 - CompareTheBricks (https://comparethebricks.com) and BrickEconomy (https://www.brickeconomy.com): optional barcode
   lookups, each with the user's own key. Their answers are cached in the user's own database only.

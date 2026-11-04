@@ -54,5 +54,5 @@ it('seeds demo sets, themes, a wishlist, minifigs, part prices and barcodes', ()
   expect(count('SELECT count(*) AS n FROM cmf_figs')).toBe(12);
   expect(count('SELECT count(*) AS n FROM part_prices')).toBe(6);
   expect(count('SELECT count(*) AS n FROM designer_projects')).toBe(3);
-  expect(count("SELECT count(*) AS n FROM set_barcodes WHERE source = 'user' AND verified = 1")).toBe(3);
+  expect(count("SELECT count(*) AS n FROM identifiers WHERE kind = 'set' AND scheme = 'gtin' AND source = 'user' AND verified = 1")).toBe(3);
 });

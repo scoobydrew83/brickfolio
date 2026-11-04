@@ -1,9 +1,12 @@
 // Turns a scanned barcode into a LEGO set: saved barcodes first (yours, then ones copied from Brickset or a provider),
 // then each configured provider in order until one answers. Never guesses: two different sets come back as
 // "ambiguous" for you to pick from. Used by the scanner (server action), the REST API and the MCP tool.
-import { and, eq, inArray, lt, sql } from 'drizzle-orm';
+import { eq, inArray, lt } from 'drizzle-orm';
 import type { DB } from '../db/types';
-import { barcodeMisses, setBarcodes, sets, wishlist } from '../db/schema';
+import { barcodeMisses, sets, wishlist } from '../db/schema';
+import { resolve } from '../identifiers/resolve';
+import { barcodeCounts, barcodeRows, saveBarcode, touchBarcode } from '../identifiers/barcodes';
+import { ownedSummary } from '../service/copies';
 import { parseBarcode, type Barcode, type BarcodeError, type BarcodeFormat } from './gtin';
 import type { BarcodeLookupProvider, Candidate, Failure, ProviderId } from './providers';
 
@@ -28,24 +31,22 @@ type Found = Omit<ScanCandidate, 'owned' | 'wished'>;
 
 /** Saved barcodes for a GTIN. Ones you confirmed win; otherwise every saved set is a candidate. */
 async function local(db: DB, gtin: string): Promise<Found[]> {
-  const rows = await db.select().from(setBarcodes).where(eq(setBarcodes.gtin, gtin)).all();
-  const trusted = rows.some((r) => r.verified) ? rows.filter((r) => r.verified) : rows;
-  const bySet = new Map<string, Found>();
-  const rank = (s: Source) => (s === 'user' ? 0 : s === 'community' ? 1 : s === 'brickset' ? 2 : 3);
-  for (const r of trusted) {
-    const prev = bySet.get(r.setNo);
-    if (prev && rank(prev.source) <= rank(r.source)) continue;
-    bySet.set(r.setNo, { setNo: r.setNo, name: r.name, year: r.year, pieces: r.pieces, theme: null, imageUrl: r.imageUrl, source: r.source, verified: r.verified });
-  }
-  return [...bySet.values()];
+  const { candidates } = await resolve(db, 'set', 'gtin', gtin);
+  const ids = candidates.map((c) => c.id).filter((id): id is number => id !== null);
+  const details = new Map((ids.length ? await barcodeRows(db, { ids }) : []).map((r) => [r.id, r]));
+  return candidates.map((c) => {
+    const d = c.id === null ? undefined : details.get(c.id);
+    return { setNo: c.canonical, name: d?.name ?? null, year: d?.year ?? null, pieces: d?.pieces ?? null, theme: null, imageUrl: d?.imageUrl ?? null, source: c.source as Source, verified: c.verified };
+  });
 }
 
 /** Adds what the collection and wishlist know: you own it, its real name and photo. */
 async function withOwnership(db: DB, found: Found[]): Promise<ScanCandidate[]> {
   if (!found.length) return [];
   const nos = found.map((f) => f.setNo);
-  const [own, wish] = await Promise.all([
-    db.select({ setNo: sets.setNo, name: sets.name, qty: sets.qty, condition: sets.condition, location: sets.location, year: sets.year, pieces: sets.pieces, imageUrl: sets.imageUrl }).from(sets).where(inArray(sets.setNo, nos)).all(),
+  const [own, counts, wish] = await Promise.all([
+    db.select({ setNo: sets.setNo, name: sets.name, year: sets.year, pieces: sets.pieces, imageUrl: sets.imageUrl }).from(sets).where(inArray(sets.setNo, nos)).all(),
+    ownedSummary(db, nos),
     db.select({ setNo: wishlist.setNo, name: wishlist.name, year: wishlist.year, imageUrl: wishlist.imageUrl }).from(wishlist).where(inArray(wishlist.setNo, nos)).all(),
   ]);
   const o = new Map(own.map((r) => [r.setNo, r])), w = new Map(wish.map((r) => [r.setNo, r]));
@@ -54,7 +55,7 @@ async function withOwnership(db: DB, found: Found[]): Promise<ScanCandidate[]> {
     return {
       ...f,
       name: s?.name ?? x?.name ?? f.name, year: s?.year ?? x?.year ?? f.year, pieces: s?.pieces ?? f.pieces, imageUrl: s?.imageUrl ?? x?.imageUrl ?? f.imageUrl,
-      owned: s ? { qty: s.qty, condition: s.condition, location: s.location } : null,
+      owned: s ? (({ qty, condition, location }) => ({ qty, condition, location }))(counts.get(s.setNo) ?? { qty: 0, condition: null, location: null }) : null,
       wished: !!x,
     };
   });
@@ -62,9 +63,7 @@ async function withOwnership(db: DB, found: Found[]): Promise<ScanCandidate[]> {
 
 /** Saves a provider's single answer as an unconfirmed barcode, for this installation only. */
 async function remember(db: DB, b: Barcode, source: ProviderId, c: Candidate) {
-  const row = { name: c.name, year: c.year, pieces: c.pieces, imageUrl: c.imageUrl, sourceRef: c.sourceRef, lastSeenAt: nowIso(), updatedAt: nowIso() };
-  await db.insert(setBarcodes).values({ barcode: b.raw, format: b.format, gtin: b.gtin, setNo: c.setNo, source, ...row })
-    .onConflictDoUpdate({ target: [setBarcodes.gtin, setBarcodes.setNo, setBarcodes.source], set: row });
+  await saveBarcode(db, { barcode: b.raw, format: b.format, gtin: b.gtin, setNo: c.setNo, source, name: c.name, year: c.year, pieces: c.pieces, imageUrl: c.imageUrl, sourceRef: c.sourceRef }, 'refresh');
 }
 
 /**
@@ -86,7 +85,7 @@ export async function resolveBarcode(
 
   const saved = await local(db, b.gtin);
   if (saved.length) {
-    if (!opts.readOnly) await db.update(setBarcodes).set({ lastSeenAt: nowIso() }).where(eq(setBarcodes.gtin, b.gtin));
+    if (!opts.readOnly) await touchBarcode(db, b.gtin);
     return done(saved, []);
   }
   if (noProviders || opts.readOnly) return done([], []);
@@ -126,17 +125,15 @@ export async function pruneMisses(db: DB) {
 
 /** How many barcodes are saved, by source, for Settings. */
 export async function barcodeStats(db: DB): Promise<{ total: number; user: number; community: number; brickset: number; providers: number }> {
-  const rows = await db.select({ source: setBarcodes.source, n: sql<number>`count(*)` }).from(setBarcodes).groupBy(setBarcodes.source).all();
-  const by = Object.fromEntries(rows.map((r) => [r.source, Number(r.n)])) as Record<string, number>;
+  const by = await barcodeCounts(db);
   const user = by.user ?? 0, community = by.community ?? 0, brickset = by.brickset ?? 0;
-  const total = rows.reduce((t, r) => t + Number(r.n), 0);
+  const total = Object.values(by).reduce((t, n) => t + n, 0);
   return { total, user, community, brickset, providers: total - user - community - brickset };
 }
 
 /** Saved barcodes for one set (set page, API). */
 export async function barcodesForSet(db: DB, no: string) {
-  return db.select({ barcode: setBarcodes.barcode, gtin: setBarcodes.gtin, format: setBarcodes.format, source: setBarcodes.source, verified: setBarcodes.verified })
-    .from(setBarcodes).where(and(eq(setBarcodes.setNo, no))).all();
+  return (await barcodeRows(db, { setNo: no })).map((r) => ({ barcode: r.barcode, gtin: r.gtin, format: r.format, source: r.source as Source, verified: r.verified }));
 }
 
 /**
@@ -144,7 +141,7 @@ export async function barcodesForSet(db: DB, no: string) {
  * name and photo. Unknown sets come back with only their number; BrickLink fills in the rest once added.
  */
 export async function describeSet(db: DB, no: string): Promise<ScanCandidate> {
-  const saved = await db.select().from(setBarcodes).where(and(eq(setBarcodes.setNo, no), sql`${setBarcodes.name} is not null`)).limit(1).get();
+  const [saved] = await barcodeRows(db, { setNo: no, named: true }, 1);
   const [c] = await withOwnership(db, [{ setNo: no, name: saved?.name ?? null, year: saved?.year ?? null, pieces: saved?.pieces ?? null, theme: null, imageUrl: saved?.imageUrl ?? null, source: 'user', verified: false }]);
   return c;
 }
@@ -152,12 +149,11 @@ export async function describeSet(db: DB, no: string): Promise<ScanCandidate> {
 /** Everything the scanner needs offline: saved barcodes (trusted rows only), and what you own and want. */
 export async function offlineMap(db: DB): Promise<import('./offline').OfflineMap> {
   const { trusted } = await import('./offline');
-  const rows = await db.select({ gtin: setBarcodes.gtin, setNo: setBarcodes.setNo, name: setBarcodes.name, year: setBarcodes.year, pieces: setBarcodes.pieces, imageUrl: setBarcodes.imageUrl, source: setBarcodes.source, verified: setBarcodes.verified })
-    .from(setBarcodes).limit(50_000).all();
+  const rows = await barcodeRows(db, {}, 50_000);
   const by: Record<string, import('./offline').OfflineSet[]> = {};
-  for (const { gtin, ...r } of rows) (by[gtin] ??= []).push(r);
+  for (const r of rows) (by[r.gtin] ??= []).push({ setNo: r.setNo, name: r.name, year: r.year, pieces: r.pieces, imageUrl: r.imageUrl, source: r.source as Source, verified: r.verified });
   for (const g of Object.keys(by)) by[g] = trusted(by[g]);
-  const own = await db.select({ setNo: sets.setNo, qty: sets.qty, condition: sets.condition, location: sets.location, name: sets.name }).from(sets).all();
+  const own = [...(await ownedSummary(db))].map(([setNo, o]) => ({ setNo, ...o }));
   const wish = await db.select({ setNo: wishlist.setNo, name: wishlist.name }).from(wishlist).all();
   return {
     at: nowIso(),

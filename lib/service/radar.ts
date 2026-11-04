@@ -3,7 +3,7 @@
 import { and, eq, gte, inArray, isNotNull, isNull, lte, or, sql } from 'drizzle-orm';
 import type { DB } from '../db/types';
 import { priceSnapshots, wishlist } from '../db/schema';
-import { displayNo, money, priceGuide } from '../sets';
+import { displayNo, money, setGuide } from '../sets';
 import { retirement } from '../retail';
 import { daysUntil, flagsFor, growthSince, type Flag, type Growth, type PricePoint } from '../radar';
 import { getCurrency, listSets } from './sets';
@@ -54,14 +54,14 @@ export async function getRadar(db: DB, todayIso = new Date().toISOString().slice
   const owned = await listSets(db);
   const wishes = await db.select().from(wishlist).all();
 
-  // Stored prices for retired sets, in the guide that matches each set's condition today.
+  // Stored prices for retired sets, in the guide most of each set's copies need today.
   const retiredOwned = owned.filter((s) => retirement(s, todayIso)?.kind === 'retired');
   const snaps = retiredOwned.length
     ? await db.select({ setId: priceSnapshots.setId, date: priceSnapshots.date, guide: priceSnapshots.guide, avgSold: priceSnapshots.avgSold })
       .from(priceSnapshots).where(inArray(priceSnapshots.setId, retiredOwned.map((s) => s.id))).all()
     : [];
   const bySet = new Map<number, PricePoint[]>();
-  const guideOf = new Map(retiredOwned.map((s) => [s.id, priceGuide(s.condition)]));
+  const guideOf = new Map(retiredOwned.map((s) => [s.id, setGuide(s.copies)]));
   for (const p of snaps) if (p.guide === guideOf.get(p.setId)) bySet.set(p.setId, [...(bySet.get(p.setId) ?? []), p]);
 
   const status = (r: { exitDate?: string | null; retired?: boolean | null }): RadarItem['status'] => retirement(r, todayIso)?.kind ?? (r.exitDate && r.exitDate >= todayIso ? 'retiring' : 'available');

@@ -6,6 +6,7 @@ import { authMode } from '@/lib/auth';
 import { getDb } from '@/lib/db';
 import { getCurrency, listLocations } from '@/lib/service/sets';
 import { listTokens } from '@/lib/service/tokens';
+import { listShareLinks } from '@/lib/service/share';
 import { libraryStatus } from '@/lib/ldraw/download';
 import { alertsFromEnv } from '@/lib/service/alerts';
 import { barcodeCaps, bricklink, brickset, currentUser, rebrickable } from '@/lib/session';
@@ -32,6 +33,6 @@ async function Content() {
   const user = await currentUser();
   if (!user) return <p className="py-24 text-center text-fg-3">Not signed in.</p>;
   const db = await getDb();
-  const [locations, currency, tokens] = await Promise.all([listLocations(db), getCurrency(db), listTokens(db)]);
-  return <Settings locations={locations} currency={currency} tokens={tokens} user={user.user} authMode={authMode()} priced={!!bricklink()} alerts={!!alertsFromEnv()} rebrickable={{ key: !!rebrickable(), stats: await rebrickableStats(db), run: rebrickableRun() }} brickset={{ key: !!brickset(), stats: await retailStats(db) }} ldraw={await libraryStatus()} barcodes={{ caps: barcodeCaps(), saved: await barcodeStats(db), community: await communityStatus(db) }} />;
+  const [locations, currency, tokens, shares] = await Promise.all([listLocations(db), getCurrency(db), listTokens(db), listShareLinks(db)]);
+  return <Settings locations={locations} currency={currency} tokens={tokens} shares={shares} user={user.user} authMode={authMode()} priced={!!bricklink()} alerts={!!alertsFromEnv()} rebrickable={{ key: !!rebrickable(), stats: await rebrickableStats(db), run: rebrickableRun() }} brickset={{ key: !!brickset(), stats: await retailStats(db) }} ldraw={await libraryStatus()} barcodes={{ caps: barcodeCaps(), saved: await barcodeStats(db), community: await communityStatus(db) }} />;
 }

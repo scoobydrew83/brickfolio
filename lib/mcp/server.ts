@@ -4,7 +4,7 @@
 import pkg from '../../package.json';
 import { APP_NAME } from '../brand';
 import type { DB } from '../db/types';
-import { dailyHistory, displayNo, filterSets, groupTotals, setNo as fullSetNo, totals, type Filters, type SetRow } from '../sets';
+import { copyGuide, costBasis, dailyHistory, displayNo, filterSets, groupTotals, setGuide, setNo as fullSetNo, STATUSES, totals, type Filters, type SetRow } from '../sets';
 import { collectionGain, retirement } from '../retail';
 import { getCurrency, getSet, listHistory, listSets, priceHistory, syncStatus } from '../service/sets';
 import { listWishlist } from '../service/wishlist';
@@ -12,7 +12,7 @@ import { getRadar } from '../service/radar';
 import { listProjects } from '../service/designer';
 import { listMinifigs, minifigTotals } from '../service/minifigs';
 import { partout, unpricedLots } from '../service/partout';
-import { listMissing } from '../service/missing';
+import { listMissing, pickCopy } from '../service/missing';
 import { searchParts } from '../service/parts';
 import { resolveBarcode } from '../barcode/resolve';
 import { resolveFigCode } from '../barcode/figcodes';
@@ -28,18 +28,25 @@ const int = (v: unknown, def: number, min: number, max: number) => { const n = N
 const r2 = (v: number | null | undefined) => (v == null ? null : Math.round(v * 100) / 100);
 
 /** A set as the tools return it: short, with the source of each number spelled out once in the descriptions. */
-const brief = (s: SetRow) => ({
-  setNo: displayNo(s.setNo), name: s.name, year: s.year, theme: s.subtheme ? `${s.theme} / ${s.subtheme}` : s.theme ?? null,
-  qty: s.qty, condition: s.condition, missingPct: s.missingPct, location: s.location, estValueEach: r2(s.estValue),
-  estValueTotal: s.estValue == null ? null : r2(s.estValue * s.qty), retail: s.retailPrice ?? null, retailCurrency: s.retailCurrency ?? null,
-  retirement: retirement(s), pieces: s.pieces,
-});
+const brief = (s: SetRow) => {
+  const n = (st: string) => s.copies.filter((c) => c.status === st).length;
+  return {
+    setNo: displayNo(s.setNo), name: s.name, year: s.year, theme: s.subtheme ? `${s.theme} / ${s.subtheme}` : s.theme ?? null,
+    qty: s.qty, copies: { sealed: n('sealed'), built: n('built'), inProgress: n('in_progress'), partedOut: n('parted_out') },
+    condition: s.condition, missingPct: s.missingPct, location: s.location, estValueEach: r2(s.estValue),
+    estValueTotal: r2(s.valueTotal), costBasis: r2(s.costBasis), gain: r2(s.gain), retail: s.retailPrice ?? null, retailCurrency: s.retailCurrency ?? null,
+    retirement: retirement(s), pieces: s.pieces,
+  };
+};
+
+/** The condition whose guide partout() should price a set in: the guide most of its copies need. */
+const guideCondition = (s: SetRow) => (setGuide(s.copies) === 'N' ? 'New' as const : 'Used' as const);
 
 export const TOOLS: Tool[] = [
   {
     name: 'collection_summary',
     title: 'Collection summary',
-    description: 'Totals for the whole collection: sets, copies, minifigures, estimated value (BrickLink average sold prices, less missing pieces), change over the stored value history, gain over original retail (Brickset), and value by location, condition and theme. Start here.',
+    description: 'Totals for the whole collection: sets, copies (each physical copy of a set: sealed, built, in progress; parted out copies are not counted), minifigures, estimated value (BrickLink average sold prices, less missing pieces), cost basis and gain where purchase prices are recorded, change over the stored value history, gain over original retail (Brickset), and value by location, condition and theme. Start here.',
     inputSchema: { type: 'object', properties: {} },
     async run(db) {
       const [sets, figs, hist, currency, sync] = await Promise.all([listSets(db), listMinifigs(db), listHistory(db), getCurrency(db), syncStatus(db)]);
@@ -47,7 +54,7 @@ export const TOOLS: Tool[] = [
       const group = (k: 'location' | 'condition' | 'theme') => groupTotals(sets, k).map((g) => ({ [k]: g.label, sets: g.count, copies: g.copies, estValue: r2(g.estValue) }));
       return {
         currency, lastSync: sync?.finishedAt ?? null,
-        sets: { count: t.count, copies: t.copies, pieces: t.pieces, estValue: r2(t.estValue), notFoundOnBrickLink: t.errors },
+        sets: { count: t.count, copies: t.copies, partedOut: t.partedOut, pieces: t.pieces, estValue: r2(t.estValue), costBasis: r2(t.costBasis), gain: r2(t.gain), notFoundOnBrickLink: t.errors },
         minifigures: { count: f.count, copies: f.copies, estValue: r2(f.estValue), unpriced: f.unpriced },
         totalEstValue: r2(t.estValue + f.estValue),
         history: d.length > 1 ? { from: d[0].date, fromValue: d[0].estValue, to: d[d.length - 1].date, toValue: d[d.length - 1].estValue } : null,
@@ -59,12 +66,12 @@ export const TOOLS: Tool[] = [
   {
     name: 'search_sets',
     title: 'Search sets',
-    description: 'Find sets in the collection by text (set number, name, theme, location, year) and filters. Returns up to `limit` sets with quantity, condition, location, estimated value per copy and in total, retail price and retirement status.',
+    description: 'Find sets in the collection by text (set number, name, theme, location, year) and filters. Returns up to `limit` sets with quantity, copies by status, condition and location (null when copies differ), estimated value per copy and in total, cost basis and gain, retail price and retirement status. Location, condition and status match when any copy matches.',
     inputSchema: {
       type: 'object',
       properties: {
         query: { type: 'string', description: 'Free text, e.g. "castle" or "10497"' },
-        location: { type: 'string' }, condition: { type: 'string', enum: ['New', 'Used', 'Partial'] }, theme: { type: 'string' },
+        location: { type: 'string' }, condition: { type: 'string', enum: ['New', 'Used', 'Partial'] }, status: { type: 'string', enum: [...STATUSES] }, theme: { type: 'string' },
         availability: { type: 'string', enum: ['Available', 'Retiring soon', 'Retired'] },
         sort: { type: 'string', enum: ['setNo', 'value', 'name', 'year'], default: 'value' },
         limit: { type: 'integer', minimum: 1, maximum: 200, default: 25 },
@@ -72,7 +79,7 @@ export const TOOLS: Tool[] = [
     },
     async run(db, a) {
       const sorts = ['setNo', 'value', 'name', 'year'];
-      const f: Filters = { q: str(a.query), location: str(a.location), condition: str(a.condition), theme: str(a.theme), availability: str(a.availability), sort: (sorts.includes(str(a.sort)) ? str(a.sort) : 'value') as Filters['sort'] };
+      const f: Filters = { q: str(a.query), location: str(a.location), condition: str(a.condition), status: str(a.status), theme: str(a.theme), availability: str(a.availability), sort: (sorts.includes(str(a.sort)) ? str(a.sort) : 'value') as Filters['sort'] };
       const all = filterSets(await listSets(db), f);
       return { currency: await getCurrency(db), matched: all.length, sets: all.slice(0, int(a.limit, 25, 1, 200)).map(brief) };
     },
@@ -80,15 +87,16 @@ export const TOOLS: Tool[] = [
   {
     name: 'get_set',
     title: 'Set details',
-    description: 'Everything about one set you own: value and BrickLink low/average/high sold prices with the number of sales, recent price history, retail and retirement (Brickset), part-out value (what its parts would sell for), marked missing parts and notes.',
+    description: 'Everything about one set you own: value and BrickLink low/average/high sold prices with the number of sales, recent price history, retail and retirement (Brickset), part-out value (what its parts would sell for), each copy (status, condition, location, dates, cost basis, value and gain), marked missing parts and notes.',
     inputSchema: { type: 'object', properties: { setNo: { type: 'string', description: 'Set number, e.g. 10497 or 10497-1' } }, required: ['setNo'] },
     async run(db, a) {
       const s = await getSet(db, fullSetNo(str(a.setNo, 12)));
       if (!s) throw new Error(`Set ${str(a.setNo, 12)} isn't in the collection.`);
       const currency = await getCurrency(db);
-      const [prices, po, unpriced, missing] = await Promise.all([priceHistory(db, s.id), partout(db, s.id, s.condition, currency), unpricedLots(db, s.id, s.condition, currency), listMissing(db, s.id)]);
+      const [prices, po, unpriced, missing] = await Promise.all([priceHistory(db, s.id), partout(db, s.id, guideCondition(s), currency), unpricedLots(db, s.id, guideCondition(s), currency), listMissing(db, s.id, pickCopy(s, null, false)?.id ?? null)]);
       return {
         currency, ...brief(s), notes: s.notes,
+        copyList: s.copies.map((c) => ({ id: c.id, status: c.status, condition: c.condition, location: c.location, missingPct: c.missingPct, acquired: c.acquiredDate, built: c.buildDate, costBasis: costBasis(c), giftWithPurchase: c.gwp, estValue: r2(c.estValue), pricedFrom: c.estGuide && c.estGuide !== copyGuide(c) ? (c.estGuide === 'U' ? 'used sales' : 'new sales') : null, notes: c.notes })),
         bricklink: { avgSold: s.avgSold, minSold: s.minSold, maxSold: s.maxSold, sales: s.qtySold, lookedUp: s.lastUpdated, error: s.blError },
         priceHistory: prices.slice(-12).map((p) => ({ date: p.date, avgSold: p.avgSold })),
         partout: po.lots ? { value: po.value, coveragePct: po.coverage, pricedLots: po.pricedLots, lots: po.lots, unpricedLots: unpriced, ageDays: po.ageDays } : null,

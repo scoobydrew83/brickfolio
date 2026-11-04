@@ -89,11 +89,16 @@ export async function removeWish(db: DB, no: string): Promise<Result> {
   return r.length ? { ok: true } : { ok: false, status: 404, error: `#${fullSetNo(no)} isn't on your wishlist.` };
 }
 
-/** You got it: adds it to the collection (another copy if you already have one) and takes it off the wishlist. */
-export async function acquireWish(db: DB, no: string, lookup: Lookup | null): Promise<Result> {
+/**
+ * You got it: adds it to the collection as a copy (sealed when you wanted it New), optionally with what you paid, and
+ * takes it off the wishlist.
+ */
+export async function acquireWish(db: DB, no: string, lookup: Lookup | null, opts: { pricePaid?: number | null } = {}): Promise<Result> {
   const w = await getWish(db, no);
   if (!w) return { ok: false, status: 404, error: `#${fullSetNo(no)} isn't on your wishlist.` };
-  const added = await addSet(db, { setNo: w.setNo, name: w.name || w.setNo, condition: w.condition }, { another: true, lookup });
+  if (opts.pricePaid != null && (!Number.isFinite(opts.pricePaid) || opts.pricePaid < 0 || opts.pricePaid > 1_000_000)) return { ok: false, status: 400, error: 'Price paid must be 0–1,000,000' };
+  const copy = { acquiredDate: new Date().toISOString().slice(0, 10), ...(opts.pricePaid != null ? { pricePaid: Math.round(opts.pricePaid * 100) / 100 } : {}) };
+  const added = await addSet(db, { setNo: w.setNo, name: w.name || w.setNo, condition: w.condition, copy }, { another: true, lookup });
   if (!added.ok) return added;
   await db.delete(wishlist).where(eq(wishlist.id, w.id));
   return { ok: true };

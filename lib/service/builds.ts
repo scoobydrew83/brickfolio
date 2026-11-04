@@ -1,11 +1,13 @@
 // "What can I build?": alternate builds (MOCs) of sets you own, from Rebrickable, matched against every part in
 // your collection's parts lists. Fetched a little at a time in the daily sync to stay under Rebrickable's limit.
 import { and, asc, eq, isNotNull, isNull, lt, or, sql } from 'drizzle-orm';
-import { PartsUnavailable, type BuildSource } from '../rebrickable/client';
+import { PartsUnavailable, type BuildSource, type RbBuildPart } from '../rebrickable/client';
 import type { DB } from '../db/types';
 import { buildParts, builds, setParts, sets } from '../db/schema';
 import { displayNo, setNo as fullSetNo } from '../sets';
 import { toWantedListXml, type WantedItem } from '../bricklink/wanted';
+import { remember, resolveMany, type Resolved } from '../identifiers/resolve';
+import { rbMappings } from './identifiers';
 
 const nowIso = () => new Date().toISOString();
 
@@ -13,6 +15,28 @@ const nowIso = () => new Date().toISOString();
 export const RECHECK_UNAVAILABLE_DAYS = 90;
 /** When this many builds in a row are refused and none has ever had a parts list, the key can't read them: stop. */
 export const GIVE_UP_AFTER = 5;
+
+type Line = { partNo: string; colorId: number | null; qty: number; mapped: boolean };
+
+/** A BrickLink ID for a Rebrickable one: the agreed one, else the first saved (Rebrickable lists its best match first). */
+const blOf = (r: Resolved | undefined) => r?.canonical ?? r?.candidates[0]?.canonical ?? null;
+
+/**
+ * Saves the BrickLink and LDraw numbers Rebrickable sent with a parts list, then turns each line into BrickLink part
+ * and colour numbers through the identifiers map. A line is `mapped` only when both are known; otherwise it keeps
+ * Rebrickable's numbers and matching and Wanted Lists skip it.
+ */
+export async function toBrickLink(db: DB, parts: RbBuildPart[]): Promise<Line[]> {
+  await remember(db, parts.flatMap((p) => [...rbMappings('part', p.partNo, p.part), ...(p.colorId === null ? [] : rbMappings('color', p.colorId, p.color))]));
+  const [bp, bc] = await Promise.all([
+    resolveMany(db, 'part', 'rebrickable', parts.map((p) => p.partNo)),
+    resolveMany(db, 'color', 'rebrickable', parts.flatMap((p) => (p.colorId === null ? [] : [p.colorId]))),
+  ]);
+  return parts.map((p) => {
+    const part = blOf(bp.get(p.partNo)), color = p.colorId === null ? null : blOf(bc.get(String(p.colorId)));
+    return { partNo: part ?? p.partNo, colorId: color !== null ? Number(color) : p.colorId, qty: p.qty, mapped: !!part && color !== null };
+  });
+}
 
 /**
  * Finds alternate builds for owned sets not checked yet, then fetches parts for builds that have none, stopping
@@ -53,7 +77,7 @@ export async function syncBuilds(db: DB, src: BuildSource, opts: { maxCalls?: nu
     if (calls >= max) break;
     calls++;
     try {
-      const parts = await src.buildParts(b.mocNo);
+      const parts = await toBrickLink(db, await src.buildParts(b.mocNo));
       await db.delete(buildParts).where(eq(buildParts.buildId, b.id));
       // Merge duplicate lines (same part and colour) so matching counts them once.
       const merged = new Map<string, { partNo: string; colorId: number | null; qty: number; mapped: boolean }>();
@@ -91,7 +115,7 @@ const key = (partNo: string, colorId: number | null) => `${partNo.toLowerCase()}
 /** Every part you own, counted across all copies of every set (alternates and counterparts left out). */
 async function ownedParts(db: DB): Promise<Map<string, number>> {
   const rows = await db
-    .select({ partNo: setParts.partNo, colorId: setParts.colorId, n: sql<number>`sum(${setParts.qty} * ${sets.qty})` })
+    .select({ partNo: setParts.partNo, colorId: setParts.colorId, n: sql<number>`sum(${setParts.qty} * (select count(*) from "set_copies" c where c."set_id" = ${sets.id} and c."status" <> 'parted_out'))` })
     .from(setParts).innerJoin(sets, eq(sets.id, setParts.setId))
     .where(and(eq(setParts.alternate, false), eq(setParts.counterpart, false)))
     .groupBy(setParts.partNo, setParts.colorId).all();

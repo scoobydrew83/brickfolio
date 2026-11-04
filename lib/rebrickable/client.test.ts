@@ -58,3 +58,28 @@ it('tells a refused or missing build parts list apart from other errors', async 
   // A bad key on any call is still a refusal, with Rebrickable's own words.
   await expect(createRebrickable('bad', async () => Response.json({ detail: 'Invalid token.' }, { status: 401 }), 0).themes()).rejects.toBeInstanceOf(RebrickableForbidden);
 });
+
+it('reads colour and part IDs, following parts pages only on rebrickable.com', async () => {
+  const urls: string[] = [];
+  const rb = createRebrickable('k', async (input) => {
+    const url = String(input);
+    urls.push(url.replace(BASE, ''));
+    if (url.includes('/lego/colors/')) return Response.json({ count: 2, next: null, results: [
+      { id: 4, name: 'Red', external_ids: { BrickLink: { ext_ids: [5], ext_descrs: [['Red']] }, LDraw: { ext_ids: [4] } } },
+      { id: 9999, name: '[No Color/Any Color]', external_ids: {} },
+    ] });
+    if (url.includes('page=2')) return Response.json({ count: 2, next: 'https://evil.example/steal?page=3', results: [{ part_num: '3002', name: 'Brick 2 x 3' }] });
+    if (url.includes('/lego/parts/')) return Response.json({ count: 2, next: `${BASE}/lego/parts/?page=2&page_size=1000&inc_part_details=1`, results: [
+      { part_num: '3001', name: 'Brick 2 x 4', external_ids: { BrickLink: ['3001'], LDraw: ['3001'], BrickOwl: ['771344'] } },
+    ] });
+    return new Response('{"detail":"Not found."}', { status: 404 });
+  }, 0);
+
+  expect(await rb.colors()).toEqual([{ id: 4, name: 'Red', bricklink: ['5'], ldraw: ['4'] }, { id: 9999, name: '[No Color/Any Color]', bricklink: [], ldraw: [] }]);
+  const first = await rb.partsPage();
+  expect(first).toEqual({ parts: [{ partNo: '3001', name: 'Brick 2 x 4', bricklink: ['3001'], ldraw: ['3001'] }], next: `${BASE}/lego/parts/?page=2&page_size=1000&inc_part_details=1` });
+  const second = await rb.partsPage(first.next);
+  expect(second).toEqual({ parts: [{ partNo: '3002', name: 'Brick 2 x 3', bricklink: [], ldraw: [] }], next: null }); // the link off-site is dropped
+  await expect(rb.partsPage('https://evil.example/steal')).rejects.toThrow(/refusing/);
+  expect(urls).toEqual(['/lego/colors/?page_size=1000', '/lego/parts/?page_size=1000&inc_part_details=1', '/lego/parts/?page=2&page_size=1000&inc_part_details=1']);
+});

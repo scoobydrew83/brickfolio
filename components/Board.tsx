@@ -5,7 +5,7 @@ import { useSearchParams } from 'next/navigation';
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, useTransition } from 'react';
 import { addSet, editSet, quickAddList, relookupSet, reload, removeSet, runSync, type Result } from '@/app/actions';
 import type { SyncStatus } from '@/lib/service/sets';
-import { dailyHistory, filterSets, groupTotals, totals, type Filters, type HistoryRow, type SetRow } from '@/lib/sets';
+import { dailyHistory, filterSets, groupTotals, STATUSES, STATUS_LABEL, totals, type Filters, type HistoryRow, type SetRow } from '@/lib/sets';
 import { availability, collectionGain, retirement } from '@/lib/retail';
 import { SetCard } from './board/SetCard';
 import { PartsDialog } from './board/PartsDialog';
@@ -19,7 +19,7 @@ import { PageHeader } from './shell/PageHeader';
 import { CollectionTabs } from './shell/CollectionTabs';
 
 // Filters and view live in the URL, so a reload or a shared link keeps them. Defaults are left out of the URL.
-const DEFAULTS = { q: '', location: '', condition: '', theme: '', availability: '', sort: 'setNo', view: 'cards' } as const;
+const DEFAULTS = { q: '', location: '', condition: '', status: '', theme: '', availability: '', sort: 'setNo', view: 'cards' } as const;
 const SORTS: Filters['sort'][] = ['setNo', 'value', 'name', 'year'];
 type View = 'cards' | 'table';
 const noop = () => () => {};
@@ -30,7 +30,7 @@ export default function Board({ sets, history, sync, locations, currency, readAt
   const params = useSearchParams();
   const [filters, setFilters] = useState<Filters>(() => {
     const sort = params.get('sort') as Filters['sort'];
-    return { q: params.get('q') ?? '', location: params.get('location') ?? '', condition: params.get('condition') ?? '', theme: params.get('theme') ?? '', availability: params.get('availability') ?? '', sort: SORTS.includes(sort) ? sort : 'setNo' };
+    return { q: params.get('q') ?? '', location: params.get('location') ?? '', condition: params.get('condition') ?? '', status: params.get('status') ?? '', theme: params.get('theme') ?? '', availability: params.get('availability') ?? '', sort: SORTS.includes(sort) ? sort : 'setNo' };
   });
   const [view, setView] = useState<View>(() => (params.get('view') === 'table' ? 'table' : 'cards'));
   const [editing, setEditing] = useState<SetRow | 'new' | null>(null);
@@ -78,12 +78,13 @@ export default function Board({ sets, history, sync, locations, currency, readAt
     });
 
   const set = (k: keyof Filters) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setFilters({ ...filters, [k]: e.target.value });
-  const toggle = (k: 'location' | 'condition' | 'theme' | 'availability', v: string) => setFilters({ ...filters, [k]: filters[k] === v ? '' : v });
+  const toggle = (k: 'location' | 'condition' | 'status' | 'theme' | 'availability', v: string) => setFilters({ ...filters, [k]: filters[k] === v ? '' : v });
+  const statusCounts = useMemo(() => STATUSES.map((st) => ({ status: st, n: sets.reduce((t, s) => t + s.copies.filter((c) => c.status === st).length, 0) })).filter((x) => x.n), [sets]);
   const themed = sets.some((s) => s.theme);
   const dated = sets.some((s) => availability(s));
   const gain = useMemo(() => collectionGain(sets, currency), [sets, currency]);
   const retiring = useMemo(() => sets.filter((s) => retirement(s)?.kind === 'retiring').length, [sets]);
-  const remove = (s: SetRow) => act(() => removeSet(s.setNo), s.qty > 1 ? `Removed one ${s.name}. ${s.qty - 1} left.` : `Removed ${s.name}.`);
+  const remove = (s: SetRow) => act(() => removeSet(s.setNo), s.copies.length > 1 ? `Removed one ${s.name}. ${Math.max(0, s.qty - 1)} left.` : `Removed ${s.name}.`);
   const retry = (s: SetRow) => act(() => relookupSet(s.setNo), `Lookup worked for ${s.name}.`);
   const rowProps = { onEdit: setEditing, onParts: setPartsOf, onRemove: remove, onRetry: retry, pending, money, currency };
 
@@ -92,7 +93,7 @@ export default function Board({ sets, history, sync, locations, currency, readAt
       <CollectionTabs />
       <PageHeader
         title="Sets"
-        badge={<span className="text-sm text-fg-3 tabular-nums">{all.count} sets · {all.copies} copies</span>}
+        badge={<span className="text-sm text-fg-3 tabular-nums">{all.count} sets · {all.copies} copies{all.partedOut ? ` · parted out: ${all.partedOut}` : ''}</span>}
         actions={
           <span className="flex flex-wrap items-center gap-2" title={`Signed in as ${user}`}>
             {priced && (
@@ -145,6 +146,11 @@ export default function Board({ sets, history, sync, locations, currency, readAt
               : 'From the BrickLink sold prices stored at the last sync, less missing pieces. Add BrickLink keys to keep them current.'}
           </p>
           {gain && <RetailGainLine gain={gain} money={money} className="mt-2 max-w-sm text-sm" />}
+          {all.gain !== null && (
+            <p className="mt-1 max-w-sm text-sm text-fg-3">
+              Cost basis {money(all.costBasis)} · <b className={all.gain >= 0 ? 'text-ok' : 'text-danger'}>{all.gain >= 0 ? '+' : '−'}{money(Math.abs(all.gain))}</b> on the copies with a price paid
+            </p>
+          )}
         </div>
         <ValueChart history={history} money={money} />
       </section>
@@ -166,10 +172,20 @@ export default function Board({ sets, history, sync, locations, currency, readAt
             ))}
           </div>
         ))}
+        {statusCounts.length > 1 && (
+          <div className="-mx-4 flex items-center gap-2 overflow-x-auto px-4 pb-1 sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0 sm:pb-0">
+            <span className="w-20 shrink-0 text-sm text-fg-3">Status</span>
+            {statusCounts.map((x) => (
+              <FilterChip key={x.status} active={filters.status === x.status} onClick={() => toggle('status', x.status)}>
+                {STATUS_LABEL[x.status]} · <span className="tabular-nums">{x.n}</span>
+              </FilterChip>
+            ))}
+          </div>
+        )}
         {shown.length < all.count && (
           <p className="text-fg-3">
             Showing <b className="text-fg">{shown.length}</b> of {all.count} sets · <b className="text-fg tabular-nums">{money(view_.estValue)}</b>
-            {' '}<Button variant="link" onClick={() => setFilters({ q: '', location: '', condition: '', theme: '', availability: '', sort: filters.sort })}>Clear filters</Button>
+            {' '}<Button variant="link" onClick={() => setFilters({ q: '', location: '', condition: '', status: '', theme: '', availability: '', sort: filters.sort })}>Clear filters</Button>
           </p>
         )}
       </section>
@@ -223,7 +239,7 @@ export default function Board({ sets, history, sync, locations, currency, readAt
       {editing && (
         <SetForm
           set={editing === 'new' ? null : editing}
-          locations={[...new Set([...locations, ...sets.map((x) => x.location).filter((l): l is string => !!l)])]}
+          locations={[...new Set([...locations, ...sets.flatMap((x) => x.copies.map((c) => c.location)).filter((l): l is string => !!l)])]}
           pending={pending}
           dupe={dupe}
           money={money}

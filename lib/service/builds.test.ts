@@ -1,16 +1,22 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { eq } from 'drizzle-orm';
-import { builds } from '../db/schema';
+import { buildParts, builds } from '../db/schema';
 import { rebrickableStats } from './catalog';
 import { openNodeDb } from '../db/node';
 import type { DB } from '../db/types';
-import { createRebrickable, PartsUnavailable, toBuildPart, type BuildSource } from '../rebrickable/client';
+import { createRebrickable, PartsUnavailable, toBuildPart, type BuildSource, type RbBuildPart } from '../rebrickable/client';
+import { resolve, toScheme } from '../identifiers/resolve';
 import { replaceParts } from './parts';
 import * as sets from './sets';
 import { buildMatches, GIVE_UP_AFTER, RECHECK_UNAVAILABLE_DAYS, syncBuilds, wantedListXml } from './builds';
 
 let db: DB;
 const part = (partNo: string, colorId: number | null, qty: number) => ({ matchNo: 0, partNo, name: partNo, type: 'PART', colorId, qty, extra: 0, alternate: false, counterpart: false });
+
+// A parts list line as the client returns it: Rebrickable numbers, here with the same BrickLink ones (or none: unmapped).
+const line = (partNo: string, colorId: number, qty: number, mapped = true): RbBuildPart => ({
+  partNo, colorId, qty, part: { bricklink: mapped ? [partNo] : [], ldraw: [] }, color: { bricklink: mapped ? [String(colorId)] : [], ldraw: [] },
+});
 
 let calls: string[];
 const src: BuildSource = {
@@ -21,8 +27,8 @@ const src: BuildSource = {
   },
   async buildParts(mocNo) {
     calls.push(`parts:${mocNo}`);
-    if (mocNo === 'MOC-1') return [{ partNo: '3001', colorId: 5, qty: 4, mapped: true }, { partNo: '3001', colorId: 5, qty: 2, mapped: true }, { partNo: '3023', colorId: 11, qty: 4, mapped: true }];
-    return [{ partNo: '3001', colorId: 5, qty: 10, mapped: true }, { partNo: '9999', colorId: 1, qty: 15, mapped: true }, { partNo: 'rb-only', colorId: 1000, qty: 5, mapped: false }];
+    if (mocNo === 'MOC-1') return [line('3001', 5, 4), line('3001', 5, 2), line('3023', 11, 4)];
+    return [line('3001', 5, 10), line('9999', 1, 15), line('rb-only', 1000, 5, false)];
   },
 };
 
@@ -37,10 +43,37 @@ beforeEach(async () => {
   await replaceParts(db, b.id, [part('3001', 5, 2)]);
 });
 
-it('maps Rebrickable inventory lines to BrickLink numbers', () => {
-  expect(toBuildPart({ quantity: 3, part: { part_num: '3001', external_ids: { BrickLink: ['3001'] } }, color: { id: 4, external_ids: { BrickLink: { ext_ids: [5] } } } }))
-    .toEqual({ partNo: '3001', colorId: 5, qty: 3, mapped: true });
-  expect(toBuildPart({ quantity: 1, part: { part_num: '973c01' }, color: { id: 72 } })).toEqual({ partNo: '973c01', colorId: 72, qty: 1, mapped: false });
+it('keeps Rebrickable numbers on inventory lines, with the BrickLink and LDraw numbers it lists', () => {
+  expect(toBuildPart({ quantity: 3, part: { part_num: '3001', external_ids: { BrickLink: ['3001'], LDraw: ['3001'] } }, color: { id: 4, external_ids: { BrickLink: { ext_ids: [5] }, LDraw: { ext_ids: [4] } } } }))
+    .toEqual({ partNo: '3001', colorId: 4, qty: 3, part: { bricklink: ['3001'], ldraw: ['3001'] }, color: { bricklink: ['5'], ldraw: ['4'] } });
+  expect(toBuildPart({ quantity: 1, part: { part_num: '973c01' }, color: { id: 72 } })).toEqual({ partNo: '973c01', colorId: 72, qty: 1, part: { bricklink: [], ldraw: [] }, color: { bricklink: [], ldraw: [] } });
+});
+
+it('saves the IDs a parts list came with, and maps lines to BrickLink numbers as before', async () => {
+  const moc: BuildSource = {
+    async alternates(setNo) { return setNo === '31120-1' ? [{ mocNo: 'MOC-9', name: 'Cart', numParts: 4, imageUrl: null, url: null, designer: null }] : []; },
+    async buildParts() {
+      return [
+        { partNo: '3001', colorId: 4, qty: 2, part: { bricklink: ['3001'], ldraw: ['3001'] }, color: { bricklink: ['5'], ldraw: ['4'] } },
+        { partNo: '3069bpr0001', colorId: 4, qty: 1, part: { bricklink: ['3069bpr0001', '3069bp01'], ldraw: [] }, color: { bricklink: ['5'], ldraw: ['4'] } },
+        { partNo: 'rb-only', colorId: 4, qty: 1, part: { bricklink: [], ldraw: [] }, color: { bricklink: ['5'], ldraw: ['4'] } },
+        { partNo: '3023', colorId: 9999, qty: 1, part: { bricklink: ['3023'], ldraw: [] }, color: { bricklink: [], ldraw: [] } },
+      ];
+    },
+  };
+  await syncBuilds(db, moc);
+  const b = (await db.select().from(builds).where(eq(builds.mocNo, 'MOC-9')).get())!;
+  const lines = (await db.select().from(buildParts).where(eq(buildParts.buildId, b.id)).all()).map(({ partNo, colorId, qty, mapped }) => ({ partNo, colorId, qty, mapped }));
+  expect(lines).toEqual([
+    { partNo: '3001', colorId: 5, qty: 2, mapped: true },
+    { partNo: '3069bpr0001', colorId: 5, qty: 1, mapped: true }, // Rebrickable's first BrickLink number, as before
+    { partNo: 'rb-only', colorId: 5, qty: 1, mapped: false },
+    { partNo: '3023', colorId: 9999, qty: 1, mapped: false },
+  ]);
+  expect(await resolve(db, 'color', 'ldraw', 4)).toMatchObject({ canonical: '5' });
+  expect(await resolve(db, 'part', 'ldraw', '3001.dat')).toMatchObject({ canonical: '3001' });
+  expect(await toScheme(db, 'part', '3001', 'rebrickable')).toEqual(['3001']);
+  expect((await resolve(db, 'part', 'rebrickable', '3069bpr0001')).candidates.map((c) => c.canonical)).toEqual(['3069bpr0001', '3069bp01']);
 });
 
 it('fetches alternates and parts through the client, skipping spares', async () => {
@@ -53,7 +86,7 @@ it('fetches alternates and parts through the client, skipping spares', async () 
     ] });
   }, 0);
   expect(await rb.alternates('31120-1')).toEqual([{ mocNo: 'MOC-7', name: 'Cart', numParts: 3, imageUrl: 'https://cdn.rebrickable.com/x.jpg', url: 'https://rebrickable.com/mocs/MOC-7/', designer: 'ada' }]);
-  expect(await rb.buildParts('MOC-7')).toEqual([{ partNo: '3001', colorId: 5, qty: 2, mapped: true }]);
+  expect(await rb.buildParts('MOC-7')).toEqual([{ partNo: '3001', colorId: 4, qty: 2, part: { bricklink: ['3001'], ldraw: [] }, color: { bricklink: ['5'], ldraw: [] } }]);
 });
 
 it('stays within the call budget and picks up where it stopped', async () => {
@@ -88,7 +121,7 @@ describe('builds whose parts list Rebrickable won’t share', () => {
     async alternates(setNo) { calls.push(`alt:${setNo}`); return setNo === '31120-1' ? many(8) : []; },
     async buildParts(mocNo) {
       calls.push(`parts:${mocNo}`);
-      if (open.has(mocNo)) return [{ partNo: '3001', colorId: 5, qty: 1, mapped: true }];
+      if (open.has(mocNo)) return [line('3001', 5, 1)];
       throw new PartsUnavailable('forbidden', `Rebrickable doesn't share the parts list of ${mocNo}.`);
     },
   });

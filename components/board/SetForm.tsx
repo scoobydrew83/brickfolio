@@ -3,11 +3,14 @@ import { priceHistoryFor } from '@/app/actions';
 import { CONDITIONS, REGISTERED, displayNo, type SetRow } from '@/lib/sets';
 import type { Money } from './ui';
 import { Button, Dialog, field } from '../ui';
+import { CopyFields } from './CopyForm';
 
 type Dupe = { name: string; qty: number } | null;
 type Props = { set: SetRow | null; locations: string[]; pending: boolean; dupe: Dupe; money: Money; onClose: () => void; onAddAnother: () => void; onSubmit: (form: Record<string, unknown>) => void };
 
 export function SetForm({ set, locations, pending, dupe, money, onClose, onAddAnother, onSubmit }: Props) {
+  // With several copies, condition, location and Missing % are per copy: they're edited on the set page.
+  const several = !!set && set.copies.length > 1;
   const footer = dupe ? (
     <>
       <Button variant="ghost" onClick={onClose}>Skip</Button>
@@ -26,7 +29,8 @@ export function SetForm({ set, locations, pending, dupe, money, onClose, onAddAn
         className="space-y-4 px-5 py-4"
         onSubmit={(e) => {
           e.preventDefault();
-          onSubmit(Object.fromEntries(new FormData(e.currentTarget)));
+          const f = Object.fromEntries(new FormData(e.currentTarget));
+          onSubmit(set ? f : { ...f, gwp: f.gwp === 'on' });
         }}
       >
         <label className="block text-sm">Set #
@@ -36,6 +40,7 @@ export function SetForm({ set, locations, pending, dupe, money, onClose, onAddAn
           <input name="name" defaultValue={set?.name ?? ''} required={!set} maxLength={120} className={field} />
         </label>
         <div className="grid grid-cols-2 gap-3">
+          {!several && <>
           <label className="block text-sm">Location
             <select name="location" defaultValue={set?.location ?? ''} className={field}>
               <option value="">(none)</option>
@@ -47,13 +52,14 @@ export function SetForm({ set, locations, pending, dupe, money, onClose, onAddAn
               {CONDITIONS.map((c) => <option key={c}>{c}</option>)}
             </select>
           </label>
+          </>}
           <label className="block text-sm">Registered
             <select name="registered" defaultValue={set?.registered ?? ''} className={field}>
               <option value="">(blank)</option>
               {REGISTERED.map((r) => <option key={r}>{r}</option>)}
             </select>
           </label>
-          <label className="block text-sm">Missing %
+          {!several && <label className="block text-sm">Missing %
             {set?.missingMarked ? (
               <>
                 <input type="number" value={set.missingPct ?? 0} readOnly aria-describedby="missing-computed" className={`${field} bg-muted`} />
@@ -62,17 +68,23 @@ export function SetForm({ set, locations, pending, dupe, money, onClose, onAddAn
             ) : (
               <input name="missingPct" type="number" min={0} max={100} step="any" defaultValue={set?.missingPct ?? ''} placeholder="0" className={field} />
             )}
-          </label>
-          {set && (
+          </label>}
+          {set && !several && (
             <label className="block text-sm">Qty
               <input name="qty" type="number" min={1} max={999} step={1} required defaultValue={set.qty} className={field} />
             </label>
           )}
         </div>
+        {several && (
+          <p className="rounded-control bg-subtle p-3 text-sm text-fg-2">
+            This set has {set!.copies.length} copies. Change their condition, location and Missing % under Copies on the set page.
+          </p>
+        )}
+        {!set && <CopyFields copy={null} locations={locations} withPlace={false} />}
         <label className="block text-sm">Notes
           <textarea name="notes" defaultValue={set?.notes ?? ''} maxLength={2000} rows={2} className={field} />
         </label>
-        <p className="text-xs text-fg-3">New sets are priced at the new sold price; Used and Partial at the used price. Est. Value subtracts Missing %.</p>
+        <p className="text-xs text-fg-3">New and sealed copies are priced at the new sold price; Used and Partial at the used price. Est. Value subtracts Missing %.</p>
         {set && <PriceTrend setNo={set.setNo} money={money} />}
         {dupe && (
           <p role="alert" className="rounded-control bg-warn-soft p-3 text-sm text-warn ring-1 ring-warn-ring">

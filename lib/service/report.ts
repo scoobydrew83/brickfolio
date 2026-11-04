@@ -1,9 +1,7 @@
 // Insurance / valuation report: every set and minifigure with its value, where the number came from and when.
 // The data is built here (testable); lib/report/pdf.ts draws it.
-import { asc } from 'drizzle-orm';
 import type { DB } from '../db/types';
-import { setMissingParts } from '../db/schema';
-import { displayNo, groupTotals, num, totals } from '../sets';
+import { displayNo, groupTotals, isActive, num, totals, withCopies, type CopyRow, type SetRow } from '../sets';
 import { listMinifigs, minifigTotals } from './minifigs';
 import { getCurrency, listSets, syncStatus } from './sets';
 
@@ -31,7 +29,7 @@ export type Valuation = {
   totals: { sets: number; setCopies: number; setValue: number; minifigs: number; minifigCopies: number; minifigValue: number; value: number; unpriced: number; retail: number | null; retailCovered: number };
   byLocation: { label: string; items: number; copies: number; value: number }[];
   lines: ReportLine[];
-  partialWithParts: number; // Partial sets whose Missing % comes from marked parts
+  partialWithParts: number; // Partial copies whose Missing % comes from marked parts
 };
 
 const round = (v: number) => Math.round(v * 100) / 100;
@@ -40,12 +38,16 @@ const day = (iso: string | null | undefined) => (iso ? iso.slice(0, 10) : null);
 /** Everything the report shows. `owner` is printed on the cover line when given. */
 export async function valuation(db: DB, opts: { owner?: string | null } = {}): Promise<Valuation> {
   const [sets, figs, currency, sync] = await Promise.all([listSets(db), listMinifigs(db), getCurrency(db), syncStatus(db)]);
-  const marked = new Set((await db.selectDistinct({ id: setMissingParts.setId }).from(setMissingParts).orderBy(asc(setMissingParts.setId)).all()).map((r) => r.id));
-
+  // One line per set and (location, condition, Missing %) group of its copies; parted out copies aren't listed.
+  const groups = (s: SetRow): SetRow[] => {
+    const by = new Map<string, CopyRow[]>();
+    for (const c of s.copies.filter(isActive)) { const k = JSON.stringify([c.location, c.condition, c.missingPct]); by.set(k, [...(by.get(k) ?? []), c]); }
+    return [...by.values()].map((cs) => withCopies(s, cs));
+  };
   const lines: ReportLine[] = [
-    ...sets.map((s): ReportLine => ({
+    ...sets.flatMap(groups).map((s): ReportLine => ({
       kind: 'set', no: displayNo(s.setNo), name: s.name, year: s.year, condition: s.condition, missingPct: s.missingPct, qty: s.qty,
-      location: s.location, each: s.estValue, total: s.estValue == null ? null : round(s.estValue * s.qty), sales: s.qtySold,
+      location: s.location, each: s.estValue, total: s.valueTotal, sales: s.qtySold,
       pricedAt: day(s.lastUpdated), retail: s.retailPrice && s.retailCurrency === currency ? s.retailPrice : null,
     })),
     ...figs.map((m): ReportLine => ({
@@ -75,6 +77,6 @@ export async function valuation(db: DB, opts: { owner?: string | null } = {}): P
     },
     byLocation: [...loc.values()].map((l) => ({ ...l, value: round(l.value) })).sort((a, b) => b.value - a.value),
     lines,
-    partialWithParts: sets.filter((s) => s.condition === 'Partial' && marked.has(s.id)).length,
+    partialWithParts: sets.reduce((t, s) => t + s.copies.filter((c) => isActive(c) && c.condition === 'Partial' && c.missingMarked).length, 0),
   };
 }

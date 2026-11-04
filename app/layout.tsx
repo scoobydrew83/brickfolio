@@ -2,7 +2,6 @@ import type { Metadata, Viewport } from "next";
 import { Archivo } from "next/font/google";
 import "./globals.css";
 import { APP_DESCRIPTION, APP_NAME } from "@/lib/brand";
-import { AppShell } from "@/components/shell/AppShell";
 import { THEME_SCRIPT } from "@/components/shell/ThemeToggle";
 import { InlineScript } from "@/components/shell/InlineScript";
 
@@ -36,7 +35,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
     >
       <body className="flex min-h-full flex-col bg-canvas text-fg">
         <InlineScript html={THEME_SCRIPT} />
-        <AppShell>{children}</AppShell>
+        {children}
       </body>
     </html>
   );

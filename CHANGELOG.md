@@ -4,6 +4,31 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-11-04
+
+**Before upgrading, back up your database** (Docker keeps daily copies in `/data/backups`). The upgrade runs six migrations: every set becomes one copy per unit of its old quantity (condition New becomes **Sealed**, the rest **Built**), and saved barcodes move from `set_barcodes` into the new `identifiers` table. Collection totals don't change.
+
+### Added
+- **Share links:** **Settings → Share links** creates a read-only link to your collection for someone without access to the app. Values, locations and notes are off by default; minifigures are on. A link can expire, and revoking it takes effect at once. The link is shown once and stored hashed. `GET/POST /api/v1/share-links`, `DELETE /api/v1/share-links/{id}`. `compose.tailscale-funnel.yml` and Cloudflare Access bypass rules open only `/share` (see the install guide). New `SHARE_BASE_URL`.
+- **Copies:** each physical copy of a set is tracked on its own, with a status (Sealed, Built, In progress, Parted out), condition, location, acquired and build dates, cost (price paid, tax, shipping), notes and its own Est. Value. A set's page lists its copies with **Add a copy**, **Edit** and **Remove**. A **Gift with purchase** copy costs 0.
+- Cost basis and gain: on the Sets page, each card, a set's page and in MCP `collection_summary`, `search_sets` and `get_set`, over the copies with a price paid.
+- A **Status** filter on the Sets page. Location, condition and status filters match a set when any of its copies matches.
+- `GET/POST /api/v1/sets/{setNo}/copies`, `PATCH/DELETE /api/v1/sets/{setNo}/copies/{id}`. `POST /api/v1/sets` takes the copy fields (`status`, `acquiredDate`, `buildDate`, `pricePaid`, `tax`, `shipping`, `gwp`, `copyNotes`).
+- A part and colour ID map from Rebrickable: with `REBRICKABLE_API_KEY` set, the daily sync (and **Sync Rebrickable now**) saves the BrickLink and LDraw numbers Rebrickable lists for every colour (one call, refreshed monthly) and part (20 pages of 1,000 parts per sync by default, `REBRICKABLE_ID_PAGES_PER_SYNC`; a full pass is about 60 pages, picks up where the last sync stopped and is redone monthly). Alternate builds' parts lists add the mappings they come with, and the Brickset sync keeps Brickset's own set ids.
+
+### Changed
+- App pages moved into the `app/(app)` route group, so share pages render without the app's header and nav. URLs are unchanged.
+- Existing sets become `qty` copies on upgrade, keeping condition, location, Missing % and value. Condition **New** becomes status **Sealed**; Used, Partial and blank become **Built**. Change a copy afterwards if it was opened. Collection totals are unchanged.
+- Sealed copies are valued with BrickLink's new sold prices and built ones with used prices. Until both guides are fetched, a set fetches the guide most of its copies need (ties go to used); a copy in the other guide uses a snapshot from the last 90 days, or is labelled "priced from new/used sales".
+- Marked missing parts belong to a copy. Existing marks move to each set's first copy. `GET/PUT /api/v1/sets/{setNo}/missing` and `.../missing/wanted.xml` take `?copy=<id>` (a PUT needs it when a set has several copies and it isn't clear which).
+- `PATCH /api/v1/sets/{setNo}` changes condition, location and Missing % only on a set with one copy; with several it answers 409. `qty` adds copies (cloned from the newest, without cost) or removes the newest. `DELETE` removes the newest copy.
+- CSV export has one row per copy (with `copyId`, `status`, dates, cost and `copyNotes`); re-importing it updates those copies. The Google Sheet's format still imports, setting the copy count to `qty`.
+- Totals, history, the valuation report, Radar, scan "you own N", Designer and "What can I build?" count copies. Parted out copies aren't counted ("parted out: N" in the Sets header).
+- Locations: renaming moves copies, and a location can't be deleted while a copy uses it.
+- Wishlist **Got it** adds a copy dated today (sealed when you wanted it New); the action takes an optional price paid.
+- `sets.qty`, `condition`, `location` and `missing_pct` are no longer read or written; they're dropped in a later release.
+- Saved barcodes moved into a new `identifiers` table, one map from every ID scheme (barcodes, LEGO, BrickLink, Rebrickable, Brickset, LDraw) to the BrickLink ID, with the provider's details in `barcode_details`. Upgrading copies every barcode over, and minifigures with both a BrickLink and a Rebrickable number get a mapping. Scanning, the community list and **Settings → Barcode scanning** work as before.
+
 ## [0.8.1] - 2026-11-04
 
 ### Fixed

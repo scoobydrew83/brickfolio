@@ -1,7 +1,9 @@
 import { beforeEach, expect, it } from 'vitest';
+import { barcodeRows, saveBarcode } from '../identifiers/barcodes';
 import { openNodeDb } from '../db/node';
+import { insertCopies } from '../service/copies';
 import type { DB } from '../db/types';
-import { barcodeMisses, setBarcodes, sets, wishlist } from '../db/schema';
+import { barcodeMisses, sets, wishlist } from '../db/schema';
 import { barcodeStats, resolveBarcode } from './resolve';
 import type { BarcodeLookupProvider, ProviderResult } from './providers';
 import { rememberBarcode } from '../service/barcodes';
@@ -48,7 +50,7 @@ it('doesn’t pick between two different sets, and doesn’t save them', async (
   const r = await resolveBarcode(db, UPC, { providers: [p] });
   expect(r.status).toBe('ambiguous');
   if (r.status !== 'invalid') expect(r.candidates.map((c) => c.setNo)).toEqual(['75192-1', '10179-1']);
-  expect(await db.select().from(setBarcodes).all()).toHaveLength(0);
+  expect(await barcodeRows(db)).toHaveLength(0);
 });
 
 it('remembers a miss only when every provider said not found', async () => {
@@ -65,7 +67,7 @@ it('remembers a miss only when every provider said not found', async () => {
 });
 
 it('prefers a barcode you confirmed over what a provider said', async () => {
-  await db.insert(setBarcodes).values({ barcode: UPC, format: 'UPC_A', gtin: GTIN, setNo: '10179-1', source: 'comparethebricks' });
+  await saveBarcode(db, { barcode: UPC, format: 'UPC_A', gtin: GTIN, setNo: '10179-1', source: 'comparethebricks' });
   await rememberBarcode(db, UPC, '75192');
   const r = await resolveBarcode(db, UPC, { providers: [] });
   expect(r).toMatchObject({ status: 'matched', candidates: [{ setNo: '75192-1', source: 'user', verified: true }] });
@@ -73,7 +75,8 @@ it('prefers a barcode you confirmed over what a provider said', async () => {
 
 it('says when you own or want the set, with the collection’s name and photo', async () => {
   await rememberBarcode(db, UPC, '75192-1');
-  await db.insert(sets).values({ setNo: '75192-1', name: 'My Falcon', qty: 2, condition: 'New', location: null, imageUrl: 'https://img/x.png' });
+  const [f] = await db.insert(sets).values({ setNo: '75192-1', name: 'My Falcon', imageUrl: 'https://img/x.png' }).returning().all();
+  await insertCopies(db, f.id, { condition: 'New' }, 2);
   await db.insert(wishlist).values({ setNo: '75192-1' });
   const r = await resolveBarcode(db, UPC, { providers: [] });
   expect(r).toMatchObject({ candidates: [{ name: 'My Falcon', imageUrl: 'https://img/x.png', owned: { qty: 2, condition: 'New' }, wished: true }] });
@@ -94,9 +97,10 @@ it('read-only lookups never write', async () => {
 it('builds an offline map that resolves like the server does', async () => {
   const { offlineMap } = await import('./resolve');
   const { localResolve } = await import('./offline');
-  await db.insert(setBarcodes).values({ barcode: UPC, format: 'UPC_A', gtin: GTIN, setNo: '10179-1', source: 'comparethebricks', name: 'UCS Falcon' });
+  await saveBarcode(db, { barcode: UPC, format: 'UPC_A', gtin: GTIN, setNo: '10179-1', source: 'comparethebricks', name: 'UCS Falcon' });
   await rememberBarcode(db, UPC, '75192');
-  await db.insert(sets).values({ setNo: '75192-1', name: 'My Falcon', qty: 2 });
+  const [f] = await db.insert(sets).values({ setNo: '75192-1', name: 'My Falcon' }).returning().all();
+  await insertCopies(db, f.id, {}, 2);
   const map = JSON.parse(JSON.stringify(await offlineMap(db))); // as it travels to the browser
   const b = { raw: UPC, format: 'UPC_A' as const, gtin: GTIN };
   const server = await resolveBarcode(db, UPC, { providers: [], readOnly: true });

@@ -1,4 +1,4 @@
-// Rebrickable API v3 client: catalog data only (themes, set details, minifigures). Rebrickable has no prices,
+// Rebrickable API v3 client: catalog data only (themes, set details, minifigures, part and colour IDs). Rebrickable has no prices,
 // so BrickLink stays the source for every value in the app. Docs: https://rebrickable.com/api/v3/docs/
 // Free key from your Rebrickable account settings. The API allows about one call per second.
 
@@ -32,8 +32,23 @@ export type Catalog = {
 
 /** An alternate build (MOC) of a set, from Rebrickable. */
 export type RbBuild = { mocNo: string; name: string; numParts: number | null; imageUrl: string | null; url: string | null; designer: string | null };
-/** One part of a build, in BrickLink numbers when Rebrickable knows them (`mapped`), else Rebrickable's own. */
-export type RbBuildPart = { partNo: string; colorId: number | null; qty: number; mapped: boolean };
+/** The other catalogs' numbers Rebrickable lists for a part or colour (`external_ids`). */
+export type RbExternal = { bricklink: string[]; ldraw: string[] };
+/**
+ * One part of a build in Rebrickable's numbers, with the BrickLink and LDraw numbers Rebrickable sent for its part and
+ * colour. lib/service/builds.ts saves them in the identifiers map and turns the line into BrickLink numbers.
+ */
+export type RbBuildPart = { partNo: string; colorId: number | null; qty: number; part: RbExternal; color: RbExternal };
+/** A colour and its BrickLink and LDraw ids. */
+export type RbColor = { id: number; name: string } & RbExternal;
+/** A part in Rebrickable's catalog and its BrickLink and LDraw numbers. */
+export type RbPart = { partNo: string; name: string } & RbExternal;
+/** Part and colour ID mappings, for the identifiers map (lib/service/identifiers.ts). */
+export type IdCatalog = {
+  colors(): Promise<RbColor[]>;
+  /** One page of the parts catalog (`url` is the previous page's `next`; none for the first). `next` is null on the last page. */
+  partsPage(url?: string | null): Promise<{ parts: RbPart[]; next: string | null }>;
+};
 
 /** Alternate builds and their parts, for "What can I build?". */
 export type BuildSource = {
@@ -48,17 +63,19 @@ export type FigSource = { themeFigs(themeId: number): Promise<RbFig[]> };
 
 type Page<T> = { count: number; next: string | null; results: T[] };
 type ApiBuild = { set_num: string; name: string; num_parts?: number; moc_img_url?: string | null; moc_url?: string | null; designer_name?: string | null };
-type ApiInvPart = {
-  quantity: number; is_spare?: boolean;
-  part: { part_num: string; external_ids?: { BrickLink?: string[] } };
-  color?: { id: number; external_ids?: { BrickLink?: { ext_ids?: number[] } } };
-};
+type ApiPartIds = { BrickLink?: string[]; LDraw?: string[] };
+type ApiColorIds = { BrickLink?: { ext_ids?: number[] }; LDraw?: { ext_ids?: number[] } };
+type ApiPart = { part_num: string; name?: string; external_ids?: ApiPartIds };
+type ApiColor = { id: number; name?: string; external_ids?: ApiColorIds };
+type ApiInvPart = { quantity: number; is_spare?: boolean; part: ApiPart; color?: ApiColor };
 
-/** Maps a Rebrickable inventory line to BrickLink part and colour numbers where Rebrickable lists them. */
+const strs = (v: unknown) => (Array.isArray(v) ? v.filter((x) => x !== null && x !== undefined && x !== '').map(String) : []);
+const partIds = (e?: ApiPartIds): RbExternal => ({ bricklink: strs(e?.BrickLink), ldraw: strs(e?.LDraw) });
+const colorIds = (e?: ApiColorIds): RbExternal => ({ bricklink: strs(e?.BrickLink?.ext_ids), ldraw: strs(e?.LDraw?.ext_ids) });
+
+/** A Rebrickable inventory line, with the BrickLink and LDraw numbers Rebrickable lists for its part and colour. */
 export function toBuildPart(p: ApiInvPart): RbBuildPart {
-  const blPart = p.part.external_ids?.BrickLink?.[0];
-  const blColor = p.color?.external_ids?.BrickLink?.ext_ids?.[0];
-  return { partNo: blPart ?? p.part.part_num, colorId: blColor ?? p.color?.id ?? null, qty: p.quantity, mapped: !!blPart && blColor !== undefined };
+  return { partNo: p.part.part_num, colorId: p.color?.id ?? null, qty: p.quantity, part: partIds(p.part.external_ids), color: colorIds(p.color?.external_ids) };
 }
 type ApiTheme = { id: number; parent_id: number | null; name: string };
 type ApiSet = { set_num: string; name: string; year?: number; theme_id?: number; num_parts?: number; set_img_url?: string | null };
@@ -67,7 +84,10 @@ type ApiFig = { set_num: string; name: string; num_parts?: number; set_img_url?:
 
 class NotFound extends Error {}
 
-export function createRebrickable(key: string, fetchImpl: typeof fetch = fetch, gapMs = GAP_MS): Catalog & BuildSource & FigSource {
+/** Only links back to the API are followed, so the key is never sent anywhere else. */
+const ours = (url: string | null | undefined) => (url?.startsWith(BASE + '/') ? url : null);
+
+export function createRebrickable(key: string, fetchImpl: typeof fetch = fetch, gapMs = GAP_MS): Catalog & BuildSource & FigSource & IdCatalog {
   let last = 0;
   async function get<T>(urlOrPath: string): Promise<T> {
     const url = urlOrPath.startsWith('http') ? urlOrPath : BASE + urlOrPath;
@@ -98,8 +118,7 @@ export function createRebrickable(key: string, fetchImpl: typeof fetch = fetch, 
     for (let url: string | null = path; url; ) {
       const page: Page<T> = await get<Page<T>>(url);
       out.push(...page.results);
-      // Only follow links back to the API, so the key is never sent anywhere else.
-      url = page.next?.startsWith(BASE + '/') ? page.next : null;
+      url = ours(page.next);
     }
     return out;
   }
@@ -145,6 +164,15 @@ export function createRebrickable(key: string, fetchImpl: typeof fetch = fetch, 
         throw e;
       }
     },
+    async colors() {
+      return (await all<ApiColor>('/lego/colors/?page_size=1000')).map((c) => ({ id: c.id, name: c.name ?? String(c.id), ...colorIds(c.external_ids) }));
+    },
+    async partsPage(url) {
+      const first = '/lego/parts/?page_size=1000&inc_part_details=1';
+      if (url && !ours(url)) throw new RebrickableError('Rebrickable: refusing to follow a parts link off rebrickable.com.');
+      const page = await get<Page<ApiPart>>(url || first);
+      return { parts: page.results.map((p) => ({ partNo: p.part_num, name: p.name ?? p.part_num, ...partIds(p.external_ids) })), next: ours(page.next) };
+    },
     async themeFigs(themeId) {
       return (await all<ApiFig>(`/lego/minifigs/?in_theme_id=${themeId}&page_size=1000`)).map((f) => ({
         figNo: f.set_num, name: f.name, numParts: f.num_parts ?? null, imageUrl: f.set_img_url ?? null,
@@ -162,7 +190,7 @@ export function createRebrickable(key: string, fetchImpl: typeof fetch = fetch, 
 }
 
 /** Client from REBRICKABLE_API_KEY, or null when it isn't set (the feature is optional). */
-export function rebrickableFromEnv(): (Catalog & BuildSource & FigSource) | null {
+export function rebrickableFromEnv(): (Catalog & BuildSource & FigSource & IdCatalog) | null {
   const key = process.env.REBRICKABLE_API_KEY;
   return key ? createRebrickable(key) : null;
 }

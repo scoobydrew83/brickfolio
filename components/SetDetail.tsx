@@ -3,29 +3,33 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useMemo, useState, useTransition } from 'react';
-import { Copy, Download, ExternalLink, ListX, Pencil, RefreshCw } from 'lucide-react';
-import { editSet, refreshPartsFor, relookupSet, removeSet, priceSetParts, saveMissingParts, type Result } from '@/app/actions';
+import { Copy, Download, ExternalLink, ListX, Pencil, Plus, RefreshCw } from 'lucide-react';
+import { addCopy, editCopy, editSet, refreshPartsFor, relookupSet, removeCopy, removeSet, priceSetParts, saveMissingParts, type Result } from '@/app/actions';
 import type { BuildMatch } from '@/lib/service/builds';
 import type { MissingSummary } from '@/lib/service/missing';
 import type { Partout } from '@/lib/service/partout';
 import { partKey } from '@/lib/bricklink/wanted';
 import type { PartRow } from '@/lib/service/parts';
-import { displayNo, num, type SetRow } from '@/lib/sets';
+import { copiesSummary, copyGuide, costBasis, displayNo, num, setGuide, STATUS_LABEL, type CopyRow, type SetRow } from '@/lib/sets';
 import { ModelViewer } from './ModelViewer';
 import { PartList } from './board/PartsDialog';
-import { RemoveButton, RetireChip } from './board/SetCard';
+import { locationLabel, RemoveButton, RetireChip } from './board/SetCard';
+import { CopyForm } from './board/CopyForm';
 import { retailGain, retirement } from '@/lib/retail';
 import { SetForm } from './board/SetForm';
 import { blLink, moneyIn } from './board/ui';
 import { Banner, Button, Callout, CONDITION_TONE, Chip, EmptyState, FilterChip, buttonClass, cx } from './ui';
 
-type Props = { set: SetRow; parts: PartRow[]; prices: { date: string; avgSold: number | null }[]; currency: string; locations: string[]; priced: boolean; model: { fileName: string; author: string | null } | null; library: boolean; builds: BuildMatch[]; view?: '3d'; missing: MissingSummary; partout: (Partout & { unpriced: number }) | null; partsPriced: boolean };
+type Props = { set: SetRow; parts: PartRow[]; prices: { date: string; avgSold: number | null }[]; currency: string; locations: string[]; priced: boolean; model: { fileName: string; author: string | null } | null; library: boolean; builds: BuildMatch[]; view?: '3d'; missing: MissingSummary; missingCopyId: number | null; guide: 'N' | 'U' | null; partout: (Partout & { unpriced: number }) | null; partsPriced: boolean };
 
 /** One set: its photo, value and price history, parts list and copies. */
-export default function SetDetail({ set: s, parts, prices, currency, locations, priced, model, library, builds, view, missing, partout, partsPriced }: Props) {
+export default function SetDetail({ set: s, parts, prices, currency, locations, priced, model, library, builds, view, missing, missingCopyId, guide, partout, partsPriced }: Props) {
   const router = useRouter();
   const money = useMemo(() => moneyIn(currency), [currency]);
   const [editing, setEditing] = useState(false);
+  const [copyForm, setCopyForm] = useState<CopyRow | 'new' | null>(null);
+  const missingCopy = s.copies.find((c) => c.id === missingCopyId) ?? null;
+  const copyLabel = (c: CopyRow) => `Copy ${s.copies.indexOf(c) + 1}`;
   const [message, setMessage] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
   const [pending, start] = useTransition();
   const act = (fn: () => Promise<Result>, ok: string, after?: () => void) =>
@@ -46,11 +50,11 @@ export default function SetDetail({ set: s, parts, prices, currency, locations, 
   const shownMissing = marking ? draft : saved;
   const listed = missingOnly && !marking ? regular.filter((p) => (saved[partKey(p.type, p.partNo, p.colorId)] ?? 0) > 0) : regular;
   const saveMarks = () => act(
-    () => saveMissingParts(s.setNo, regular.flatMap((p) => { const q = draft[partKey(p.type, p.partNo, p.colorId)] ?? 0; return q ? [{ partNo: p.partNo, colorId: p.colorId, type: p.type, qty: q }] : []; })),
+    () => saveMissingParts(s.setNo, missingCopyId, regular.flatMap((p) => { const q = draft[partKey(p.type, p.partNo, p.colorId)] ?? 0; return q ? [{ partNo: p.partNo, colorId: p.colorId, type: p.type, qty: q }] : []; })),
     'Missing parts saved. Missing % and Est. Value now follow them.',
     () => setMarking(false),
   );
-  const wantedUrl = `/api/v1/sets/${encodeURIComponent(displayNo(s.setNo))}/missing/wanted.xml`;
+  const wantedUrl = `/api/v1/sets/${encodeURIComponent(displayNo(s.setNo))}/missing/wanted.xml${missingCopyId ? `?copy=${missingCopyId}` : ''}`;
   const copyWanted = () => start(async () => {
     try {
       const res = await fetch(wantedUrl);
@@ -101,22 +105,25 @@ export default function SetDetail({ set: s, parts, prices, currency, locations, 
               <p className="text-lg font-bold tabular-nums text-fg-3">#{displayNo(s.setNo)}</p>
               <span className="flex items-center gap-1">
                 {ret && <RetireChip ret={ret} />}
-                {s.condition && <Chip tone={CONDITION_TONE[s.condition] ?? 'neutral'}>{s.condition}</Chip>}
+                {s.condition ? <Chip tone={CONDITION_TONE[s.condition] ?? 'neutral'}>{s.condition}</Chip> : s.mixed.condition ? <Chip>Mixed</Chip> : null}
               </span>
             </div>
             <h1 className="mt-1 text-4xl font-extrabold leading-tight tracking-tight [font-stretch:110%]">{s.name}</h1>
             <p className="mt-1 text-sm text-fg-3">
-              {[theme, s.year, s.pieces ? `${num(s.pieces).toLocaleString()} pieces` : null, s.minifigs ? `${s.minifigs} minifig${s.minifigs === 1 ? '' : 's'}` : null, s.location ? `on ${s.location}` : 'no location'].filter(Boolean).join(' · ')}
+              {[theme, s.year, s.pieces ? `${num(s.pieces).toLocaleString()} pieces` : null, s.minifigs ? `${s.minifigs} minifig${s.minifigs === 1 ? '' : 's'}` : null, s.location ? `on ${s.location}` : locationLabel(s).replace('No location', 'no location')].filter(Boolean).join(' · ')}
             </p>
             {s.blName && s.blName !== s.name && <p className="mt-1 text-xs italic text-fg-3">BrickLink calls it {s.blName}</p>}
           </div>
 
           <Callout className="px-4 pt-3.5 pb-3">
             <div className="flex items-end justify-between gap-3">
-              <p className="text-3xl font-extrabold leading-none tabular-nums [font-stretch:112%]" title={`${s.qty} ${s.qty === 1 ? 'copy' : 'copies'}`}>{s.qty}x</p>
+              <div>
+                <p className="text-3xl font-extrabold leading-none tabular-nums [font-stretch:112%]" title={`${s.qty} ${s.qty === 1 ? 'copy' : 'copies'}`}>{s.qty}x</p>
+                <p className="mt-1 text-xs text-fg-3">{copiesSummary(s.copies)}</p>
+              </div>
               <div className="text-right">
-                <p className="text-xs text-fg-3">Est. Value{s.qty > 1 ? ' each' : ''}</p>
-                <p className="text-3xl font-extrabold tracking-tight tabular-nums [font-stretch:112%]">{money(s.estValue)}</p>
+                <p className="text-xs text-fg-3">Est. Value{s.qty > 1 ? ` (${money(s.estValue)} each)` : ''}</p>
+                <p className="text-3xl font-extrabold tracking-tight tabular-nums [font-stretch:112%]">{money(s.valueTotal)}</p>
               </div>
             </div>
             <PriceHistory prices={prices} money={money} />
@@ -126,9 +133,9 @@ export default function SetDetail({ set: s, parts, prices, currency, locations, 
               <div><dt className="text-xs text-fg-3">High</dt><dd className="font-semibold">{money(s.maxSold)}</dd></div>
             </dl>
             <p className="mt-2 text-xs text-fg-3">
-              {s.qtySold ? `BrickLink ${s.condition === 'New' ? 'new' : 'used'} sold prices from ${s.qtySold} recent sales` : 'No recent BrickLink sales'}
+              {s.qtySold ? `BrickLink ${(guide ?? setGuide(s.copies)) === 'N' ? 'new' : 'used'} sold prices from ${s.qtySold} recent sales` : 'No recent BrickLink sales'}
               {s.missingPct ? <span className="font-semibold text-warn"> · less {s.missingPct}% missing</span> : null}
-              {s.qty > 1 && s.estValue != null ? <> · {money(num(s.estValue) * s.qty)} for all {s.qty}</> : null}
+              {s.gain !== null ? <> · cost {money(s.costBasis)}, <b className={s.gain >= 0 ? 'text-ok' : 'text-danger'}>{s.gain >= 0 ? '+' : '−'}{money(Math.abs(s.gain))}</b>{s.costCovered < s.qty ? ` over ${s.costCovered} of ${s.qty} copies` : ''}</> : null}
             </p>
             {(s.retailPrice || s.launchDate || s.exitDate) && (
               <dl className="mt-3 grid grid-cols-3 gap-2 border-t border-line pt-2 text-sm tabular-nums">
@@ -167,6 +174,12 @@ export default function SetDetail({ set: s, parts, prices, currency, locations, 
             <a href={blLink(s.setNo)} target="_blank" rel="noreferrer" className={buttonClass('secondary')}><ExternalLink aria-hidden className="size-4" />BrickLink</a>
             <span className="ml-auto"><RemoveButton s={s} onRemove={remove} busy={pending} compact={false} /></span>
           </div>
+
+          <CopiesSection
+            s={s} money={money} pending={pending} label={copyLabel}
+            onAdd={() => setCopyForm('new')} onEdit={(c) => setCopyForm(c)}
+            onRemove={(c) => act(() => removeCopy(c.id), s.copies.length > 1 ? `Removed ${copyLabel(c).toLowerCase()}.` : `Removed ${s.name}.`, () => { if (s.copies.length <= 1) router.push('/'); })}
+          />
 
           {builds.length > 0 && (
             <section aria-labelledby="alt-title">
@@ -212,9 +225,20 @@ export default function SetDetail({ set: s, parts, prices, currency, locations, 
             )}
           </p>
         </div>
+        {s.copies.length > 1 && regular.length > 0 && (
+          <nav aria-label="Missing parts of copy" className="flex flex-wrap items-center gap-2 text-sm">
+            <span className="text-fg-3">Missing parts of</span>
+            {s.copies.map((c) => (
+              <Link key={c.id} href={`?copy=${c.id}`} scroll={false} aria-current={c.id === missingCopyId ? 'true' : undefined}
+                className={cx('rounded-chip px-2 py-0.5 ring-1', c.id === missingCopyId ? 'bg-primary-soft text-link ring-primary-ring' : 'ring-line hover:bg-subtle')}>
+                {copyLabel(c)} · {STATUS_LABEL[c.status]}{c.missingMarked ? ` · ${c.missingMarked} missing` : ''}
+              </Link>
+            ))}
+          </nav>
+        )}
         {marking && (
           <Callout className="flex flex-wrap items-center gap-3 px-4 py-3 text-sm">
-            <p className="mr-auto">Type how many of each part are missing. Missing % and Est. Value will follow, and the set becomes Partial.</p>
+            <p className="mr-auto">Type how many of each part are missing{missingCopy && s.copies.length > 1 ? ` from ${copyLabel(missingCopy).toLowerCase()}` : ''}. Missing % and Est. Value will follow, and the copy becomes Partial.</p>
             <Button variant="ghost" disabled={pending} onClick={() => { setDraft({}); }}>Clear all</Button>
             <Button disabled={pending} onClick={() => setMarking(false)}>Cancel</Button>
             <Button variant="primary" loading={pending} onClick={saveMarks}>Save missing parts</Button>
@@ -248,6 +272,16 @@ export default function SetDetail({ set: s, parts, prices, currency, locations, 
         )}
       </section>
 
+      {copyForm && (
+        <CopyForm
+          copy={copyForm === 'new' ? null : copyForm}
+          title={copyForm === 'new' ? `Add a copy of #${displayNo(s.setNo)}` : `Edit ${copyLabel(copyForm).toLowerCase()} of #${displayNo(s.setNo)}`}
+          locations={locations}
+          pending={pending}
+          onClose={() => setCopyForm(null)}
+          onSubmit={(form) => act(() => (copyForm === 'new' ? addCopy(s.setNo, form) : editCopy(copyForm.id, form)), 'Saved.', () => setCopyForm(null))}
+        />
+      )}
       {editing && (
         <SetForm
           set={s}
@@ -261,6 +295,55 @@ export default function SetDetail({ set: s, parts, prices, currency, locations, 
         />
       )}
     </div>
+  );
+}
+
+/** One row per copy: status, condition, place, dates, cost, value and gain, with Edit and Remove. */
+function CopiesSection({ s, money, pending, label, onAdd, onEdit, onRemove }: { s: SetRow; money: (v: unknown) => string; pending: boolean; label: (c: CopyRow) => string; onAdd: () => void; onEdit: (c: CopyRow) => void; onRemove: (c: CopyRow) => void }) {
+  const [confirm, setConfirm] = useState<number | null>(null);
+  return (
+    <section aria-labelledby="copies-title">
+      <div className="flex items-baseline justify-between gap-3">
+        <h2 id="copies-title" className="text-sm font-semibold">Copies</h2>
+        <Button variant="link" icon={Plus} disabled={pending} onClick={onAdd}>Add a copy</Button>
+      </div>
+      <Callout className="mt-2 divide-y divide-line">
+        {s.copies.map((c) => {
+          const cost = costBasis(c);
+          const gain = cost != null && c.estValue != null ? Math.round((c.estValue - cost) * 100) / 100 : null;
+          const fallback = c.estGuide && c.estGuide !== copyGuide(c);
+          return (
+            <div key={c.id} className={cx('px-3 py-2 text-sm', c.status === 'parted_out' && 'opacity-70')}>
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                <span className="font-semibold">{label(c)}</span>
+                <Chip tone={c.status === 'sealed' ? 'ok' : c.status === 'parted_out' ? 'neutral' : 'info'}>{STATUS_LABEL[c.status]}</Chip>
+                <Chip tone={CONDITION_TONE[c.condition] ?? 'neutral'}>{c.condition}</Chip>
+                {c.missingPct ? <span className="text-xs font-semibold text-warn">{c.missingPct}% missing</span> : null}
+                {c.gwp && <Chip tone="primary">Gift with purchase</Chip>}
+                <span className="ml-auto text-right font-bold tabular-nums">{c.status === 'parted_out' ? 'not counted' : money(c.estValue)}</span>
+              </div>
+              <p className="mt-0.5 text-xs text-fg-3">
+                {[c.location ?? 'No location', c.acquiredDate && `acquired ${c.acquiredDate}`, c.buildDate && `built ${c.buildDate}`, cost != null && `cost ${money(cost)}`].filter(Boolean).join(' · ')}
+                {gain !== null && <> · <b className={gain >= 0 ? 'text-ok' : 'text-danger'}>{gain >= 0 ? '+' : '−'}{money(Math.abs(gain))}</b></>}
+                {fallback && <> · priced from {c.estGuide === 'U' ? 'used' : 'new'} sales</>}
+              </p>
+              {c.notes && <p className="mt-0.5 whitespace-pre-line text-xs text-fg-2">{c.notes}</p>}
+              <div className="mt-1 flex gap-1">
+                <Button variant="ghost" size="sm" icon={Pencil} disabled={pending} onClick={() => onEdit(c)}>Edit</Button>
+                {confirm === c.id ? (
+                  <>
+                    <Button variant="danger" size="sm" disabled={pending} onClick={() => { setConfirm(null); onRemove(c); }}>{s.copies.length > 1 ? 'Remove copy' : 'Remove set'}</Button>
+                    <Button variant="ghost" size="sm" onClick={() => setConfirm(null)}>Cancel</Button>
+                  </>
+                ) : (
+                  <Button variant="ghost" size="sm" disabled={pending} onClick={() => setConfirm(c.id)} className="text-danger">Remove</Button>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </Callout>
+    </section>
   );
 }
 
