@@ -16,7 +16,8 @@ export default function BuildView({ builds, hasKey, hasParts }: { builds: BuildM
   const [filter, setFilter] = useState<Filter>('all');
   const known = builds.filter((b) => b.partsKnown);
   const shown = useMemo(() => known.filter((b) => (filter === 'ready' ? b.pct === 100 : filter === 'close' ? b.pct >= 90 : true)), [known, filter]);
-  const waiting = builds.length - known.length;
+  const unavailable = builds.filter((b) => b.partsUnavailable);
+  const waiting = builds.length - known.length - unavailable.length;
 
   return (
     <div className="space-y-6">
@@ -42,6 +43,21 @@ export default function BuildView({ builds, hasKey, hasParts }: { builds: BuildM
             ))}
             {waiting > 0 && <span className="text-sm text-fg-3">{waiting} more waiting for their parts lists (next sync).</span>}
           </div>
+          {unavailable.length > 0 && (
+            <details className="text-sm text-fg-3">
+              <summary className="cursor-pointer">
+                {unavailable.length} {unavailable.length === 1 ? 'build has' : 'builds have'} no parts list Rebrickable shares, so {unavailable.length === 1 ? 'it' : 'they'} can’t be matched. Designers can keep a parts list private or sell it with the instructions.
+              </summary>
+              <ul className="mt-2 grid gap-1 sm:grid-cols-2">
+                {unavailable.map((b) => (
+                  <li key={b.mocNo} className="truncate">
+                    {b.url ? <a href={b.url} target="_blank" rel="noreferrer" className="text-link hover:underline">{b.name}</a> : b.name}
+                    <span> · {displayNo(b.sourceSetNo)}</span>
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
           {shown.length === 0 ? (
             <EmptyState title="No builds match">Try another filter.</EmptyState>
           ) : (

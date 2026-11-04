@@ -6,6 +6,15 @@ const BASE = 'https://rebrickable.com/api/v3';
 const GAP_MS = 1100;
 
 export class RebrickableError extends Error {}
+/** Rebrickable refused the request for this key (401/403). */
+export class RebrickableForbidden extends RebrickableError {}
+/**
+ * A build's parts list isn't available: Rebrickable refuses it ('forbidden': designers can keep a MOC's parts list
+ * private or sell it, and the API doesn't hand those out) or doesn't have it ('not_found').
+ */
+export class PartsUnavailable extends RebrickableError {
+  constructor(public reason: 'forbidden' | 'not_found', message: string) { super(message); }
+}
 
 export type RbTheme = { id: number; parentId: number | null; name: string };
 export type RbSet = { setNo: string; name: string; year: number | null; themeId: number | null; numParts: number | null; imageUrl: string | null };
@@ -77,7 +86,8 @@ export function createRebrickable(key: string, fetchImpl: typeof fetch = fetch, 
       if (res.status === 404) throw new NotFound();
       if (!res.ok) {
         const body = (await res.json().catch(() => null)) as { detail?: string } | null;
-        throw new RebrickableError(`Rebrickable: ${body?.detail || res.statusText || res.status}`);
+        const message = `Rebrickable: ${body?.detail || res.statusText || res.status}`;
+        throw res.status === 401 || res.status === 403 ? new RebrickableForbidden(message) : new RebrickableError(message);
       }
       return (await res.json()) as T;
     }
@@ -126,8 +136,14 @@ export function createRebrickable(key: string, fetchImpl: typeof fetch = fetch, 
       }
     },
     async buildParts(mocNo) {
-      const lines = await all<ApiInvPart>(`/lego/mocs/${encodeURIComponent(mocNo)}/parts/?page_size=1000&inc_part_details=1`);
-      return lines.filter((l) => !l.is_spare).map(toBuildPart);
+      try {
+        const lines = await all<ApiInvPart>(`/lego/mocs/${encodeURIComponent(mocNo)}/parts/?page_size=1000&inc_part_details=1`);
+        return lines.filter((l) => !l.is_spare).map(toBuildPart);
+      } catch (e) {
+        if (e instanceof NotFound) throw new PartsUnavailable('not_found', `Rebrickable has no parts list for ${mocNo}.`);
+        if (e instanceof RebrickableForbidden) throw new PartsUnavailable('forbidden', `Rebrickable doesn't share the parts list of ${mocNo}.`);
+        throw e;
+      }
     },
     async themeFigs(themeId) {
       return (await all<ApiFig>(`/lego/minifigs/?in_theme_id=${themeId}&page_size=1000`)).map((f) => ({

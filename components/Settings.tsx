@@ -176,7 +176,7 @@ function RebrickableSection({ initial }: { initial: RebrickableStatus }) {
       <p className="text-sm text-fg-3">
         {s.sets === 0
           ? 'Add sets, then sync to fill in their themes and minifig counts.'
-          : <><b className="text-fg tabular-nums">{s.matched}</b> of {s.sets} sets have a theme{s.notFound ? <>, <span className="tabular-nums">{s.notFound}</span> aren&apos;t on Rebrickable</> : null}{s.waiting ? <>, <span className="tabular-nums">{s.waiting}</span> not checked yet</> : null}. <span className="tabular-nums">{s.builds}</span> alternate builds found{s.builds ? <> (<span className="tabular-nums">{s.buildsWithParts}</span> with parts lists)</> : null}.</>}
+          : <><b className="text-fg tabular-nums">{s.matched}</b> of {s.sets} sets have a theme{s.notFound ? <>, <span className="tabular-nums">{s.notFound}</span> aren&apos;t on Rebrickable</> : null}{s.waiting ? <>, <span className="tabular-nums">{s.waiting}</span> not checked yet</> : null}. <span className="tabular-nums">{s.builds}</span> alternate builds found{s.builds ? <> (<span className="tabular-nums">{s.buildsWithParts}</span> with parts lists{s.buildsUnavailable ? <>, <span className="tabular-nums">{s.buildsUnavailable}</span> whose parts lists Rebrickable doesn&apos;t share: their designers keep them private or sell them</> : null})</> : null}.</>}
         {' '}Each BrickLink sync adds more; this button runs just the Rebrickable part.
       </p>
       {running && <p className="text-sm font-semibold">{run.step ?? 'Working…'}</p>}

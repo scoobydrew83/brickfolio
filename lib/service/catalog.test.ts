@@ -63,7 +63,7 @@ it('asks again about unknown sets after 30 days, or right away on recheck, and c
   await syncCatalog(db, catalog, { recheck: true, onProgress: (d, t) => progress.push(`${d}/${t}`) });
   expect(calls).toEqual(['themes', 'set:1234-1']);
   expect(progress).toEqual(['0/1']);
-  expect(await rebrickableStats(db)).toEqual({ sets: 2, matched: 1, notFound: 1, waiting: 0, builds: 0, buildsWithParts: 0 });
+  expect(await rebrickableStats(db)).toEqual({ sets: 2, matched: 1, notFound: 1, waiting: 0, builds: 0, buildsWithParts: 0, buildsUnavailable: 0 });
 });
 
 it('runs Rebrickable on its own, without BrickLink, and reports a bad key', async () => {

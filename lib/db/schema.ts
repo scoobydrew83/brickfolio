@@ -248,6 +248,10 @@ export const builds = sqliteTable('builds', {
   designer: text('designer'),
   sourceSetNo: text('source_set_no').notNull(), // the owned set it's an alternate build of
   partsFetchedAt: text('parts_fetched_at'),
+  // Why there's no parts list: Rebrickable refused it ('forbidden', e.g. a private or paid MOC) or doesn't have it.
+  // Such builds are skipped until partsCheckedAt is 90 days old (lib/service/builds.ts).
+  partsError: text('parts_error', { enum: ['forbidden', 'not_found'] }),
+  partsCheckedAt: text('parts_checked_at'),
   fetchedAt: text('fetched_at').notNull().default(now),
 });
 

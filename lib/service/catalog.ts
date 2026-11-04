@@ -62,7 +62,7 @@ export async function syncCatalog(db: DB, catalog: Catalog, opts: { recheck?: bo
   return errors;
 }
 
-export type RebrickableStats = { sets: number; matched: number; notFound: number; waiting: number; builds: number; buildsWithParts: number };
+export type RebrickableStats = { sets: number; matched: number; notFound: number; waiting: number; builds: number; buildsWithParts: number; buildsUnavailable: number };
 
 /** How far the Rebrickable sync has got, for Settings. */
 export async function rebrickableStats(db: DB): Promise<RebrickableStats> {
@@ -71,7 +71,11 @@ export async function rebrickableStats(db: DB): Promise<RebrickableStats> {
     matched: sql<number>`sum(case when ${sets.themeId} is not null then 1 else 0 end)`,
     notFound: sql<number>`sum(case when ${sets.themeId} is null and ${sets.rbSyncedAt} is not null then 1 else 0 end)`,
   }).from(sets).all();
-  const [b] = await db.select({ builds: sql<number>`count(*)`, withParts: sql<number>`sum(case when ${builds.partsFetchedAt} is not null then 1 else 0 end)` }).from(builds).all();
+  const [b] = await db.select({
+    builds: sql<number>`count(*)`,
+    withParts: sql<number>`sum(case when ${builds.partsFetchedAt} is not null then 1 else 0 end)`,
+    unavailable: sql<number>`sum(case when ${builds.partsFetchedAt} is null and ${builds.partsError} is not null then 1 else 0 end)`,
+  }).from(builds).all();
   const n = (v: unknown) => Number(v ?? 0);
-  return { sets: n(s.sets), matched: n(s.matched), notFound: n(s.notFound), waiting: n(s.sets) - n(s.matched) - n(s.notFound), builds: n(b.builds), buildsWithParts: n(b.withParts) };
+  return { sets: n(s.sets), matched: n(s.matched), notFound: n(s.notFound), waiting: n(s.sets) - n(s.matched) - n(s.notFound), builds: n(b.builds), buildsWithParts: n(b.withParts), buildsUnavailable: n(b.unavailable) };
 }

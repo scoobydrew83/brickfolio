@@ -1,10 +1,13 @@
-import { beforeEach, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
+import { eq } from 'drizzle-orm';
+import { builds } from '../db/schema';
+import { rebrickableStats } from './catalog';
 import { openNodeDb } from '../db/node';
 import type { DB } from '../db/types';
-import { createRebrickable, toBuildPart, type BuildSource } from '../rebrickable/client';
+import { createRebrickable, PartsUnavailable, toBuildPart, type BuildSource } from '../rebrickable/client';
 import { replaceParts } from './parts';
 import * as sets from './sets';
-import { buildMatches, syncBuilds, wantedListXml } from './builds';
+import { buildMatches, GIVE_UP_AFTER, RECHECK_UNAVAILABLE_DAYS, syncBuilds, wantedListXml } from './builds';
 
 let db: DB;
 const part = (partNo: string, colorId: number | null, qty: number) => ({ matchNo: 0, partNo, name: partNo, type: 'PART', colorId, qty, extra: 0, alternate: false, counterpart: false });
@@ -77,4 +80,52 @@ it('exports missing parts as a BrickLink Wanted List', async () => {
   expect(w!.xml).toContain('<ITEMID>9999</ITEMID>\n    <COLOR>1</COLOR>\n    <MINQTY>15</MINQTY>');
   expect(w!.xml).not.toContain('3001'); // owned enough
   expect(await wantedListXml(db, 'MOC-404')).toBeNull();
+});
+
+describe('builds whose parts list Rebrickable won’t share', () => {
+  const many = (n: number) => Array.from({ length: n }, (_, i) => ({ mocNo: `MOC-${100 + i}`, name: `Build ${i}`, numParts: 5, imageUrl: null, url: null, designer: null }));
+  const refusing = (open: Set<string>): BuildSource => ({
+    async alternates(setNo) { calls.push(`alt:${setNo}`); return setNo === '31120-1' ? many(8) : []; },
+    async buildParts(mocNo) {
+      calls.push(`parts:${mocNo}`);
+      if (open.has(mocNo)) return [{ partNo: '3001', colorId: 5, qty: 1, mapped: true }];
+      throw new PartsUnavailable('forbidden', `Rebrickable doesn't share the parts list of ${mocNo}.`);
+    },
+  });
+
+  it('notes refused builds once, moves on to the rest, and reports no errors', async () => {
+    const src = refusing(new Set(['MOC-102', 'MOC-106']));
+    expect(await syncBuilds(db, src, { maxCalls: 100 })).toEqual([]);
+    const all = await buildMatches(db);
+    expect(all.filter((b) => b.partsKnown).map((b) => b.mocNo).sort()).toEqual(['MOC-102', 'MOC-106']);
+    expect(all.filter((b) => b.partsUnavailable)).toHaveLength(6);
+    calls = [];
+    await syncBuilds(db, src, { maxCalls: 100 });
+    expect(calls.filter((c) => c.startsWith('parts:'))).toEqual([]); // nothing retried
+    expect(await rebrickableStats(db)).toMatchObject({ builds: 8, buildsWithParts: 2, buildsUnavailable: 6 });
+  });
+
+  it('stops early when the key gets no parts lists at all, and continues with the next ones later', async () => {
+    const src = refusing(new Set());
+    await syncBuilds(db, src, { maxCalls: 100 });
+    expect(calls.filter((c) => c.startsWith('parts:'))).toHaveLength(GIVE_UP_AFTER);
+    calls = [];
+    await syncBuilds(db, src, { maxCalls: 100 });
+    expect(calls.filter((c) => c.startsWith('parts:'))).toEqual(['parts:MOC-105', 'parts:MOC-106', 'parts:MOC-107']); // the rest, never the same ones
+  });
+
+  it('asks about a refused build again after 90 days', async () => {
+    await syncBuilds(db, refusing(new Set()), { maxCalls: 100 });
+    const old = new Date(Date.now() - (RECHECK_UNAVAILABLE_DAYS + 1) * 86_400_000).toISOString();
+    await db.update(builds).set({ partsCheckedAt: old }).where(eq(builds.mocNo, 'MOC-100'));
+    calls = [];
+    await syncBuilds(db, refusing(new Set(['MOC-100'])), { maxCalls: 100 });
+    expect(calls).toContain('parts:MOC-100');
+    expect((await buildMatches(db)).find((b) => b.mocNo === 'MOC-100')).toMatchObject({ partsKnown: true, partsUnavailable: false });
+  });
+
+  it('still reports other errors', async () => {
+    const broken: BuildSource = { ...refusing(new Set()), async buildParts() { throw new Error('boom'); } };
+    expect(await syncBuilds(db, broken, { maxCalls: 4 })) // 2 calls find the builds, 2 ask for parts.toEqual(['Rebrickable parts for MOC-100: boom', 'Rebrickable parts for MOC-101: boom']);
+  });
 });

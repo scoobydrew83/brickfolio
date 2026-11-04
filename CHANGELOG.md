@@ -4,6 +4,11 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-11-04
+
+### Fixed
+- Alternate builds whose parts list Rebrickable won't share ("You do not have permission to perform this action") no longer fill Settings with errors or get retried on every sync, which kept the sync from reaching other builds. Each is noted and skipped for 90 days; the sync stops after five refusals in a row when none of your builds' lists come through. **Settings → Rebrickable** counts them, and **What can I build?** lists them with links to Rebrickable.
+
 ## [0.8.0] - 2026-11-03
 
 ### Added

@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { createRebrickable } from './client';
+import { createRebrickable, PartsUnavailable, RebrickableForbidden } from './client';
 
 const BASE = 'https://rebrickable.com/api/v3';
 
@@ -45,4 +45,16 @@ it('checks the key with one call and explains a refusal', async () => {
 it('says plainly when rebrickable.com can\'t be reached', async () => {
   const down = createRebrickable('k', async () => { throw new TypeError('fetch failed', { cause: new Error('getaddrinfo ENOTFOUND rebrickable.com') }); }, 0);
   await expect(down.check!()).rejects.toThrow("Couldn't reach rebrickable.com from the server (getaddrinfo ENOTFOUND rebrickable.com)");
+});
+
+it('tells a refused or missing build parts list apart from other errors', async () => {
+  const answer = (status: number, detail: string) => createRebrickable('k', async () => Response.json({ detail }, { status }), 0).buildParts('MOC-136543');
+  await expect(answer(403, 'You do not have permission to perform this action.')).rejects.toMatchObject({ reason: 'forbidden' });
+  await expect(answer(403, 'x')).rejects.toBeInstanceOf(PartsUnavailable);
+  await expect(answer(404, 'Not found.')).rejects.toMatchObject({ reason: 'not_found' });
+  const other = answer(400, 'Bad request.');
+  await expect(other).rejects.toThrow('Rebrickable: Bad request.');
+  await expect(answer(400, 'Bad request.')).rejects.not.toBeInstanceOf(PartsUnavailable);
+  // A bad key on any call is still a refusal, with Rebrickable's own words.
+  await expect(createRebrickable('bad', async () => Response.json({ detail: 'Invalid token.' }, { status: 401 }), 0).themes()).rejects.toBeInstanceOf(RebrickableForbidden);
 });
