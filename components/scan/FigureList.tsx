@@ -9,6 +9,7 @@ import type { FigCandidate, FigCode } from '@/lib/barcode/figcodes';
 import type { CmfFig, CmfSeries } from '@/lib/service/minifigs';
 import { Button, Chip, IconButton, cx, field } from '../ui';
 import type { FigLookup } from './useScanNetwork';
+import { cachedImageSrc, fallBackTo } from '@/lib/images/url';
 
 export type FigRow = {
   id: string; code: FigCode; status: 'looking' | 'matched' | 'ambiguous' | 'not_found' | 'offline' | 'error';
@@ -102,7 +103,7 @@ function FigRowView({ r, series, onChange, onRemove }: { r: FigRow; series: CmfS
       <div className="flex items-start gap-3">
         <div className="flex size-12 shrink-0 items-center justify-center overflow-hidden rounded-control bg-muted">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          {c?.imageUrl ? <img src={c.imageUrl} alt="" referrerPolicy="no-referrer" className="size-full object-contain" /> : <CircleHelp aria-hidden className="size-5 text-fg-4" />}
+          {c?.imageUrl ? <img src={cachedImageSrc('minifig', c.rbFigNo, c.imageUrl, c.owned > 0)!} alt="" referrerPolicy="no-referrer" onError={fallBackTo(c.imageUrl)} className="size-full object-contain" /> : <CircleHelp aria-hidden className="size-5 text-fg-4" />}
         </div>
         <div className="min-w-0 flex-1">
           <p className="truncate font-medium">{c ? c.name : r.status === 'looking' ? 'Looking up…' : r.status === 'ambiguous' ? 'One of several figures' : r.status === 'offline' ? 'Offline: looked up when you’re back' : r.status === 'error' ? 'Lookup failed' : 'Unknown code'}</p>

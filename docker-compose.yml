@@ -24,6 +24,10 @@ services:
       - ALERT_WEBHOOK_FORMAT
       - APP_URL
       - SHARE_BASE_URL
+      # Cached set and minifigure photos (share pages, offline scanning), in the data volume.
+      - IMAGE_CACHE
+      - IMAGE_CACHE_DIR=${IMAGE_CACHE_DIR:-/data/images}
+      - IMAGE_CACHE_WARM
       # The LDraw parts library for the 3D view lives in the data volume; download it from Settings.
       - LDRAW_LIBRARY_DIR=${LDRAW_LIBRARY_DIR:-/data/ldraw}
       - LDRAW_LIBRARY_URL
@@ -38,7 +42,7 @@ services:
     ports:
       - "127.0.0.1:${PORT:-3000}:3000"
     volumes:
-      - data:/data                           # SQLite database and daily backups
+      - data:/data                           # SQLite database, daily backups and cached photos
       - image-cache:/app/.next/cache/images  # optimized BrickLink photos
     restart: unless-stopped
 

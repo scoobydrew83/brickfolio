@@ -86,7 +86,7 @@ describe('sync', () => {
     expect(await svc.syncStatus(db)).toMatchObject({ running: false, total: 2, processed: 2, errors: 1 });
     const [h] = await svc.listHistory(db);
     expect(h).toMatchObject({ sets: 2, copies: 2, estValue: 20 });
-    expect((await svc.priceHistory(db, 1)).length).toBe(1);
+    expect((await svc.priceHistory(db, '10280-1')).length).toBe(1);
     expect((await svc.startSync(db)).ok).toBe(true); // lock released
   });
 

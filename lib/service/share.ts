@@ -5,6 +5,8 @@ import { desc, eq, sql } from 'drizzle-orm';
 import { shareLinks } from '../db/schema';
 import type { DB } from '../db/types';
 import { copiesSummary, isActive, totals } from '../sets';
+import { ownedSummary } from './copies';
+import { imageUrlFor, type ImageKind } from './images';
 import { listMinifigs } from './minifigs';
 import { listSets, type Result } from './sets';
 import { sha256Hex } from './tokens';
@@ -66,13 +68,26 @@ export async function revokeShareLink(db: DB, id: number): Promise<Result> {
   return r.length ? { ok: true } : { ok: false, status: 404, error: 'Share link not found.' };
 }
 
-/** The link for a token when it exists and hasn't expired, counting the view. Null otherwise (one answer for every failure). */
-export async function checkShareLink(db: DB, token: string, now = new Date()): Promise<ShareLink | null> {
+/**
+ * The link for a token when it exists and hasn't expired, counting the view (not for the page's photos). Null
+ * otherwise (one answer for every failure).
+ */
+export async function checkShareLink(db: DB, token: string, now = new Date(), { count = true } = {}): Promise<ShareLink | null> {
   if (!token.startsWith(SHARE_PREFIX) || token.length > 100) return null;
   const row = await db.select().from(shareLinks).where(eq(shareLinks.hash, await sha256Hex(token))).get();
   if (!row || (row.expiresAt && Date.parse(row.expiresAt) <= now.getTime())) return null;
-  await db.update(shareLinks).set({ lastViewedAt: now.toISOString(), views: sql`${shareLinks.views} + 1` }).where(eq(shareLinks.id, row.id));
+  if (count) await db.update(shareLinks).set({ lastViewedAt: now.toISOString(), views: sql`${shareLinks.views} + 1` }).where(eq(shareLinks.id, row.id));
   return row;
+}
+
+/** The photo route for an item on a shared page, or null when it has no photo. */
+export const sharedImage = (token: string, kind: ImageKind, no: string | null, url: string | null) =>
+  no && url ? `/share/${encodeURIComponent(token)}/img/${kind}/${encodeURIComponent(no)}` : null;
+
+/** True when a link shows this item: a set someone still owns a copy of, or any minifigure when figures are shown. */
+export async function sharesItem(db: DB, link: Pick<ShareLink, 'showMinifigs'>, kind: ImageKind, no: string): Promise<boolean> {
+  if (kind === 'set') return (await ownedSummary(db, [no])).has(no);
+  return link.showMinifigs && !!(await imageUrlFor(db, 'minifig', no));
 }
 
 /** One set as a shared page shows it. Optional fields are present only when the link allows them. */
@@ -90,13 +105,13 @@ export type SharedCollection = {
 };
 
 /** The public view of the collection for a link. Built from an explicit field list: never spread a row here. */
-export async function sharedCollection(db: DB, link: Pick<ShareLink, 'name' | 'showValues' | 'showLocations' | 'showNotes' | 'showMinifigs'>, currency: string): Promise<SharedCollection> {
+export async function sharedCollection(db: DB, link: Pick<ShareLink, 'name' | 'showValues' | 'showLocations' | 'showNotes' | 'showMinifigs'>, currency: string, token: string): Promise<SharedCollection> {
   const rows = (await listSets(db)).filter((s) => s.qty > 0);
   const t = totals(rows);
   const sets = rows.map((s): SharedSet => {
     const o: SharedSet = {
       setNo: s.setNo, name: s.name, year: s.year, theme: s.theme ?? null, subtheme: s.subtheme ?? null, pieces: s.pieces,
-      minifigs: s.minifigs ?? null, qty: s.qty, copies: copiesSummary(s.copies.filter(isActive)), condition: s.condition, image: s.imageUrl,
+      minifigs: s.minifigs ?? null, qty: s.qty, copies: copiesSummary(s.copies.filter(isActive)), condition: s.condition, image: sharedImage(token, 'set', s.setNo, s.imageUrl),
     };
     if (link.showValues) { o.estValue = s.valueTotal; o.retailPrice = s.retailPrice ?? null; o.retailCurrency = s.retailCurrency ?? null; }
     if (link.showLocations) o.location = s.location ?? ([...new Set(s.copies.filter(isActive).map((c) => c.location).filter(Boolean))].join(', ') || null);
@@ -104,7 +119,7 @@ export async function sharedCollection(db: DB, link: Pick<ShareLink, 'name' | 's
     return o;
   });
   const figs = link.showMinifigs ? (await listMinifigs(db)).map((m): SharedFig => {
-    const o: SharedFig = { figNo: m.figNo, name: m.name, year: m.year, qty: m.qty, condition: m.condition, image: m.imageUrl };
+    const o: SharedFig = { figNo: m.figNo, name: m.name, year: m.year, qty: m.qty, condition: m.condition, image: sharedImage(token, 'minifig', m.figNo ?? m.rbFigNo, m.imageUrl) };
     if (link.showValues) o.estValue = m.estValue;
     if (link.showLocations) o.location = m.location;
     if (link.showNotes) o.notes = m.notes;

@@ -79,19 +79,36 @@ export const setCopies = sqliteTable(
   (t) => [index('set_copies_set').on(t.setId), index('set_copies_collection').on(t.collectionId), index('set_copies_location').on(t.location)],
 );
 
-/** Sold prices per set per day, so a set's value can be charted over time. */
-export const priceSnapshots = sqliteTable(
-  'price_snapshots',
+/**
+ * Every price from every source, one row per item, source, type, condition, currency and day (a later write that day
+ * replaces it). Keyed by the canonical BrickLink number, not a row id, so history survives removing and re-adding a
+ * set, and nothing cascades. Parts stay in part_prices.
+ */
+export const priceObservations = sqliteTable(
+  'price_observations',
   {
-    setId: integer('set_id').notNull().references(() => sets.id, { onDelete: 'cascade' }),
-    date: text('date').notNull(), // YYYY-MM-DD
-    guide: text('guide', { enum: ['N', 'U'] }).notNull(),
-    avgSold: real('avg_sold'),
-    minSold: real('min_sold'),
-    maxSold: real('max_sold'),
-    qtySold: integer('qty_sold'),
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    itemKind: text('item_kind', { enum: ['set', 'minifig'] }).notNull(),
+    itemId: text('item_id').notNull(), // 75192-1, sw0001
+    source: text('source').notNull(), // bricklink, brickowl, brickeconomy, brickset, manual, retailer:<slug> (parseSource)
+    type: text('type', { enum: ['sold_avg', 'asking', 'estimate', 'retail', 'offer'] }).notNull(),
+    condition: text('condition', { enum: ['N', 'U'] }).notNull(),
+    currency: text('currency').notNull(), // ISO 4217
+    amount: real('amount'), // null: the source answered, with no sales
+    low: real('low'),
+    high: real('high'),
+    sampleSize: integer('sample_size'), // sales, listings, …
+    observedOn: text('observed_on').notNull(), // YYYY-MM-DD
+    observedAt: text('observed_at').notNull(), // ISO time
+    url: text('url'),
+    sourceRef: text('source_ref'),
+    createdAt: text('created_at').notNull().default(now),
   },
-  (t) => [uniqueIndex('price_snapshots_set_date').on(t.setId, t.date)],
+  (t) => [
+    uniqueIndex('price_obs_key').on(t.itemKind, t.itemId, t.source, t.type, t.condition, t.currency, t.observedOn),
+    index('price_obs_item').on(t.itemKind, t.itemId, t.observedOn),
+    index('price_obs_recent').on(t.type, t.observedOn),
+  ],
 );
 
 /** Collection totals, one row per day, written after each sync. */
@@ -349,19 +366,6 @@ export const minifigs = sqliteTable(
     uniqueIndex('minifigs_fig_no').on(t.figNo).where(sql`fig_no is not null`),
     uniqueIndex('minifigs_rb_fig_no').on(t.rbFigNo).where(sql`rb_fig_no is not null`),
   ],
-);
-
-/** Sold prices per minifigure per day, like price_snapshots for sets. */
-export const minifigPriceSnapshots = sqliteTable(
-  'minifig_price_snapshots',
-  {
-    figId: integer('fig_id').notNull().references(() => minifigs.id, { onDelete: 'cascade' }),
-    date: text('date').notNull(),
-    guide: text('guide', { enum: ['N', 'U'] }).notNull(),
-    avgSold: real('avg_sold'),
-    qtySold: integer('qty_sold'),
-  },
-  (t) => [uniqueIndex('minifig_price_snapshots_fig_date').on(t.figId, t.date)],
 );
 
 /** Rebrickable's figures for each Collectible Minifigures series, cached for the checklist. */

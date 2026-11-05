@@ -3,7 +3,8 @@ import { eq } from 'drizzle-orm';
 import type { Lookup } from '../bricklink/client';
 import { openNodeDb } from '../db/node';
 import type { DB } from '../db/types';
-import { priceSnapshots, sets, themes, wishlist } from '../db/schema';
+import { sets, themes, wishlist } from '../db/schema';
+import { recordPrice } from './prices';
 import { flagsFor, growthSince } from '../radar';
 import type { Alert } from './alerts';
 import { getRadar, notifyRetiring } from './radar';
@@ -42,8 +43,7 @@ it('groups upcoming retirements by month and ranks retired sets by growth', asyn
   await upd('10305-1', { exitDate: '2024-11-01', retired: true, retailPrice: 100, retailCurrency: 'USD' });
   await upd('21325-1', { exitDate: '2025-11-01', retired: true, retailPrice: 180, retailCurrency: 'USD' });
   await upd('910001-1', { exitDate: '2026-01-01', retired: true, themeId: 2, retailPrice: 150, retailCurrency: 'USD' });
-  const id = (await svc.getSet(db, '10305-1'))!.id;
-  await db.insert(priceSnapshots).values({ setId: id, date: '2024-11-05', guide: 'N', avgSold: 120 }).onConflictDoNothing();
+  await recordPrice(db, { itemKind: 'set', itemId: '10305-1', source: 'bricklink', type: 'sold_avg', condition: 'N', currency: 'USD', amount: 120, observedOn: '2024-11-05' });
   await wish.addWish(db, { setNo: '10316-1', name: 'Rivendell', target: 430 }, null);
   await db.update(wishlist).set({ exitDate: '2026-12-15' });
 

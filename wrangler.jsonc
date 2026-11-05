@@ -7,6 +7,9 @@
   "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
   "assets": { "directory": ".open-next/assets", "binding": "ASSETS" },
   "images": { "binding": "IMAGES" }, // next/image optimization
+  // Optional photo cache for share pages and offline scanning. Create the bucket with
+  // `npx wrangler r2 bucket create brickfolio-images`, then uncomment (docs/cloudflare.md → Notes → Images).
+  // "r2_buckets": [{ "binding": "IMAGE_CACHE", "bucket_name": "brickfolio-images" }],
   "d1_databases": [
     {
       "binding": "DB",

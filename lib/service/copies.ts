@@ -1,14 +1,15 @@
 // Copies of a set: each physical box or build, with its own status, condition, location, cost basis and value.
 // The set row (lib/service/sets.ts) holds the catalog data and the fetched prices; copies hold everything per box.
-import { and, desc, eq, gte, inArray, isNotNull, ne } from 'drizzle-orm';
+import { and, eq, inArray, ne } from 'drizzle-orm';
 import type { Lookup } from '../bricklink/client';
-import { priceSnapshots, setCopies, sets } from '../db/schema';
+import { setCopies, sets } from '../db/schema';
 import type { DB } from '../db/types';
 import { copyGuide, displayNo, estValue, setGuide, type CopyInput, type CopyRow, type SetRow } from '../sets';
 import { copiesBySet, getCurrency, getSet, lookupInto, today, type Result } from './sets';
 import { hasMissing } from './missing';
+import { latestGuide, primarySource, recentAmount } from './prices';
 
-/** A snapshot in the other guide is used for a copy's value when it's at most this old. */
+/** A BrickLink price in the other guide is used for a copy's value when it's at most this old. */
 const SNAPSHOT_DAYS = 90;
 const nowIso = () => new Date().toISOString();
 
@@ -26,31 +27,47 @@ export async function insertCopies(db: DB, setId: number, c: CopyInput, n: numbe
 }
 
 /**
- * Re-values every copy of a set from its prices. A copy in the fetched guide uses today's average; a copy in the
- * other guide uses the newest snapshot in its guide from the last 90 days, else today's average (est_guide then
- * says which guide it really came from, and the UI labels it). Roadmap #4 replaces this with both guides.
+ * Re-values every copy of a set from the primary price source (Settings → Value source, default BrickLink).
+ *
+ * BrickLink: a copy in the fetched guide uses today's average; a copy in the other guide uses the newest BrickLink
+ * price in its guide from the last 90 days, else today's average (est_guide then says which guide it really came
+ * from, and the UI labels it). Roadmap #4 replaces this with both guides.
+ * Another source: each copy uses that source's newest value in its own condition, or none (never BrickLink's).
  */
 export async function repriceCopies(db: DB, setId: number, fetched?: 'N' | 'U'): Promise<void> {
-  const s = await db.select({ avgSold: sets.avgSold }).from(sets).where(eq(sets.id, setId)).get();
+  const s = await db.select({ setNo: sets.setNo, avgSold: sets.avgSold }).from(sets).where(eq(sets.id, setId)).get();
   if (!s) return;
   const copies = (await copiesBySet(db, [setId])).get(setId) ?? [];
   if (!copies.length) return;
-  const latest = await db.select({ guide: priceSnapshots.guide }).from(priceSnapshots).where(eq(priceSnapshots.setId, setId)).orderBy(desc(priceSnapshots.date)).limit(1).get();
-  const got = fetched ?? latest?.guide ?? setGuide(copies);
+  const [source, currency] = await Promise.all([primarySource(db), getCurrency(db)]);
+  const save = async (c: CopyRow, price: number | null, guide: 'N' | 'U') => {
+    const value = price == null ? null : estValue(price, c.missingPct);
+    const v = value == null ? null : Math.round(value * 100) / 100;
+    const g = price == null ? null : guide;
+    if (v !== c.estValue || g !== c.estGuide) await db.update(setCopies).set({ estValue: v, estGuide: g }).where(eq(setCopies.id, c.id));
+  };
+  if (source !== 'bricklink') {
+    for (const c of copies) {
+      const g = copyGuide(c);
+      await save(c, (await recentAmount(db, 'set', s.setNo, { source, condition: g, currency }))?.amount ?? null, g);
+    }
+    return;
+  }
+  const got = fetched ?? (await latestGuide(db, 'set', s.setNo)) ?? setGuide(copies);
   const since = new Date(Date.parse(today()) - SNAPSHOT_DAYS * 86_400_000).toISOString().slice(0, 10);
   const other = got === 'N' ? 'U' : 'N';
   const snap = copies.some((c) => copyGuide(c) === other)
-    ? await db.select({ avgSold: priceSnapshots.avgSold }).from(priceSnapshots)
-      .where(and(eq(priceSnapshots.setId, setId), eq(priceSnapshots.guide, other), gte(priceSnapshots.date, since), isNotNull(priceSnapshots.avgSold)))
-      .orderBy(desc(priceSnapshots.date)).limit(1).get()
-    : undefined;
+    ? await recentAmount(db, 'set', s.setNo, { source: 'bricklink', condition: other, currency, since })
+    : null;
   for (const c of copies) {
-    const wants = copyGuide(c);
-    const [price, guide]: [number | null, 'N' | 'U'] = wants === got || !snap ? [s.avgSold, got] : [snap.avgSold, other];
-    const value = price == null ? null : estValue(price, c.missingPct);
-    const v = value == null ? null : Math.round(value * 100) / 100;
-    if (v !== c.estValue || guide !== c.estGuide) await db.update(setCopies).set({ estValue: v, estGuide: price == null ? null : guide }).where(eq(setCopies.id, c.id));
+    const [price, guide]: [number | null, 'N' | 'U'] = copyGuide(c) === got || !snap ? [s.avgSold, got] : [snap.amount, other];
+    await save(c, price, guide);
   }
+}
+
+/** Re-values every set's copies, after the primary source changed or a source's sync wrote new prices. */
+export async function refreshEstValues(db: DB): Promise<void> {
+  for (const { id } of await db.select({ id: sets.id }).from(sets).all()) await repriceCopies(db, id);
 }
 
 export async function listCopies(db: DB, setId: number): Promise<CopyRow[]> {
@@ -116,8 +133,8 @@ const touch = (db: DB, setId: number) => db.update(sets).set({ updatedAt: nowIso
 
 /** After copies changed: a fresh lookup when the set now needs the other guide (and BrickLink is set up), else re-value. */
 async function reprice(db: DB, s: SetRow, lookup: Lookup | null): Promise<void> {
-  const latest = await db.select({ guide: priceSnapshots.guide }).from(priceSnapshots).where(eq(priceSnapshots.setId, s.id)).orderBy(desc(priceSnapshots.date)).limit(1).get();
-  if (lookup && latest && latest.guide !== setGuide(s.copies)) await lookupInto(db, s, lookup, await getCurrency(db));
+  const latest = await latestGuide(db, 'set', s.setNo);
+  if (lookup && latest && latest !== setGuide(s.copies)) await lookupInto(db, s, lookup, await getCurrency(db));
   else await repriceCopies(db, s.id);
 }
 

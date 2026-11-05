@@ -4,6 +4,25 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-11-05
+
+**Before upgrading, back up your database.** One migration moves `price_snapshots` and `minifig_price_snapshots` into the new `price_observations` table and drops the old tables.
+
+### Added
+- **Image cache:** set and minifigure photos for share pages and offline scanning are kept on your server after first use: `/data/images` on Docker (in the data volume, safe to delete), an R2 bucket on Cloudflare (binding `IMAGE_CACHE`, see docs/cloudflare.md). Only the photo URL stored on a set or minifigure is ever fetched, only from BrickLink and Rebrickable, up to 2 MB. The daily sync fetches up to `IMAGE_CACHE_WARM` (default 200) missing photos. **Settings → Image cache** shows the count and size and can clear it. `IMAGE_CACHE=off` passes photos through without keeping them. `GET /api/v1/images/{set|minifig}/{no}`.
+- Scan page offline: photos of sets and minifigures you own still show without a connection (about 300 kept on the device).
+- **Value source:** **Settings → Currency → Value source** chooses the one source Est. Value comes from (BrickLink by default). Sources are never averaged together: with another source, a set it has no value for shows no Est. Value. `GET/PUT /api/v1/settings/value-source`.
+- The set page lists **Other sources** under Est. Value, each with its type (sold average, asking, estimate, retail, offer), condition, sample size and date.
+- `GET /api/v1/sets/{setNo}/observations` and `GET /api/v1/minifigs/{figNo}/observations`: every stored price, filterable by `source` and `type`.
+
+### Changed
+- Share pages load photos from `/share/<link>/img/…` instead of BrickLink, so viewers' browsers never contact BrickLink. Photo requests don't count as views. The Funnel overlay no longer forwards `/_next/image`, and the Cloudflare Access bypass needs only `share` and `_next/static` (a `_next/image` bypass can be removed).
+- Every price is stored in one `price_observations` table, keyed by set or minifigure number, source, type, condition, currency and day. Price history now survives removing a set and adding it again, and new and used prices fetched on the same day no longer replace each other. Old snapshots move over as BrickLink sold averages in your Settings currency.
+- `GET /api/v1/sets/{setNo}/prices` answers as before; it lists prices in the current currency.
+
+### Fixed
+- A copy with no value no longer counts as worth 0: a set's "each" value averages the copies that have one, and gain is shown only when every copy with a price paid also has a value (on cards, the set page and the collection totals).
+
 ## [0.9.0] - 2026-11-04
 
 **Before upgrading, back up your database** (Docker keeps daily copies in `/data/backups`). The upgrade runs six migrations: every set becomes one copy per unit of its old quantity (condition New becomes **Sealed**, the rest **Built**), and saved barcodes move from `set_barcodes` into the new `identifiers` table. Collection totals don't change.

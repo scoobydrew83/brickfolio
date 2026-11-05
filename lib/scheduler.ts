@@ -8,6 +8,7 @@ import { bricksetFromEnv } from './brickset/client';
 import { syncRetail } from './service/retail';
 import { dbPath, nodeDb } from './db/node';
 import { runSync, startSync, syncStatus, today } from './service/sets';
+import { imageStore } from './images/cache';
 import { startRebrickableSync } from './rebrickable/run';
 
 const CHECK_MS = 10 * 60_000;
@@ -34,7 +35,7 @@ async function maybeSync() {
   const last = await syncStatus(db);
   if (last && new Date(last.startedAt).toLocaleDateString('en-CA', { timeZone: process.env.TZ || undefined }) === today()) return;
   const s = await startSync(db);
-  if (s.ok) await runSync(db, s.runId, bl.lookup, bl.store, rebrickableFromEnv() ?? undefined, bricksetFromEnv() ?? undefined, { minifig: bl.minifig, partPrice: bl.partPrice });
+  if (s.ok) await runSync(db, s.runId, bl.lookup, bl.store, rebrickableFromEnv() ?? undefined, bricksetFromEnv() ?? undefined, { minifig: bl.minifig, partPrice: bl.partPrice, images: (await imageStore()) ?? undefined });
 }
 
 /** Copies the database to BACKUP_DIR (default: backups/ next to the database) once a day and keeps BACKUP_KEEP (default 7). */

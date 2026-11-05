@@ -73,7 +73,7 @@ export type SetRow = {
   minSold: number | null;
   maxSold: number | null;
   qtySold: number | null;
-  estValue: number | null; // per copy: valueTotal ÷ qty
+  estValue: number | null; // per copy: valueTotal ÷ the copies that have a value
   blError: string | null;
   lastUpdated: string | null; // ISO time of the last BrickLink lookup
   notes: string | null;
@@ -310,10 +310,11 @@ export function withCopies<T extends Omit<SetRow, 'copies' | 'mixed' | 'valueTot
   const valueTotal = valued.length ? round2(valued.reduce((t, c) => t + num(c.estValue), 0)) : null;
   const covered = act.filter((c) => costBasis(c) != null);
   const cost = covered.length ? round2(covered.reduce((t, c) => t + num(costBasis(c)), 0)) : null;
-  const gain = covered.length ? round2(covered.reduce((t, c) => t + num(c.estValue) - num(costBasis(c)), 0)) : null;
+  // Only when every copy with a cost also has a value: a copy without one isn't worth 0.
+  const gain = covered.length && covered.every((c) => c.estValue != null) ? round2(covered.reduce((t, c) => t + num(c.estValue) - num(costBasis(c)), 0)) : null;
   return {
     ...base, copies, qty: act.length, condition: cond.value as Condition | null, location: loc.value as string | null, missingPct: miss.value as number | null,
-    mixed: { condition: cond.mixed, location: loc.mixed }, estValue: valueTotal === null || !act.length ? null : round2(valueTotal / act.length),
+    mixed: { condition: cond.mixed, location: loc.mixed }, estValue: valueTotal === null ? null : round2(valueTotal / valued.length),
     valueTotal, costBasis: cost, costCovered: covered.length, gain, partedOut: copies.length - act.length,
   };
 }
@@ -358,7 +359,7 @@ export function filterSets(sets: SetRow[], f: Filters): SetRow[] {
 
 /** Collection totals over copies that aren't parted out. A set whose copies are all parted out isn't counted. */
 export function totals(sets: SetRow[]) {
-  const covered = sets.filter((s) => s.costCovered > 0);
+  const covered = sets.filter((s) => s.costCovered > 0 && s.gain !== null); // cost and gain over the same sets
   return {
     count: sets.filter((s) => s.qty > 0).length,
     copies: sets.reduce((t, s) => t + s.qty, 0),

@@ -2,7 +2,8 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { eq } from 'drizzle-orm';
 import type { Lookup } from '../bricklink/client';
 import { openNodeDb } from '../db/node';
-import { priceSnapshots, sets } from '../db/schema';
+import { priceObservations, sets } from '../db/schema';
+import { recordPrice } from './prices';
 import type { DB } from '../db/types';
 import { addCopy, editCopy, ownedSummary, removeCopy, repriceCopies } from './copies';
 import * as svc from './sets';
@@ -47,14 +48,14 @@ describe('copies', () => {
     await svc.addSet(db, { setNo: '10280-1', name: 'x', condition: 'New' }, { lookup }); // sealed: N fetched, 50
     const s0 = await get();
     // An older used price, from before the set's copies were mostly built.
-    await db.insert(priceSnapshots).values({ setId: s0.id, date: daysAgo(10), guide: 'U', avgSold: 22 });
+    await recordPrice(db, { itemKind: 'set', itemId: s0.setNo, source: 'bricklink', type: 'sold_avg', condition: 'U', currency: 'USD', amount: 22, observedOn: daysAgo(10) });
     await addCopy(db, '10280-1', { status: 'built', condition: 'Used' });
     let s = await get();
     expect(s.copies.map((c) => [c.status, c.estValue, c.estGuide])).toEqual([['sealed', 50, 'N'], ['built', 22, 'U']]);
     expect(s.valueTotal).toBe(72);
 
     // Without a recent snapshot in its own guide, a copy falls back to today's price and says which guide that was.
-    await db.delete(priceSnapshots).where(eq(priceSnapshots.guide, 'U'));
+    await db.delete(priceObservations).where(eq(priceObservations.condition, 'U'));
     await repriceCopies(db, s.id);
     s = await get();
     expect(s.copies[1]).toMatchObject({ estValue: 50, estGuide: 'N' });
@@ -66,8 +67,8 @@ describe('copies', () => {
     expect(calls).toEqual(['10280-1:N', '10280-1:U']);
     await addCopy(db, '10280-1', { status: 'sealed' }, lookup); // 2 sealed vs 1 built → N
     expect(calls.at(-1)).toBe('10280-1:N');
-    // Only one snapshot per day, so today's N replaced today's U: the built copy is priced from new sales, and says so.
-    expect((await get()).copies.map((c) => c.estGuide)).toEqual(['N', 'N', 'N']);
+    // Each guide keeps its own row per day, so the built copy is still valued from today's used sales.
+    expect((await get()).copies.map((c) => c.estGuide)).toEqual(['N', 'U', 'N']);
   });
 
   it('keeps the old set API working: another adds a copy, removeOne removes the newest, PATCH needs one copy', async () => {

@@ -55,7 +55,7 @@ it('backfills copies from qty, keeps condition, location and value, and moves mi
   const firstCastle = (sqlite.prepare('SELECT min(id) AS id FROM set_copies WHERE set_id = ?').get(castle) as { id: number }).id;
   expect(sqlite.prepare('SELECT copy_id FROM set_missing_parts').all()).toEqual([{ copy_id: firstCastle }]);
   // Related rows survive (no table rebuild).
-  expect(sqlite.prepare('SELECT count(*) AS n FROM price_snapshots').get()).toEqual({ n: 1 });
+  expect(sqlite.prepare("SELECT item_id, condition, amount FROM price_observations").all()).toEqual([{ item_id: '6080-1', condition: 'U', amount: 100 }]);
   expect(sqlite.prepare('SELECT count(*) AS n FROM set_parts').get()).toEqual({ n: 1 });
 
   const rows = await listSets(db);

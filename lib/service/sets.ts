@@ -4,7 +4,7 @@ import { and, asc, desc, eq, inArray, lt, sql } from 'drizzle-orm';
 import type { Lookup, MinifigLookup, PartPriceLookup, Store } from '../bricklink/client';
 import type { BuildSource, Catalog, IdCatalog } from '../rebrickable/client';
 import type { DB } from '../db/types';
-import { history, locations, minifigs, priceSnapshots, setCopies, sets, settings, syncRuns, wishlist } from '../db/schema';
+import { history, locations, minifigs, setCopies, sets, settings, syncRuns, wishlist } from '../db/schema';
 import { hasParts, replaceParts } from './parts';
 import { syncStore } from './store';
 import { syncCatalog, themeMap, themeNames } from './catalog';
@@ -21,8 +21,11 @@ import { notifyRetiring } from './radar';
 import { notifyDesigner } from './designer';
 import { addMinifig, syncMinifigs } from './minifigs';
 import { syncCommunity } from '../barcode/community';
+import type { ImageStore } from '../images/cache';
+import { warmImages } from './images';
 import { estValue, parseLocation, placeholderName, setGuide, totals, withCopies, type Condition, type CopyInput, type CopyRow, type HistoryRow, type QuickList, type SetInput, type SetRow } from '../sets';
 import { editCopy, insertCopies, repriceCopies } from './copies';
+import { priceSeries, recordPrice } from './prices';
 
 /** `status` lets the REST API pick an HTTP code. `existing` = already in stock, so the UI asks before adding. */
 export type Result<T extends object = object> =
@@ -104,8 +107,15 @@ export async function listHistory(db: DB): Promise<HistoryRow[]> {
   return db.select().from(history).orderBy(asc(history.date)).all();
 }
 
-export async function priceHistory(db: DB, setId: number) {
-  return db.select().from(priceSnapshots).where(eq(priceSnapshots.setId, setId)).orderBy(asc(priceSnapshots.date)).all();
+export type PricePointRow = { date: string; guide: 'N' | 'U'; avgSold: number | null; minSold: number | null; maxSold: number | null; qtySold: number | null };
+
+/**
+ * A set's BrickLink sold prices per day in today's currency, oldest first, in whichever guide each lookup used (the
+ * last row is the latest lookup's guide). Kept by set number, so it survives removing and re-adding the set.
+ */
+export async function priceHistory(db: DB, setNo: string): Promise<PricePointRow[]> {
+  return (await priceSeries(db, 'set', setNo, { source: 'bricklink', type: 'sold_avg', currency: await getCurrency(db) }))
+    .map((p) => ({ date: p.observedOn, guide: p.condition, avgSold: p.amount, minSold: p.low, maxSold: p.high, qtySold: p.sampleSize }));
 }
 
 export async function syncStatus(db: DB): Promise<SyncStatus> {
@@ -139,9 +149,10 @@ export async function lookupInto(db: DB, s: Pick<SetRow, 'id' | 'setNo'> & { cop
         name: sql`case when ${sets.name} = ${placeholderName(s.setNo)} then ${r.blName} else ${sets.name} end`,
       })
       .where(eq(sets.id, s.id));
-    const snap = { guide, avgSold: r.avgSold, minSold: r.minSold, maxSold: r.maxSold, qtySold: r.qtySold };
-    await db.insert(priceSnapshots).values({ setId: s.id, date: today(), ...snap })
-      .onConflictDoUpdate({ target: [priceSnapshots.setId, priceSnapshots.date], set: snap });
+    await recordPrice(db, {
+      itemKind: 'set', itemId: s.setNo, source: 'bricklink', type: 'sold_avg', condition: guide, currency,
+      amount: r.avgSold, low: r.minSold, high: r.maxSold, sampleSize: r.qtySold, observedOn: today(),
+    });
     await repriceCopies(db, s.id, guide);
     return null;
   } catch (e) {
@@ -319,7 +330,7 @@ export async function startSync(db: DB): Promise<Result<{ runId: number }>> {
  * (when `store` is given) and Rebrickable themes and minifigs (when `catalog` is given). Updates progress as it goes.
  */
 /** Optional BrickLink extras for the sync: minifigure prices and part prices for part-out value. */
-export type SyncExtras = { minifig?: MinifigLookup; partPrice?: PartPriceLookup };
+export type SyncExtras = { minifig?: MinifigLookup; partPrice?: PartPriceLookup; images?: ImageStore };
 
 export async function runSync(db: DB, runId: number, lookup: Lookup, store?: Store, catalog?: Catalog & Partial<BuildSource> & Partial<IdCatalog>, retail?: RetailSource, extras: SyncExtras = {}): Promise<void> {
   try {
@@ -354,6 +365,8 @@ export async function runSync(db: DB, runId: number, lookup: Lookup, store?: Sto
     // 3D models from LDraw's OMR, only when a parts library is set up (the 3D view needs it anyway).
     const hasLibrary = !!(process.env.LDRAW_LIBRARY_DIR || process.env.LDRAW_LIBRARY_URL);
     if (hasLibrary && process.env.LDRAW_OMR_SYNC !== 'off') catalogErrors.push(...(await syncOmrModels(db)));
+    // Photos not in the image cache yet (CDN fetches, not BrickLink API calls), after the lookups filled in image URLs.
+    if (extras.images) catalogErrors.push(...(await warmImages(db, extras.images)).errors);
     // Part prices for part-out value, with whatever is left of today's BrickLink budget.
     if (extras.partPrice) {
       const r = await refreshPartPrices(db, extras.partPrice, currency, { maxCalls: partoutBudget(calls) });

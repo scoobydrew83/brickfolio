@@ -134,10 +134,10 @@ The Worker name in the dashboard must match `name` in `wrangler.jsonc`. Secrets 
 
 ## Notes
 
-- **Share links:** to let people without Access open a share link, add Access applications for the same hostname with paths `share`, `_next/static` and `_next/image`, each with a **Bypass / Everyone** policy. See [Share a read-only link](install.md#share-a-read-only-link).
+- **Share links:** to let people without Access open a share link, add Access applications for the same hostname with paths `share` and `_next/static`, each with a **Bypass / Everyone** policy. See [Share a read-only link](install.md#share-a-read-only-link).
 
 - **Sync schedule:** `triggers.crons` in `wrangler.jsonc`, in UTC (default `17 4 * * *`, 04:17 UTC). The cron calls `POST /api/v1/sync` with `CRON_SECRET`. `TZ` in `vars` sets the time zone for history dates.
-- **Images:** set photos are resized by the Cloudflare Images binding (`IMAGES`). The free plan includes a monthly allowance of transformations.
+- **Images:** set photos in the app are resized by the Cloudflare Images binding (`IMAGES`). The free plan includes a monthly allowance of transformations. Share pages and offline scanning serve photos from a cache instead: create a bucket with `npx wrangler r2 bucket create brickfolio-images` and uncomment the `r2_buckets` block in `wrangler.jsonc` (binding `IMAGE_CACHE`). Without it, photos are passed through from BrickLink and not kept. **Settings → Image cache** shows how many are stored.
 - **Backups:** D1 has Time Travel (point-in-time restore for 30 days). For a file copy: `npx wrangler d1 export brickfolio --remote --output backup.sql`.
 - **Local preview:** `cp .dev.vars.example .dev.vars`, add your BrickLink keys, then `npm run cf:preview`. It uses a local D1 and the real Workers runtime, with no login (the script passes `AUTH_MODE=none`).
 - **Large collections:** a sync runs inside one Cron invocation (up to 15 minutes of wall time). At about 1 second per set, that covers several hundred sets.

@@ -150,7 +150,7 @@ Cool paper and ink, with one warm signal.
 ### Named Rules
 **The One Signal Rule.** Brick Yellow marks what you can do next or what is selected, nothing else. If two yellow things compete on a screen, one of them is wrong.
 
-**The Source Rule.** Every money figure says where it came from (BrickLink sold prices, stored or live) within one line of it.
+**The Source Rule.** Every money figure says where it came from (BrickLink sold prices, a BrickOwl asking price, a BrickEconomy estimate, stored or live) within one line of it. Sources are listed side by side, never averaged into one number.
 
 ## Typography
 
@@ -253,10 +253,10 @@ Trends behind them: the BrickLink Designer Program is the fastest-growing area o
 
 Already shipped from earlier lists: ~~Designer Program tracker~~ (0.6.0, still to do: fill projects automatically if BrickLink offers a feed), ~~MCP server~~ (0.6.0, still to do: OAuth for a claude.ai connector and opt-in write tools), ~~Insurance and valuation report~~ (0.6.0, still to do: photos in the report).
 
-1. ~~**Read-only share link**~~ Shipped: `/share/<token>`, hashed tokens, opt-in values, locations and notes, a Funnel overlay and Access bypass rules. Still to do: the image cache (#34), so the page doesn't load photos from BrickLink.
+1. ~~**Read-only share link**~~ Shipped: `/share/<token>`, hashed tokens, opt-in values, locations and notes, a Funnel overlay and Access bypass rules. ~~Image cache~~ shipped too: share pages and offline scanning show photos from `/data/images` (R2 on Cloudflare), not BrickLink. Still to do: move the rest of the app's photos to the cache, and photos in the valuation report.
 2. ~~**Copies, not just quantities.**~~ Shipped: a `set_copies` table (status, condition, location, dates, cost basis, gift with purchase, per-copy value, `collection_id` for step 10), with missing parts per copy. `sets.qty`, `condition`, `location` and `missing_pct` are legacy: no longer read or written, and dropped (with `ALTER TABLE DROP COLUMN`) once every installation has run the backfill.
 3. **One identifier table and a local catalog.** See [Identifiers](#identifiers). Ingest Rebrickable's daily CSVs (themes, sets, inventories, parts, elements) and move set parts lists from BrickLink to Rebrickable. On Cloudflare D1, ingest only the inventories for owned, wishlisted and alternate-build sets; `inventory_parts` has over a million rows.
-4. **Prices from several sources, and the sealed vs. used gap.** See [Prices from several sources](#prices-from-several-sources). Fetch both BrickLink guides per set (the second one weekly, paid for by the calls freed in step 3) and show the gap on the set page and Radar.
+4. **Prices from several sources, and the sealed vs. used gap.** ~~One price table~~ Shipped: `price_observations` holds every price, Est. Value comes from one primary source (Settings → Value source), and the set page lists the other sources. See [Prices from several sources](#prices-from-several-sources). Still to do: fetch both BrickLink guides per set (the second one weekly, paid for by the calls freed in step 3) and show the gap on the set page and Radar.
 5. **Loose-parts lots and build allocations.** Storage locations for parts outside sets (a `part_lots` table: part, color, qty, location, source bin or set copy), filled by BrickLink XML or Rebrickable CSV import and by marking a copy "parted out". Builds reserve parts from it, so parts set aside for a MOC don't count as free in "What can I build?".
 6. **Brickognize photo scan** to add minifigs (now) and loose parts (after step 5) from a phone. Off unless turned on, since photos go to a third party.
 7. **Retailer deal alerts:** the n8n flows in `docs/n8n/` post `offer` prices to `POST /api/v1/prices`; the wishlist's "under target" alert reads the lowest recent offer. No scraping inside the app.
@@ -282,12 +282,14 @@ One `identifiers` table maps every ID scheme to one item, replacing `set_barcode
 - **One lookup:** every import, export and scan resolves IDs through one function.
 
 ### Prices from several sources
-One `price_observations` table holds every price the app knows.
+Shipped: one `price_observations` table holds every price the app knows (`lib/service/prices.ts`).
 - **Row:** the item (kind + canonical ID), source, type, condition (N/U), currency, amount, sample size, date and link.
   - **Sources:** bricklink, brickowl, brickeconomy, brickset, retailer:<name>, manual.
   - **Types:** sold average, asking, estimate, retail, offer.
 - **Est. Value:** comes from one primary source, chosen in Settings (BrickLink by default). The set page lists the other sources next to it, each with its label, sample size and date. Sources are never blended.
-- **Migration:** `price_snapshots` and `minifig_price_snapshots` move in as BrickLink sold rows. `part_prices` stays as it is (a high-volume cache, not history).
+- **History:** keyed by the canonical ID, not a row ID, so it survives removing and re-adding a set. One row per item, source, type, condition, currency and day.
+- **Minifigures** stay valued from BrickLink for now; the setting covers sets.
+- **Migration:** `price_snapshots` and `minifig_price_snapshots` moved in as BrickLink sold rows (labelled with the Settings currency, as they had none of their own). `part_prices` stays as it is (a high-volume cache, not history).
 - **What's then just a query:** the sealed vs. used gap, deal alerts and a second marketplace.
 
 ## Integrations

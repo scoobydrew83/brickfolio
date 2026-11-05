@@ -169,6 +169,13 @@
       "when": 1793766912490,
       "tag": "0023_share_links",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "6",
+      "when": 1793851438775,
+      "tag": "0024_price_observations",
+      "breakpoints": true
     }
   ]
 }

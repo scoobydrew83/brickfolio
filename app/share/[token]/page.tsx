@@ -11,7 +11,8 @@ export const metadata = { title: 'Shared collection', robots: { index: false, fo
 export default async function SharePage({ params }: PageProps<'/share/[token]'>) {
   await connection();
   const db = await getDb();
-  const link = await checkShareLink(db, decodeURIComponent((await params).token));
+  const token = decodeURIComponent((await params).token);
+  const link = await checkShareLink(db, token);
   if (!link) notFound(); // unknown, revoked and expired links all look the same
-  return <ShareView data={await sharedCollection(db, link, await getCurrency(db))} />;
+  return <ShareView data={await sharedCollection(db, link, await getCurrency(db), token)} />;
 }

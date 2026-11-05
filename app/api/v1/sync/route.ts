@@ -1,5 +1,6 @@
 import { after } from 'next/server';
 import { api, fromResult, json } from '@/lib/api';
+import { imageStore } from '@/lib/images/cache';
 import { runSync, startSync, syncStatus } from '@/lib/service/sets';
 import { brickMinifig, brickPartPrice, brickStore, bricklink, brickset, rebrickable } from '@/lib/session';
 
@@ -11,6 +12,7 @@ export const POST = api(async (_req, { db }) => {
   const lookup = bricklink();
   if (!lookup) return json({ error: 'BrickLink API keys are not set.' }, 400);
   const r = await startSync(db);
-  if (r.ok) after(() => runSync(db, r.runId, lookup, brickStore() ?? undefined, rebrickable() ?? undefined, brickset() ?? undefined, { minifig: brickMinifig() ?? undefined, partPrice: brickPartPrice() ?? undefined }));
+  const images = (await imageStore()) ?? undefined;
+  if (r.ok) after(() => runSync(db, r.runId, lookup, brickStore() ?? undefined, rebrickable() ?? undefined, brickset() ?? undefined, { minifig: brickMinifig() ?? undefined, partPrice: brickPartPrice() ?? undefined, images }));
   return fromResult(r, 202);
 });

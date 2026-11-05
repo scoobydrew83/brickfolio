@@ -18,6 +18,7 @@ import { PageHeader } from './shell/PageHeader';
 import { Scanner } from './scan/Scanner';
 import { useScanNetwork, type SetLookup } from './scan/useScanNetwork';
 import { FigureList, useFigSession } from './scan/FigureList';
+import { cachedImageSrc, fallBackTo } from '@/lib/images/url';
 import { readSetNumbers } from './scan/ocr';
 import type { Pending } from './scan/outbox';
 
@@ -408,9 +409,10 @@ function SetSummary({ c, children }: { c: ScanCandidate; children?: React.ReactN
   return (
     <div className="flex gap-4">
       <div className="flex size-24 shrink-0 items-center justify-center overflow-hidden rounded-control bg-muted">
-        {/* A plain img on purpose: provider photos come from any host, and the server must not fetch arbitrary URLs. */}
+        {/* A plain img on purpose: provider photos come from any host, and the server must not fetch arbitrary URLs.
+            Sets you own come from the image cache instead, so they still show offline. */}
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        {c.imageUrl ? <img src={c.imageUrl} alt="" referrerPolicy="no-referrer" className="size-full object-contain" /> : <ScanBarcode aria-hidden className="size-8 text-fg-4" />}
+        {c.imageUrl ? <img src={cachedImageSrc('set', c.setNo, c.imageUrl, !!c.owned)!} alt="" referrerPolicy="no-referrer" onError={fallBackTo(c.imageUrl)} className="size-full object-contain" /> : <ScanBarcode aria-hidden className="size-8 text-fg-4" />}
       </div>
       <div className="min-w-0 space-y-1">
         <p className="text-lg font-bold leading-tight">{setLabel(c)}</p>

@@ -74,7 +74,8 @@ In Sheets, use **File → Download → Comma-separated values** on the Sets, His
 - **Remove:** takes away the newest copy. On the last copy it deletes the set.
 - **Copies:** a set's page lists each copy: sealed, built, in progress or parted out, with its own condition, location, dates, what it cost and its value. **Add a copy**, or tick **Gift with purchase** for one that cost nothing. Cards show "2 sealed · 1 built", the total value and, when you've recorded prices paid, your gain.
 - **Sync BrickLink:** refreshes every set, then your store inventory and orders (it also runs daily at `SYNC_HOUR`). Progress shows on the button.
-- **Set page:** click a set number or name for its photo, value history, parts list and notes.
+- **Set page:** click a set number or name for its photo, value history, parts list and notes. Prices from other sources are listed under Est. Value with their date and sample size.
+- **Value source:** **Settings → Currency → Value source** picks the one source Est. Value comes from (BrickLink by default). Sources are never mixed: a set with no value from the chosen source shows none.
 - **Parts:** open a set's parts list from its card, or search every set's parts on the Parts page (e.g. which sets have a given part).
 - **Radar:** upcoming retirements by month and growth since retiring. Rates marked * start from the retail price or a short price history.
 - **Designer Program:** on the Radar page. **Follow a project**, add its pre-order dates, and the bell turns its alerts on or off.
@@ -96,6 +97,7 @@ In Sheets, use **File → Download → Comma-separated values** on the Sets, His
 - Docker keeps the database at `/data/app.db` in the `data` volume, and writes a copy to `/data/backups` daily (keeps `BACKUP_KEEP`, default 7).
 - Restore by stopping the app and copying a backup over `app.db`.
 - **Settings → Download all sets as CSV** gives a portable export at any time.
+- Photos for share pages and offline scanning are cached in `/data/images` (R2 on Cloudflare). It can be deleted at any time, or emptied in **Settings → Image cache**; photos are fetched again when needed.
 
 ## API
 

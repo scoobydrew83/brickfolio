@@ -1,8 +1,8 @@
 // Retirement Radar: when your sets and wishes retire, and how retired sets have done since.
 // Uses Brickset dates and retail prices plus the BrickLink sold prices stored at each sync. Makes no API calls.
-import { and, eq, gte, inArray, isNotNull, isNull, lte, or, sql } from 'drizzle-orm';
+import { and, asc, eq, gte, inArray, isNotNull, isNull, lte, or, sql } from 'drizzle-orm';
 import type { DB } from '../db/types';
-import { priceSnapshots, wishlist } from '../db/schema';
+import { priceObservations, wishlist } from '../db/schema';
 import { displayNo, money, setGuide } from '../sets';
 import { retirement } from '../retail';
 import { daysUntil, flagsFor, growthSince, type Flag, type Growth, type PricePoint } from '../radar';
@@ -56,13 +56,15 @@ export async function getRadar(db: DB, todayIso = new Date().toISOString().slice
 
   // Stored prices for retired sets, in the guide most of each set's copies need today.
   const retiredOwned = owned.filter((s) => retirement(s, todayIso)?.kind === 'retired');
-  const snaps = retiredOwned.length
-    ? await db.select({ setId: priceSnapshots.setId, date: priceSnapshots.date, guide: priceSnapshots.guide, avgSold: priceSnapshots.avgSold })
-      .from(priceSnapshots).where(inArray(priceSnapshots.setId, retiredOwned.map((s) => s.id))).all()
+  const obs = retiredOwned.length
+    ? await db.select({ setNo: priceObservations.itemId, date: priceObservations.observedOn, guide: priceObservations.condition, avgSold: priceObservations.amount })
+      .from(priceObservations)
+      .where(and(eq(priceObservations.itemKind, 'set'), inArray(priceObservations.itemId, retiredOwned.map((s) => s.setNo)), eq(priceObservations.source, 'bricklink'), eq(priceObservations.type, 'sold_avg'), eq(priceObservations.currency, currency)))
+      .orderBy(asc(priceObservations.observedOn)).all()
     : [];
-  const bySet = new Map<number, PricePoint[]>();
-  const guideOf = new Map(retiredOwned.map((s) => [s.id, setGuide(s.copies)]));
-  for (const p of snaps) if (p.guide === guideOf.get(p.setId)) bySet.set(p.setId, [...(bySet.get(p.setId) ?? []), p]);
+  const bySet = new Map<string, PricePoint[]>();
+  const guideOf = new Map(retiredOwned.map((s) => [s.setNo, setGuide(s.copies)]));
+  for (const p of obs) if (p.guide === guideOf.get(p.setNo)) bySet.set(p.setNo, [...(bySet.get(p.setNo) ?? []), p]);
 
   const status = (r: { exitDate?: string | null; retired?: boolean | null }): RadarItem['status'] => retirement(r, todayIso)?.kind ?? (r.exitDate && r.exitDate >= todayIso ? 'retiring' : 'available');
   const items: RadarItem[] = [
@@ -72,7 +74,7 @@ export async function getRadar(db: DB, todayIso = new Date().toISOString().slice
       value: s.estValue, retailPrice: s.retailPrice ?? null, retailCurrency: s.retailCurrency ?? null,
       gainPct: gain(s.estValue, s.retailPrice ?? null, s.retailCurrency ?? null, currency),
       growth: status(s) === 'retired'
-        ? growthSince(s.exitDate, s.avgSold, bySet.get(s.id) ?? [], { price: s.retailPrice, currency: s.retailCurrency }, currency, todayIso)
+        ? growthSince(s.exitDate, s.avgSold, bySet.get(s.setNo) ?? [], { price: s.retailPrice, currency: s.retailCurrency }, currency, todayIso)
         : null,
     })),
     ...wishes.map((w): RadarItem => ({

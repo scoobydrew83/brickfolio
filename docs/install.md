@@ -73,7 +73,7 @@ Rebrickable doesn't share every build's parts list through its API: designers ca
 1. Sign in to Brickset, open your account's **API** page, and request a key (free for personal use).
 2. Set it as `BRICKSET_API_KEY` and restart (in Coolify, add it under Environment Variables and redeploy).
 
-Each sync asks Brickset about sets it hasn't checked in 30 days, 50 sets per call and at most 10 calls, to stay well inside the key's daily limit. Retail prices are stored in your collection currency when Brickset has it (USD, GBP, CAD or EUR), otherwise in USD; the gain is only shown when the currencies match. **Settings → Brickset** shows the counts and has **Test key** and **Sync Brickset now**. Prices you could sell for still come only from BrickLink.
+Each sync asks Brickset about sets it hasn't checked in 30 days, 50 sets per call and at most 10 calls, to stay well inside the key's daily limit. Retail prices are stored in your collection currency when Brickset has it (USD, GBP, CAD or EUR), otherwise in USD; the gain is only shown when the currencies match. **Settings → Brickset** shows the counts and has **Test key** and **Sync Brickset now**. Prices you could sell for still come only from BrickLink. Once other price sources are stored, **Settings → Currency → Value source** can choose which one Est. Value uses.
 
 ### Optional: barcode scanning
 
@@ -168,6 +168,8 @@ curl -fsSL $base/.env.example -o .env
 ```
 
 Then open `.env` in an editor and fill in your BrickLink keys. Everything else in it has a sensible default or is covered in the setup steps below.
+
+Everything the app stores lives in the `data` volume: the database, daily backups, the LDraw library and cached photos (`/data/images`, safe to delete; set `IMAGE_CACHE=off` to not keep photos).
 
 **Image tags:** `:latest` is the newest release, `:1.2.3` / `:1.2` pin a release, and `:main` follows the main branch. To choose one, set `BRICKFOLIO_IMAGE=ghcr.io/scoobydrew83/brickfolio:main` in `.env`. To build from source instead, clone the repo and run `docker compose up -d --build`.
 
@@ -306,11 +308,11 @@ The app checks Access's signed JWT on every request, so knowing the hostname or 
 
 The share pages need no login, but your app may not be reachable from the internet. To open only `/share`:
 
-- **Tailscale:** add the Funnel overlay. It funnels a second port, 8443, which proxies only `/share/`, the static files and images. Port 443 stays on your tailnet.
+- **Tailscale:** add the Funnel overlay. It funnels a second port, 8443, which proxies only `/share/` (including its photos) and the static files. Port 443 stays on your tailnet.
   1. In the tailnet policy, allow Funnel for the tag: `"nodeAttrs": [{ "target": ["tag:brickfolio"], "attr": ["funnel"] }]`.
   2. Put `COMPOSE_FILE=docker-compose.yml:compose.tailscale.yml:compose.tailscale-funnel.yml` and `SHARE_BASE_URL=https://brickfolio.<tailnet>.ts.net:8443` in `.env`.
   3. Restart. Settings now shows links on port 8443.
-- **Cloudflare Access** (Docker tunnel or Workers): in Zero Trust → Access → Applications, add self-hosted applications for the same hostname with paths `share`, `_next/static` and `_next/image`, each with one policy: **Action: Bypass, Include: Everyone**. The more specific path wins over the main application. Without the static files the page loads without styles, and photos go through `/_next/image`.
+- **Cloudflare Access** (Docker tunnel or Workers): in Zero Trust → Access → Applications, add self-hosted applications for the same hostname with paths `share` and `_next/static`, each with one policy: **Action: Bypass, Include: Everyone**. The more specific path wins over the main application. Without the static files the page loads without styles. Photos come from `/share/<link>/img/…`, which checks the link, so nothing else needs to be open. (A `_next/image` bypass from 0.9.0 can be removed.)
 
 `SHARE_BASE_URL` sets the address used in new links. It defaults to `APP_URL`, then to the address you opened Settings on.
 

@@ -148,7 +148,7 @@ export default function Board({ sets, history, sync, locations, currency, readAt
           {gain && <RetailGainLine gain={gain} money={money} className="mt-2 max-w-sm text-sm" />}
           {all.gain !== null && (
             <p className="mt-1 max-w-sm text-sm text-fg-3">
-              Cost basis {money(all.costBasis)} · <b className={all.gain >= 0 ? 'text-ok' : 'text-danger'}>{all.gain >= 0 ? '+' : '−'}{money(Math.abs(all.gain))}</b> on the copies with a price paid
+              Cost basis {money(all.costBasis)} · <b className={all.gain >= 0 ? 'text-ok' : 'text-danger'}>{all.gain >= 0 ? '+' : '−'}{money(Math.abs(all.gain))}</b> on the copies with a price paid and a value
             </p>
           )}
         </div>

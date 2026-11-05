@@ -1,8 +1,8 @@
 'use client';
 import { useEffect, useState, useTransition } from 'react';
-import { shareCodes, syncCommunityNow, bricksetStatus, downloadLdrawLibrary, ldrawLibraryStatus, rebrickableStatus, syncBricksetNow, syncRebrickableNow, testBricksetKey, testRebrickableKey, type BricksetStatus, type RebrickableStatus, addLocation, createShareLink, createToken, deleteLocation, revokeShareLink, importFile, renameLocation, revokeToken, setCurrency, type Result } from '@/app/actions';
+import { clearImageCache, imageCacheStatus, type ImageCacheStatus, shareCodes, syncCommunityNow, bricksetStatus, downloadLdrawLibrary, ldrawLibraryStatus, rebrickableStatus, syncBricksetNow, syncRebrickableNow, testBricksetKey, testRebrickableKey, type BricksetStatus, type RebrickableStatus, addLocation, createShareLink, createToken, deleteLocation, revokeShareLink, importFile, renameLocation, revokeToken, setCurrency, setValueSource, type Result } from '@/app/actions';
 import { Copy } from 'lucide-react';
-import { Banner, Button, field } from './ui';
+import { Banner, Button, Select, field } from './ui';
 import { PageHeader } from './shell/PageHeader';
 import type { LibraryStatus } from '@/lib/ldraw/download';
 import type { BarcodeCapabilities } from '@/lib/barcode/providers';
@@ -14,12 +14,12 @@ type BarcodeStatus = { caps: BarcodeCapabilities; saved: { total: number; user: 
 import type { ShareLinkRow } from '@/lib/service/share';
 
 type Token = { id: number; name: string; prefix: string; createdAt: string; lastUsedAt: string | null };
-type Props = { locations: string[]; currency: string; tokens: Token[]; shares: ShareLinkRow[]; user: string; authMode: string; priced: boolean; alerts: boolean; rebrickable: RebrickableStatus; brickset: BricksetStatus; ldraw: LibraryStatus; barcodes: BarcodeStatus };
+type Props = { locations: string[]; currency: string; valueSource: { current: string; options: [string, string][] }; tokens: Token[]; shares: ShareLinkRow[]; user: string; authMode: string; priced: boolean; alerts: boolean; rebrickable: RebrickableStatus; brickset: BricksetStatus; ldraw: LibraryStatus; barcodes: BarcodeStatus };
 
 const h2 = 'text-lg font-extrabold [font-stretch:110%]';
 const section = 'space-y-3 border-t border-line pt-6';
 
-export default function Settings({ locations, currency, tokens, shares, user, authMode, priced, alerts, rebrickable, brickset, ldraw, barcodes }: Props) {
+export default function Settings({ locations, currency, valueSource, tokens, shares, user, authMode, priced, alerts, rebrickable, brickset, ldraw, barcodes }: Props) {
   const [pending, start] = useTransition();
   const [message, setMessage] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
   const [newToken, setNewToken] = useState<string | null>(null);
@@ -53,6 +53,15 @@ export default function Settings({ locations, currency, tokens, shares, user, au
         <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); const c = String(new FormData(e.currentTarget).get('currency')); run(() => setCurrency(c), `Currency set to ${c.toUpperCase()}.`); }}>
           <input name="currency" defaultValue={currency} required pattern="[A-Za-z]{3}" maxLength={3} className={`${field} mt-0 w-24 uppercase`} />
           <Button type="submit" disabled={pending}>Save</Button>
+        </form>
+        <h3 className="pt-2 font-semibold">Value source</h3>
+        <p className="text-sm text-fg-3">
+          Est. Value comes from this source only; other sources are shown next to it on each set&apos;s page, never mixed in.
+          A set with no value from it shows no Est. Value. Sources appear here once they have stored prices.
+        </p>
+        <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); const v = String(new FormData(e.currentTarget).get('source')); run(() => setValueSource(v), `Est. Value now comes from ${valueSource.options.find(([k]) => k === v)?.[1] ?? v}.`); }}>
+          <Select name="source" aria-label="Value source" defaultValue={valueSource.current} options={valueSource.options} disabled={valueSource.options.length < 2} />
+          <Button type="submit" disabled={pending || valueSource.options.length < 2}>Save</Button>
         </form>
       </section>
 
@@ -116,6 +125,7 @@ export default function Settings({ locations, currency, tokens, shares, user, au
       <BarcodeSection status={barcodes} />
 
       <LdrawSection initial={ldraw} />
+      <ImageCacheSection />
 
       <section className={`${section} text-sm text-fg-2`}>
         <h2 className={`${h2} text-fg`}>About this server</h2>
@@ -350,6 +360,41 @@ function LdrawSection({ initial }: { initial: LibraryStatus }) {
           <Button variant={st.ready ? 'secondary' : 'primary'} loading={st.running || starting} onClick={go}>
             {st.running ? 'Working…' : st.ready ? 'Update the library' : 'Download the LDraw library'}
           </Button>
+        </>
+      )}
+    </section>
+  );
+}
+
+/** The photo cache behind share pages and offline scanning: where it lives, how much it holds, and a Clear button. */
+function ImageCacheSection() {
+  const [st, setSt] = useState<ImageCacheStatus | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [clearing, startClear] = useTransition();
+  useEffect(() => { imageCacheStatus().then(setSt, () => setError('Couldn’t read the image cache.')); }, []);
+  const clear = () => startClear(async () => {
+    setError(null);
+    const r = await clearImageCache();
+    if (!r.ok) return setError(r.error);
+    setSt(await imageCacheStatus());
+  });
+  const size = (b: number) => (b >= 1e6 ? `${(b / 1e6).toFixed(1)} MB` : `${Math.round(b / 1e3)} KB`);
+  return (
+    <section className={section} aria-live="polite">
+      <h2 className={h2}>Image cache</h2>
+      {!st ? <p className="text-sm text-fg-3">{error ?? 'Reading…'}</p> : st.kind === null ? (
+        <p className="text-sm text-fg-3">
+          Off. Share pages and the Scan page pass photos through from BrickLink without keeping them. On Docker, set{' '}
+          <code className="rounded-chip bg-muted px-1">IMAGE_CACHE_DIR</code>; on Cloudflare, add the <code className="rounded-chip bg-muted px-1">IMAGE_CACHE</code> R2 binding.
+        </p>
+      ) : (
+        <>
+          <p className="text-sm text-fg-3">
+            {st.count.toLocaleString()} photo{st.count === 1 ? '' : 's'}, {size(st.bytes)}, {st.kind === 'r2' ? 'in R2' : 'on the server’s disk'}.
+            Share pages and offline scanning show photos from here, and the daily sync fills in new ones. Clearing is safe: photos are fetched again when needed.
+          </p>
+          {error && <Banner kind="error">{error}</Banner>}
+          <Button variant="secondary" loading={clearing} disabled={!st.count} onClick={clear}>Clear the cache</Button>
         </>
       )}
     </section>

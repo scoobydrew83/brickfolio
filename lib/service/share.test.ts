@@ -3,7 +3,9 @@ import { eq } from 'drizzle-orm';
 import { openNodeDb } from '../db/node';
 import { minifigs, shareLinks } from '../db/schema';
 import type { DB } from '../db/types';
-import { checkShareLink, createShareLink, listShareLinks, parseShareInput, revokeShareLink, sharedCollection, type ShareInput } from './share';
+import { checkShareLink, createShareLink, listShareLinks, parseShareInput, revokeShareLink, sharedCollection, sharesItem, type ShareInput } from './share';
+import { editCopy, listCopies } from './copies';
+import { getSet } from './sets';
 import { addSet } from './sets';
 import { createToken } from './tokens';
 
@@ -48,6 +50,8 @@ it('creates, checks and revokes; stores only the hash and counts views', async (
   expect(await checkShareLink(db, token)).toMatchObject({ id, name: 'For Dad' });
   await checkShareLink(db, token);
   expect((await listShareLinks(db))[0]).toMatchObject({ views: 2, lastViewedAt: expect.any(String) });
+  expect(await checkShareLink(db, token, new Date(), { count: false })).toMatchObject({ id }); // photos don't count
+  expect((await listShareLinks(db))[0]).toMatchObject({ views: 2 });
 
   expect(await checkShareLink(db, token.slice(0, -1) + (token.endsWith('A') ? 'B' : 'A'))).toBeNull();
   expect(await revokeShareLink(db, id)).toEqual({ ok: true });
@@ -65,21 +69,41 @@ it('refuses expired links and API tokens', async () => {
 });
 
 it('shows only what the link allows', async () => {
-  const hidden = JSON.stringify(await sharedCollection(db, input(), 'USD'));
+  const hidden = JSON.stringify(await sharedCollection(db, input(), 'USD', 'bfs_t'));
   for (const secret of ['SecretShelf', 'SecretNote', 'SecretFigNote', '31.41', '27.18', 'blError', '"id"', 'estValue', 'costBasis', 'missingPct', 'registered']) {
     expect(hidden).not.toContain(secret);
   }
-  const c = await sharedCollection(db, input(), 'USD');
+  const c = await sharedCollection(db, input(), 'USD', 'bfs_t');
   expect(c.sets[0]).toMatchObject({ setNo: '10280-1', name: 'Flower Bouquet', qty: 1, copies: '1 built', condition: 'Used' });
   expect(c.totals).toEqual({ sets: 1, copies: 1, pieces: 0, minifigs: 2 });
 
-  expect(JSON.stringify(await sharedCollection(db, input({ showLocations: true }), 'USD'))).toContain('SecretShelf');
-  const notes = JSON.stringify(await sharedCollection(db, input({ showNotes: true }), 'USD'));
+  expect(JSON.stringify(await sharedCollection(db, input({ showLocations: true }), 'USD', 'bfs_t'))).toContain('SecretShelf');
+  const notes = JSON.stringify(await sharedCollection(db, input({ showNotes: true }), 'USD', 'bfs_t'));
   expect(notes).toContain('SecretNote');
   expect(notes).not.toContain('SecretShelf');
-  const values = await sharedCollection(db, input({ showValues: true }), 'USD');
+  const values = await sharedCollection(db, input({ showValues: true }), 'USD', 'bfs_t');
   expect(values.minifigs[0].estValue).toBe(27.18);
   expect(values.totals.estValue).toBe(54.36);
   expect(JSON.stringify(values)).not.toContain('SecretShelf');
-  expect((await sharedCollection(db, input({ showMinifigs: false }), 'USD')).minifigs).toEqual([]);
+  expect((await sharedCollection(db, input({ showMinifigs: false }), 'USD', 'bfs_t')).minifigs).toEqual([]);
+});
+
+it('points photos at the share route, and only for items the link shows', async () => {
+  await db.update(minifigs).set({ imageUrl: 'https://img.bricklink.com/ItemImage/MN/0/sw0001.png' });
+  const { sets } = await import('../db/schema');
+  await db.update(sets).set({ imageUrl: 'https://img.bricklink.com/ItemImage/SN/0/10280-1.png' });
+  const c = await sharedCollection(db, input(), 'USD', 'bfs_abc');
+  expect(c.sets[0].image).toBe('/share/bfs_abc/img/set/10280-1');
+  expect(c.minifigs[0].image).toBe('/share/bfs_abc/img/minifig/sw0001');
+  expect(JSON.stringify(c)).not.toContain('bricklink.com/ItemImage');
+
+  expect(await sharesItem(db, input(), 'set', '10280-1')).toBe(true);
+  expect(await sharesItem(db, input(), 'set', '75192-1')).toBe(false);
+  expect(await sharesItem(db, input(), 'minifig', 'sw0001')).toBe(true);
+  expect(await sharesItem(db, input({ showMinifigs: false }), 'minifig', 'sw0001')).toBe(false);
+  // A set whose only copy was parted out isn't on the page, so neither is its photo.
+  const s = await getSet(db, '10280-1');
+  const [copy] = await listCopies(db, s!.id);
+  expect((await editCopy(db, copy.id, { status: 'parted_out' })).ok).toBe(true);
+  expect(await sharesItem(db, input(), 'set', '10280-1')).toBe(false);
 });

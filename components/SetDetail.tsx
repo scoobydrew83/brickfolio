@@ -10,6 +10,7 @@ import type { MissingSummary } from '@/lib/service/missing';
 import type { Partout } from '@/lib/service/partout';
 import { partKey } from '@/lib/bricklink/wanted';
 import type { PartRow } from '@/lib/service/parts';
+import type { ValueSources } from '@/lib/service/prices';
 import { copiesSummary, copyGuide, costBasis, displayNo, num, setGuide, STATUS_LABEL, type CopyRow, type SetRow } from '@/lib/sets';
 import { ModelViewer } from './ModelViewer';
 import { PartList } from './board/PartsDialog';
@@ -20,10 +21,10 @@ import { SetForm } from './board/SetForm';
 import { blLink, moneyIn } from './board/ui';
 import { Banner, Button, Callout, CONDITION_TONE, Chip, EmptyState, FilterChip, buttonClass, cx } from './ui';
 
-type Props = { set: SetRow; parts: PartRow[]; prices: { date: string; avgSold: number | null }[]; currency: string; locations: string[]; priced: boolean; model: { fileName: string; author: string | null } | null; library: boolean; builds: BuildMatch[]; view?: '3d'; missing: MissingSummary; missingCopyId: number | null; guide: 'N' | 'U' | null; partout: (Partout & { unpriced: number }) | null; partsPriced: boolean };
+type Props = { set: SetRow; parts: PartRow[]; prices: { date: string; avgSold: number | null }[]; currency: string; locations: string[]; priced: boolean; model: { fileName: string; author: string | null } | null; library: boolean; builds: BuildMatch[]; view?: '3d'; missing: MissingSummary; missingCopyId: number | null; guide: 'N' | 'U' | null; partout: (Partout & { unpriced: number }) | null; partsPriced: boolean; sources: ValueSources };
 
 /** One set: its photo, value and price history, parts list and copies. */
-export default function SetDetail({ set: s, parts, prices, currency, locations, priced, model, library, builds, view, missing, missingCopyId, guide, partout, partsPriced }: Props) {
+export default function SetDetail({ set: s, parts, prices, currency, locations, priced, model, library, builds, view, missing, missingCopyId, guide, partout, partsPriced, sources }: Props) {
   const router = useRouter();
   const money = useMemo(() => moneyIn(currency), [currency]);
   const [editing, setEditing] = useState(false);
@@ -137,6 +138,13 @@ export default function SetDetail({ set: s, parts, prices, currency, locations, 
               {s.missingPct ? <span className="font-semibold text-warn"> · less {s.missingPct}% missing</span> : null}
               {s.gain !== null ? <> · cost {money(s.costBasis)}, <b className={s.gain >= 0 ? 'text-ok' : 'text-danger'}>{s.gain >= 0 ? '+' : '−'}{money(Math.abs(s.gain))}</b>{s.costCovered < s.qty ? ` over ${s.costCovered} of ${s.qty} copies` : ''}</> : null}
             </p>
+            {sources.primary !== 'bricklink' && (
+              <p className="mt-1 text-xs text-fg-3">
+                Est. Value from {sources.primaryLabel} (Settings → Value source).
+                {s.valueTotal === null ? ` ${sources.primaryLabel} has no value for this set yet, so none is shown.` : ''}
+              </p>
+            )}
+            <OtherSources sources={sources} money={money} />
             {(s.retailPrice || s.launchDate || s.exitDate) && (
               <dl className="mt-3 grid grid-cols-3 gap-2 border-t border-line pt-2 text-sm tabular-nums">
                 <div>
@@ -348,6 +356,28 @@ function CopiesSection({ s, money, pending, label, onAdd, onEdit, onRemove }: { 
 }
 
 /** Avg sold per sync for this set, from the saved price snapshots. A note until there are two. */
+/** The newest price from each source other than the primary one, each figure on the same line as its source. */
+function OtherSources({ sources, money }: { sources: ValueSources; money: (v: unknown) => string }) {
+  if (!sources.others.length) return null;
+  const date = (d: string) => new Date(`${d}T00:00:00Z`).toLocaleDateString(undefined, { day: 'numeric', month: 'short', timeZone: 'UTC' });
+  return (
+    <div className="mt-3 border-t border-line pt-2">
+      <p className="text-xs font-semibold text-fg-3">Other sources</p>
+      <ul className="mt-1 space-y-1 text-sm">
+        {sources.others.map((r) => (
+          <li key={`${r.source}-${r.type}-${r.condition}`} className="flex items-baseline justify-between gap-3">
+            <span className="min-w-0">
+              {r.url ? <a href={r.url} target="_blank" rel="noreferrer noopener" className="font-medium text-link hover:underline">{r.label}</a> : <span className="font-medium">{r.label}</span>}
+              <span className="text-xs text-fg-3"> {r.typeLabel} ({r.condition === 'N' ? 'new' : 'used'}){r.sampleSize ? `, ${r.sampleSize} ${r.type === 'asking' ? 'listings' : 'sales'}` : ''}, {date(r.observedOn)}</span>
+            </span>
+            <b className="shrink-0 tabular-nums">{r.amount === null ? '—' : money(r.amount)}</b>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 function PriceHistory({ prices, money }: { prices: { date: string; avgSold: number | null }[]; money: (v: unknown) => string }) {
   const p = prices.filter((x): x is { date: string; avgSold: number } => x.avgSold !== null);
   if (p.length < 2) return <p className="mt-3 text-xs text-fg-3">Price history fills in with each daily sync.</p>;

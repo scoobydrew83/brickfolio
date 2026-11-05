@@ -1,14 +1,15 @@
 // "Complete your Partial sets": the parts you've marked missing from a set's parts list. They set Missing % exactly
 // (missing pieces ÷ pieces in the set, the same model Est. Value already uses) and export as a BrickLink Wanted List.
-import { and, desc, eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import type { Lookup } from '../bricklink/client';
 import { partKey as keyOf, toWantedListXml } from '../bricklink/wanted';
-import { colors, priceSnapshots, setCopies, setMissingParts, setParts, sets } from '../db/schema';
+import { colors, setCopies, setMissingParts, setParts, sets } from '../db/schema';
 import type { DB } from '../db/types';
 import { displayNo, setGuide, type CopyRow, type SetRow } from '../sets';
 import { getCurrency, getSet, lookupInto, type Result } from './sets';
 import { partout } from './partout';
 import { repriceCopies } from './copies';
+import { latestGuide } from './prices';
 
 export type MissingItem = { partNo: string; colorId: number | null; type: string; qty: number };
 export type MissingRow = MissingItem & { name: string; colorName: string | null; rgb: string | null; inSet: number };
@@ -82,8 +83,8 @@ async function applyMissing(db: DB, setNo: string, copyId: number, lookup: Looku
   const missingPct = lots ? (byValue ?? pct) : (hadMarks ? null : c.missingPct);
   await db.update(setCopies).set({ condition, status, missingPct, updatedAt: new Date().toISOString() }).where(eq(setCopies.id, c.id));
   const copies = s.copies.map((x) => (x.id === c.id ? { ...x, condition, status } : x));
-  const latest = await db.select({ guide: priceSnapshots.guide }).from(priceSnapshots).where(eq(priceSnapshots.setId, s.id)).orderBy(desc(priceSnapshots.date)).limit(1).get();
-  if (lookup && latest && latest.guide !== setGuide(copies)) await lookupInto(db, { ...s, copies }, lookup, await getCurrency(db));
+  const latest = await latestGuide(db, 'set', s.setNo);
+  if (lookup && latest && latest !== setGuide(copies)) await lookupInto(db, { ...s, copies }, lookup, await getCurrency(db));
   else await repriceCopies(db, s.id);
 }
 

@@ -4,8 +4,10 @@ import { refresh } from 'next/cache';
 import { headers } from 'next/headers';
 import { after } from 'next/server';
 import { getDb } from '@/lib/db';
+import { imageStore } from '@/lib/images/cache';
 import { parseCopyInput, parseQuickList, parseSetWithCopy } from '@/lib/sets';
 import * as copies from '@/lib/service/copies';
+import * as prices from '@/lib/service/prices';
 import * as svc from '@/lib/service/sets';
 import * as tokens from '@/lib/service/tokens';
 import * as share from '@/lib/service/share';
@@ -107,7 +109,8 @@ export async function runSync(): Promise<Result> {
     if (!lookup) return { ok: false, error: 'Set the BRICKLINK_* keys to sync prices.' };
     const db = await getDb();
     const s = await svc.startSync(db);
-    if (s.ok) after(() => svc.runSync(db, s.runId, lookup, brickStore() ?? undefined, rebrickable() ?? undefined, brickset() ?? undefined, { minifig: brickMinifig() ?? undefined, partPrice: brickPartPrice() ?? undefined }));
+    const images = (await imageStore()) ?? undefined;
+    if (s.ok) after(() => svc.runSync(db, s.runId, lookup, brickStore() ?? undefined, rebrickable() ?? undefined, brickset() ?? undefined, { minifig: brickMinifig() ?? undefined, partPrice: brickPartPrice() ?? undefined, images }));
     return s;
   });
 }
@@ -122,6 +125,8 @@ export async function addLocation(name: string) { return act(async () => svc.add
 export async function renameLocation(from: string, to: string) { return act(async () => svc.renameLocation(await getDb(), from, to)); }
 export async function deleteLocation(name: string) { return act(async () => svc.deleteLocation(await getDb(), name)); }
 export async function setCurrency(code: string) { return act(async () => svc.setCurrency(await getDb(), code)); }
+/** Settings → the source Est. Value comes from. Re-values every set right away. */
+export async function setValueSource(source: string) { return act(async () => prices.setPrimarySource(await getDb(), source, copies.refreshEstValues)); }
 export async function createToken(name: string) { return act(async () => tokens.createToken(await getDb(), name)); }
 /** Public origin for share links: SHARE_BASE_URL, else APP_URL, else this request's host. */
 async function shareBase(): Promise<string> {
@@ -156,7 +161,7 @@ export async function priceHistoryFor(setNo: string): Promise<{ date: string; av
   if (!(await currentUser())) return [];
   const db = await getDb();
   const s = await svc.getSet(db, setNo);
-  return s ? (await svc.priceHistory(db, s.id)).map(({ date, avgSold }) => ({ date, avgSold })) : [];
+  return s ? (await svc.priceHistory(db, s.setNo)).map(({ date, avgSold }) => ({ date, avgSold })) : [];
 }
 
 /** Imports an uploaded Sets or History CSV (e.g. the old Google Sheet tabs). */
@@ -262,6 +267,25 @@ export async function downloadLdrawLibrary(): Promise<Result> {
   if (isDemo()) return { ok: false, error: DEMO_ERROR };
   const error = await ldraw.startLibraryDownload();
   return error ? { ok: false, error } : { ok: true };
+}
+
+export type ImageCacheStatus = { kind: 'disk' | 'r2' | null; count: number; bytes: number };
+
+/** Settings → where cached photos live and how many there are. */
+export async function imageCacheStatus(): Promise<ImageCacheStatus | null> {
+  if (!(await currentUser())) return null;
+  const store = await imageStore();
+  return store ? { kind: store.kind, ...(await store.stats()) } : { kind: null, count: 0, bytes: 0 };
+}
+
+/** Settings → empties the photo cache. Photos are fetched again when next shown, or by the next sync. */
+export async function clearImageCache(): Promise<Result> {
+  return act(async () => {
+    const store = await imageStore();
+    if (!store) return { ok: false, error: 'The image cache is off.' };
+    await store.clear();
+    return { ok: true };
+  });
 }
 
 /** Progress of the library download, for the Settings page to poll. */

@@ -4,7 +4,8 @@ import { and, asc, eq, gt, inArray, isNotNull, lte, sql } from 'drizzle-orm';
 import type { MinifigLookup } from '../bricklink/client';
 import type { FigSource } from '../rebrickable/client';
 import type { DB } from '../db/types';
-import { cmfFigs, minifigPriceSnapshots, minifigs, themes } from '../db/schema';
+import { cmfFigs, minifigs, themes } from '../db/schema';
+import { recordPrice } from './prices';
 import { getCurrency, today, type Result } from './sets';
 import { FIG_NO } from '../minifigs';
 
@@ -91,9 +92,10 @@ export async function lookupFig(db: DB, m: Pick<MinifigRow, 'id' | 'figNo' | 'co
       name: m.name && m.name !== m.figNo ? m.name : r.blName, blName: r.blName, year: r.year, categoryId: r.categoryId, imageUrl: r.imageUrl,
       avgSold: r.avgSold, minSold: r.minSold, maxSold: r.maxSold, qtySold: r.qtySold, blError: null, lastUpdated: nowIso(), updatedAt: nowIso(),
     }).where(eq(minifigs.id, m.id));
-    const snap = { guide, avgSold: r.avgSold, qtySold: r.qtySold } as const;
-    await db.insert(minifigPriceSnapshots).values({ figId: m.id, date: today(), ...snap })
-      .onConflictDoUpdate({ target: [minifigPriceSnapshots.figId, minifigPriceSnapshots.date], set: snap });
+    await recordPrice(db, {
+      itemKind: 'minifig', itemId: m.figNo, source: 'bricklink', type: 'sold_avg', condition: guide, currency,
+      amount: r.avgSold, low: r.minSold, high: r.maxSold, sampleSize: r.qtySold, observedOn: today(),
+    });
     return null;
   } catch (e) {
     const error = (e instanceof Error ? e.message : String(e)).slice(0, 300);

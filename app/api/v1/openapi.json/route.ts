@@ -69,6 +69,17 @@ const spec = {
       InventoryItem: { type: 'object', properties: { inventoryId: { type: 'integer' }, itemNo: { type: 'string' }, name: { type: 'string' }, type: { type: 'string' }, colorId: nullable('integer'), colorName: nullable('string'), qty: { type: 'integer' }, condition: { enum: ['N', 'U'] }, unitPrice: nullable('number'), description: nullable('string'), remarks: nullable('string') } },
       Order: { type: 'object', properties: { orderId: { type: 'integer' }, direction: { enum: ['in', 'out'], description: 'in = you sold, out = you bought' }, dateOrdered: nullable('string'), status: { type: 'string' }, counterparty: nullable('string'), items: nullable('integer'), lots: nullable('integer'), currency: nullable('string'), subtotal: nullable('number'), grandTotal: nullable('number') } },
       Part: { type: 'object', properties: { matchNo: { type: 'integer' }, partNo: { type: 'string' }, name: { type: 'string' }, type: { type: 'string' }, colorId: nullable('integer'), colorName: nullable('string'), rgb: nullable('string'), qty: { type: 'integer' }, extra: { type: 'integer' }, alternate: { type: 'boolean' }, counterpart: { type: 'boolean' } } },
+      PriceObservation: {
+        type: 'object',
+        description: 'One price from one source on one day. Sources: bricklink, brickowl, brickeconomy, brickset, manual or retailer:<slug>.',
+        properties: {
+          id: { type: 'integer' }, itemKind: { type: 'string', enum: ['set', 'minifig'] }, itemId: { type: 'string', description: 'BrickLink number, e.g. 75192-1 or sw0001' },
+          source: { type: 'string' }, type: { type: 'string', enum: ['sold_avg', 'asking', 'estimate', 'retail', 'offer'] }, condition: { type: 'string', enum: ['N', 'U'] },
+          currency: { type: 'string', description: 'ISO 4217' }, amount: { type: 'number', nullable: true, description: 'null: the source answered with no sales' },
+          low: { type: 'number', nullable: true }, high: { type: 'number', nullable: true }, sampleSize: { type: 'integer', nullable: true },
+          observedOn: { type: 'string', format: 'date' }, observedAt: { type: 'string', format: 'date-time' }, url: { type: 'string', nullable: true }, sourceRef: { type: 'string', nullable: true },
+        },
+      },
       History: { type: 'object', properties: { date: { type: 'string', format: 'date' }, sets: { type: 'integer' }, copies: { type: 'integer' }, estValue: { type: 'number' }, avgSold: { type: 'number' }, pieces: { type: 'integer' } } },
     },
   },
@@ -134,7 +145,40 @@ const spec = {
     },
     '/sets/{setNo}/missing/wanted.xml': { parameters: [setNo, copyQ], get: { summary: "A copy's missing parts as a BrickLink Wanted List (XML)", responses: { 200: { description: 'Wanted List XML', content: { 'application/xml': {} } }, 404: err } } },
     '/ldraw/{path}': { get: { summary: 'A file from the LDraw parts library (for the 3D view)', parameters: [{ name: 'path', in: 'path', required: true, schema: { type: 'string' } }], responses: { 200: { description: 'LDraw file', content: { 'text/plain': {} } }, 400: err, 404: err } } },
-    '/sets/{setNo}/prices': { parameters: [setNo], get: { summary: 'Sold prices per day', responses: { 200: ok({ type: 'object' }), 404: err } } },
+    '/images/{kind}/{no}': {
+      get: {
+        summary: "A set's or minifigure's photo from the image cache (fetched from its stored BrickLink or Rebrickable URL on first use)",
+        parameters: [
+          { name: 'kind', in: 'path', required: true, schema: { type: 'string', enum: ['set', 'minifig'] } },
+          { name: 'no', in: 'path', required: true, schema: { type: 'string' }, description: 'Set number, or BrickLink / Rebrickable minifigure number' },
+        ],
+        responses: { 200: { description: 'The photo', content: { 'image/*': {} } }, 404: { description: 'Unknown item or no photo' }, 502: { description: 'The photo could not be fetched' } },
+      },
+    },
+    '/sets/{setNo}/observations': {
+      parameters: [setNo],
+      get: {
+        summary: 'Every stored price for a set from every source, newest first',
+        parameters: [{ name: 'source', in: 'query', schema: { type: 'string' } }, { name: 'type', in: 'query', schema: { type: 'string', enum: ['sold_avg', 'asking', 'estimate', 'retail', 'offer'] } }],
+        responses: { 200: ok({ type: 'object', properties: { observations: { type: 'array', items: ref('PriceObservation') } } }), 400: err, 404: err },
+      },
+    },
+    '/minifigs/{figNo}/observations': {
+      get: {
+        summary: 'Every stored price for a minifigure, newest first',
+        parameters: [{ name: 'figNo', in: 'path', required: true, schema: { type: 'string' } }, { name: 'source', in: 'query', schema: { type: 'string' } }, { name: 'type', in: 'query', schema: { type: 'string' } }],
+        responses: { 200: ok({ type: 'object', properties: { observations: { type: 'array', items: ref('PriceObservation') } } }), 400: err, 404: err },
+      },
+    },
+    '/settings/value-source': {
+      get: { summary: 'The source Est. Value comes from, and the sources that can be chosen', responses: { 200: ok({ type: 'object', properties: { source: { type: 'string' }, options: { type: 'array', items: { type: 'string' } } } }) } },
+      put: {
+        summary: 'Choose the source Est. Value comes from; every set is re-valued',
+        requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['source'], properties: { source: { type: 'string' } } } } } },
+        responses: { 200: ok({ type: 'object', properties: { source: { type: 'string' } } }), 400: err },
+      },
+    },
+    '/sets/{setNo}/prices': { parameters: [setNo], get: { summary: 'BrickLink sold prices per day (in the current currency)', responses: { 200: ok({ type: 'object' }), 404: err } } },
     '/sync': {
       get: { summary: 'Latest sync status', responses: { 200: ok({ type: 'object', properties: { sync: ref('Sync') } }) } },
       post: { summary: 'Start a full BrickLink sync (sets, then store inventory and orders)', responses: { 202: ok({ type: 'object', properties: { runId: { type: 'integer' } } }, 'Started'), 400: err, 409: err } },

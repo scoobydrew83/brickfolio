@@ -1,5 +1,5 @@
 'use client';
-import Image from 'next/image';
+/* eslint-disable @next/next/no-img-element -- photos come from the share link's own image route, which next/image can't fetch */
 import { useMemo, useState } from 'react';
 import type { SharedCollection } from '@/lib/service/share';
 import { displayNo, money as fmt, num } from '@/lib/sets';
@@ -44,7 +44,7 @@ export default function ShareView({ data }: { data: SharedCollection }) {
             <li key={s.setNo} className="flex flex-col gap-2">
               <div className="relative h-40 overflow-hidden rounded-card bg-tile">
                 {s.image
-                  ? <Image src={s.image} alt="" fill sizes="(min-width: 1280px) 300px, (min-width: 640px) 45vw, 90vw" className="object-contain p-4 mix-blend-multiply" />
+                  ? <img src={s.image} alt="" loading="lazy" className="absolute inset-0 size-full object-contain p-4 mix-blend-multiply" />
                   : <span className="absolute inset-0 flex items-center justify-center text-sm text-tile-ink/75">No photo</span>}
               </div>
               <div className="flex items-center justify-between gap-2">
@@ -73,7 +73,7 @@ export default function ShareView({ data }: { data: SharedCollection }) {
             {figs.map((f, i) => (
               <div key={`${f.figNo ?? f.name}-${i}`} className="flex items-center gap-3 px-3 py-2 text-sm">
                 <span className="relative size-10 shrink-0 overflow-hidden rounded-chip bg-tile">
-                  {f.image && <Image src={f.image} alt="" fill sizes="40px" className="object-contain mix-blend-multiply" />}
+                  {f.image && <img src={f.image} alt="" loading="lazy" className="absolute inset-0 size-full object-contain mix-blend-multiply" />}
                 </span>
                 <span className="min-w-0 flex-1">
                   <span className="block truncate font-medium">{f.name}</span>

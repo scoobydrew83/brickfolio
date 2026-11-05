@@ -93,7 +93,7 @@ export const TOOLS: Tool[] = [
       const s = await getSet(db, fullSetNo(str(a.setNo, 12)));
       if (!s) throw new Error(`Set ${str(a.setNo, 12)} isn't in the collection.`);
       const currency = await getCurrency(db);
-      const [prices, po, unpriced, missing] = await Promise.all([priceHistory(db, s.id), partout(db, s.id, guideCondition(s), currency), unpricedLots(db, s.id, guideCondition(s), currency), listMissing(db, s.id, pickCopy(s, null, false)?.id ?? null)]);
+      const [prices, po, unpriced, missing] = await Promise.all([priceHistory(db, s.setNo), partout(db, s.id, guideCondition(s), currency), unpricedLots(db, s.id, guideCondition(s), currency), listMissing(db, s.id, pickCopy(s, null, false)?.id ?? null)]);
       return {
         currency, ...brief(s), notes: s.notes,
         copyList: s.copies.map((c) => ({ id: c.id, status: c.status, condition: c.condition, location: c.location, missingPct: c.missingPct, acquired: c.acquiredDate, built: c.buildDate, costBasis: costBasis(c), giftWithPurchase: c.gwp, estValue: r2(c.estValue), pricedFrom: c.estGuide && c.estGuide !== copyGuide(c) ? (c.estGuide === 'U' ? 'used sales' : 'new sales') : null, notes: c.notes })),
