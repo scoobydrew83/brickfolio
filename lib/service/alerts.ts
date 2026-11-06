@@ -1,14 +1,17 @@
 // Wishlist alerts: one message when sets drop under your target price, sent to a webhook you configure.
 // ntfy (push to your phone), Discord, or any URL that accepts JSON. Off unless ALERT_WEBHOOK_URL is set.
-import { and, eq, isNotNull, isNull, lte, or, gt, sql } from 'drizzle-orm';
+import { and, eq, isNotNull, isNull, lte, or, gt } from 'drizzle-orm';
 import type { DB } from '../db/types';
 import { wishlist } from '../db/schema';
 import { displayNo, money } from '../sets';
 import { getCurrency } from './sets';
+import { bestOffers, type BestOffer } from './offers';
+import { sourceLabel } from './prices';
 import { isDemo } from '../demo';
 
 export type AlertFormat = 'ntfy' | 'discord' | 'json';
-export type AlertItem = { setNo: string; name: string; avgSold: number; target: number };
+/** One wish in an alert: under target on BrickLink's average sold price (`avgSold`) or on a retailer offer (`offer`). */
+export type AlertItem = { setNo: string; name: string; target: number; avgSold?: number; offer?: number; source?: string; url?: string | null };
 export type Alert = { title: string; message: string; url: string | null; items: AlertItem[] };
 export type Send = (alert: Alert) => Promise<void>;
 
@@ -48,31 +51,58 @@ export function alertsFromEnv(fetchImpl: typeof fetch = fetch): Send | null {
 }
 
 const under = and(isNotNull(wishlist.target), isNotNull(wishlist.avgSold), isNull(wishlist.blError), lte(wishlist.avgSold, wishlist.target));
+type Wish = typeof wishlist.$inferSelect;
 
-/** How many wishes are under target right now (for the nav badge). */
+/** Each wish's best recent offer in its own condition, in the collection currency, when it's at or under target. */
+async function offersUnderTarget(db: DB, wishes: Wish[], currency: string, now = new Date()): Promise<Map<number, BestOffer>> {
+  const withTarget = wishes.filter((w) => w.target != null);
+  const best = await bestOffers(db, withTarget.map((w) => w.setNo), { currency, now });
+  const out = new Map<number, BestOffer>();
+  for (const w of withTarget) {
+    const o = best.get(w.setNo)?.[w.condition === 'Used' ? 'U' : 'N'];
+    if (o && o.amount <= w.target!) out.set(w.id, o);
+  }
+  return out;
+}
+
+/** How many wishes are under target right now, on BrickLink's average or a recent offer (for the nav badge). */
 export async function underTargetCount(db: DB): Promise<number> {
-  const [{ n }] = await db.select({ n: sql<number>`count(*)` }).from(wishlist).where(under).all();
-  return Number(n);
+  const avg = new Set((await db.select({ id: wishlist.id }).from(wishlist).where(under).all()).map((r) => r.id));
+  const offers = await offersUnderTarget(db, await db.select().from(wishlist).all(), await getCurrency(db));
+  return new Set([...avg, ...offers.keys()]).size;
 }
 
 /**
- * Sends one alert for wishes that dropped under target since the last alert, and marks them. Wishes that went
- * back above target (or lost their price) are re-armed so a later drop alerts again. Returns an error message
- * instead of throwing, so a broken webhook never fails the sync.
+ * Sends one alert for wishes that went under target since their last alert, and marks them: on BrickLink's average
+ * sold price, or on a retailer offer from the last OFFER_MAX_AGE_DAYS (kept apart, so each alerts once). Wishes that
+ * went back above target, lost their price or whose offer ran out are re-armed so a later drop alerts again.
+ * Returns an error message instead of throwing, so a broken webhook never fails the sync.
  */
-export async function notifyUnderTarget(db: DB, send: Send): Promise<string | null> {
+export async function notifyUnderTarget(db: DB, send: Send, now = new Date()): Promise<string | null> {
   await db.update(wishlist).set({ alertedAt: null })
     .where(and(isNotNull(wishlist.alertedAt), or(isNull(wishlist.target), isNull(wishlist.avgSold), gt(wishlist.avgSold, wishlist.target))));
-  const fresh = await db.select().from(wishlist).where(and(under, isNull(wishlist.alertedAt))).all();
-  if (!fresh.length) return null;
   const currency = await getCurrency(db);
-  const items: AlertItem[] = fresh.map((w) => ({ setNo: displayNo(w.setNo), name: w.name ?? displayNo(w.setNo), avgSold: w.avgSold!, target: w.target! }));
-  const lines = items.map((i) => `${i.setNo} ${i.name}: average sold ${money(i.avgSold, currency)}, your target ${money(i.target, currency)}`);
+  const all = await db.select().from(wishlist).all();
+  const offers = await offersUnderTarget(db, all, currency, now);
+  for (const w of all) if (w.offerAlertedAt && !offers.has(w.id)) await db.update(wishlist).set({ offerAlertedAt: null }).where(eq(wishlist.id, w.id));
+
+  const fresh = await db.select().from(wishlist).where(and(under, isNull(wishlist.alertedAt))).all();
+  const freshOffers = all.filter((w) => offers.has(w.id) && !w.offerAlertedAt);
+  if (!fresh.length && !freshOffers.length) return null;
+  const name = (w: Wish) => w.name ?? displayNo(w.setNo);
+  const items: AlertItem[] = [
+    ...fresh.map((w): AlertItem => ({ setNo: displayNo(w.setNo), name: name(w), avgSold: w.avgSold!, target: w.target! })),
+    ...freshOffers.map((w): AlertItem => { const o = offers.get(w.id)!; return { setNo: displayNo(w.setNo), name: name(w), offer: o.amount, source: o.source, url: o.url, target: w.target! }; }),
+  ];
+  const lines = items.map((i) => i.offer != null
+    ? `${i.setNo} ${i.name}: ${sourceLabel(i.source!)} offer ${money(i.offer, currency)}, your target ${money(i.target, currency)}${i.url ? ` (${i.url})` : ''}`
+    : `${i.setNo} ${i.name}: average sold ${money(i.avgSold!, currency)}, your target ${money(i.target, currency)}`);
   const base = process.env.APP_URL?.replace(/\/$/, '');
+  const one = items.length === 1 ? items[0] : null;
   const alert: Alert = {
-    title: items.length === 1 ? `${items[0].name} is under your target` : `${items.length} wishlist sets are under your target`,
+    title: one ? (one.offer != null ? `${one.name}: ${sourceLabel(one.source!)} offer under your target` : `${one.name} is under your target`) : `${items.length} wishlist sets are under your target`,
     message: lines.join('\n'),
-    url: base ? `${base}/wishlist` : null,
+    url: one?.url ?? (base ? `${base}/wishlist` : null),
     items,
   };
   try {
@@ -80,7 +110,8 @@ export async function notifyUnderTarget(db: DB, send: Send): Promise<string | nu
   } catch (e) {
     return `Wishlist alert not sent: ${e instanceof Error ? e.message : String(e)}`;
   }
-  const at = new Date().toISOString();
+  const at = now.toISOString();
   for (const w of fresh) await db.update(wishlist).set({ alertedAt: at }).where(eq(wishlist.id, w.id));
+  for (const w of freshOffers) await db.update(wishlist).set({ offerAlertedAt: at }).where(eq(wishlist.id, w.id));
   return null;
 }

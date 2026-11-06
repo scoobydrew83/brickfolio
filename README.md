@@ -17,7 +17,7 @@ A self-hosted tracker for your brick-set collection: what you own, where it is, 
 - **Part-out value:** what a set would fetch sold as parts against its complete price, from BrickLink part prices. Once a set is priced, Missing % is weighted by what the missing parts are worth.
 - **Scan barcodes:** point your phone at the barcode on a box to find the set and add it, one at a time or a whole shelf in a row. It also reads the set number off the box, tells you which Collectible Minifigure is in a sealed box from its square code, and works offline. Works without any paid service; a shared community list and optional lookups identify boxes you haven't scanned before.
 - **Quick add:** paste a list of set and minifig numbers ("10497 x2") to add them all at once.
-- **Wishlist:** sets you want and the price you'd pay; Brickfolio tells you when one sells for less (in the app, or by ntfy, Discord or any webhook), and "Got it" moves it into your collection.
+- **Wishlist:** sets you want and the price you'd pay; Brickfolio tells you when one sells for less (in the app, or by ntfy, Discord or any webhook), or when a retailer offer your own flow posts is under your target, and "Got it" moves it into your collection.
 - **Parts:** every set's parts from BrickLink, searchable across the whole collection.
 - **Value vs. retail and a retirement watch** from Brickset (optional, free API key): each set's original price and your gain since, plus which sets you own or want are retiring soon.
 - **Themes, minifigs and "What can I build?"** from Rebrickable (optional, with a free API key): alternate builds of your sets ranked by how many of their parts you own, with a BrickLink Wanted List for the rest.
@@ -110,7 +110,7 @@ curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/jso
   -d '{"setNo":"10280","name":"Flower Bouquet","condition":"Used"}' https://your-host/api/v1/sets
 ```
 
-The full description is at `/api/v1/openapi.json` (OpenAPI 3.1): sets CRUD, bulk add, lookup, barcode lookup and scanned batches (`/api/v1/barcodes`), parts lists, part-out value, minifigures, the Retirement Radar, Designer Program projects, a valuation PDF (`/api/v1/report.pdf`), wishlist, sync, history, locations, store inventory, orders, import and export.
+The full description is at `/api/v1/openapi.json` (OpenAPI 3.1): sets CRUD, bulk add, lookup, barcode lookup and scanned batches (`/api/v1/barcodes`), parts lists, part-out value, minifigures, the Retirement Radar, Designer Program projects, a valuation PDF (`/api/v1/report.pdf`), wishlist, retailer offers for deal alerts (`/api/v1/prices`), sync, history, locations, store inventory, orders, import and export.
 
 ## Ask Claude (MCP)
 

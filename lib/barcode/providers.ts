@@ -4,6 +4,7 @@
 //
 // Brickset isn't one of them: its API has no barcode search. It does return each set's EAN and UPC, so the daily
 // Brickset sync saves those for sets you own or want (lib/service/retail.ts), and they scan without any call.
+import { safeHttpsUrl } from '../safe-url';
 import { upcOf, type Barcode } from './gtin';
 
 export type ProviderId = 'comparethebricks' | 'brickeconomy';
@@ -31,10 +32,7 @@ export function toSetNo(number: unknown, variant?: unknown): string | null {
 }
 
 /** Image links are shown, never fetched by the server: https only, and of a sane length. */
-export const safeImage = (v: unknown): string | null => {
-  const s = typeof v === 'string' ? v.trim() : '';
-  return /^https:\/\/[^\s"'<>]+$/i.test(s) && s.length <= 500 ? s : null;
-};
+export const safeImage = safeHttpsUrl;
 const text = (v: unknown, max = 120) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : null);
 const int = (v: unknown, max: number) => { const n = Number(v); return Number.isInteger(n) && n > 0 && n <= max ? n : null; };
 

@@ -30,6 +30,8 @@ export function parseSource(raw: unknown): string | null {
 export function sourceLabel(source: string): string {
   const known: Record<string, string> = { bricklink: 'BrickLink', brickowl: 'BrickOwl', brickeconomy: 'BrickEconomy', brickset: 'Brickset', manual: 'Manual' };
   if (known[source]) return known[source];
+  const retailers: Record<string, string> = { lego: 'LEGO.com', 'lego-com': 'LEGO.com', ebay: 'eBay' };
+  if (source.startsWith('retailer:') && retailers[source.slice(9)]) return retailers[source.slice(9)];
   return source.startsWith('retailer:') ? source.slice(9).split('-').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ') : source;
 }
 

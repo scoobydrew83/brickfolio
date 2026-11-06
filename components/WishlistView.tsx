@@ -23,7 +23,10 @@ function status(w: WishRow): Status {
   return { tone: 'neutral', label: `${Math.round(((w.avgSold - w.target) / w.target) * 100)}% above`, rank: 1 };
 }
 
-export default function WishlistView({ items, currency, priced }: { items: WishRow[]; currency: string; priced: boolean }) {
+export type WishOffer = { amount: number; label: string; url: string | null; observedAt: string };
+const ago = (iso: string) => { const d = Math.floor((Date.now() - Date.parse(iso)) / 86_400_000); return d <= 0 ? 'today' : d === 1 ? 'yesterday' : `${d} days ago`; };
+
+export default function WishlistView({ items, currency, priced, offers = {} }: { items: WishRow[]; currency: string; priced: boolean; offers?: Record<string, WishOffer> }) {
   const money = useMemo(() => moneyIn(currency), [currency]);
   const [editing, setEditing] = useState<WishRow | 'new' | null>(null);
   const [message, setMessage] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
@@ -77,8 +80,13 @@ export default function WishlistView({ items, currency, priced }: { items: WishR
                 {w.blError && <span className="block text-xs text-danger">{w.blError}</span>}
               </span>
               <span className="flex flex-col items-end gap-1 text-right">
-                <span className="text-lg font-extrabold tabular-nums [font-stretch:112%]">{money(w.avgSold)}</span>
+                <span className="text-lg font-extrabold tabular-nums [font-stretch:112%]" title="BrickLink average sold">{money(w.avgSold)}</span>
                 <Chip tone={s.tone}>{s.label}</Chip>
+                {offers[w.setNo] && (() => {
+                  const o = offers[w.setNo];
+                  const text = <>Offer <b className={cx('tabular-nums', w.target != null && o.amount <= w.target && 'text-ok')}>{money(o.amount)}</b> at {o.label}, {ago(o.observedAt)}</>;
+                  return <span className="text-xs text-fg-3">{o.url ? <a href={o.url} target="_blank" rel="noreferrer noopener" className="hover:text-link hover:underline">{text}</a> : text}</span>;
+                })()}
               </span>
               <span className="col-span-3 flex items-center justify-end gap-0.5 sm:col-span-1">
                 <Button size="sm" icon={Check} disabled={pending} onClick={() => act(() => acquireWish(w.setNo), `Added ${w.name ?? displayNo(w.setNo)} to your sets.`)}>Got it</Button>

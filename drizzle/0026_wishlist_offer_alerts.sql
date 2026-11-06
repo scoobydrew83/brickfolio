@@ -1,0 +1,1 @@
+ALTER TABLE `wishlist` ADD `offer_alerted_at` text;

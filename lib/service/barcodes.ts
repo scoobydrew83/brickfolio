@@ -1,9 +1,10 @@
 // Barcode writes: barcodes you confirm, corrections, and adding a batch of scanned sets. Adding goes through the
 // existing collection and wishlist services (quickAdd, addWish), so their rules apply unchanged.
-import { and, eq, lt, sql } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import type { Lookup, MinifigLookup } from '../bricklink/client';
 import type { DB } from '../db/types';
-import { barcodeMisses, idempotencyKeys, sets } from '../db/schema';
+import { barcodeMisses, sets } from '../db/schema';
+import { withIdempotency } from './idempotency';
 import { barcodeRows, forgetBarcodeLinks, saveBarcode } from '../identifiers/barcodes';
 import { parseBarcode, type BarcodeFormat } from '../barcode/gtin';
 import { CONDITIONS, placeholderName, setNo as fullSetNo, type Condition } from '../sets';
@@ -102,10 +103,6 @@ export function parseScanFigs(raw: unknown): { ok: true; figs: ScanFig[] } | { o
   return { ok: true, figs };
 }
 
-/** Keys are kept a day: long enough for any retry, short enough that the table stays tiny. */
-const KEY_HOURS = 24;
-const PENDING = '{"pending":true}';
-
 /**
  * Adds scanned sets: to the collection through quickAdd (a set you own gets more copies, as you confirmed on the
  * review screen) and to the wishlist through addWish. With a `key`, sending the same batch again returns the
@@ -115,16 +112,7 @@ export async function addScanned(
   db: DB, items: ScanItem[],
   opts: { key?: string | null; lookup: Lookup | null; minifig: MinifigLookup | null; figs?: ScanFig[] },
 ): Promise<Result<ScanAddResult>> {
-  const key = opts.key ? String(opts.key).slice(0, 100) : null;
-  if (key) {
-    await db.delete(idempotencyKeys).where(lt(idempotencyKeys.createdAt, new Date(Date.now() - KEY_HOURS * 3_600_000).toISOString()));
-    const claimed = await db.insert(idempotencyKeys).values({ key, result: PENDING }).onConflictDoNothing().returning({ key: idempotencyKeys.key }).all();
-    if (!claimed.length) {
-      const prev = await db.select().from(idempotencyKeys).where(eq(idempotencyKeys.key, key)).get();
-      if (!prev || prev.result === PENDING) return { ok: false, status: 409, error: 'This batch is already being saved.' };
-      return { ok: true, ...(JSON.parse(prev.result) as ScanAddResult), replayed: true };
-    }
-  }
+  return withIdempotency<ScanAddResult>(db, '', opts.key, async () => {
   try {
     const out: ScanAddResult = { added: 0, merged: 0, wished: 0, alreadyWished: 0, waiting: 0, figsAdded: 0, figsMerged: 0 };
     // quickAdd takes one condition and location per list, so group by them. Repeats of a set add up.
@@ -158,12 +146,11 @@ export async function addScanned(
       if (!r.ok) throw new Error(r.error);
       if (r.merged) out.figsMerged++; else out.figsAdded++;
     }
-    if (key) await db.update(idempotencyKeys).set({ result: JSON.stringify(out) }).where(eq(idempotencyKeys.key, key));
     return { ok: true, ...out };
   } catch (e) {
-    if (key) await db.delete(idempotencyKeys).where(eq(idempotencyKeys.key, key)); // nothing to replay: let a retry run
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }
+  });
 }
 
 /**

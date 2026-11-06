@@ -75,3 +75,40 @@ it('posts to the configured webhook', async () => {
   process.env.ALERT_WEBHOOK_URL = 'not a url';
   expect(alertsFromEnv()).toBeNull();
 });
+
+it('alerts once on a retailer offer under target, separately from the BrickLink price, and re-arms when it runs out', async () => {
+  const { recordPrice } = await import('./prices');
+  const offer = (amount: number, observedAt: string, o: { condition?: 'N' | 'U'; currency?: string; source?: string } = {}) =>
+    recordPrice(db, { itemKind: 'set', itemId: '75192-1', source: o.source ?? 'retailer:lego', type: 'offer', condition: o.condition ?? 'N', currency: o.currency ?? 'USD', amount, observedAt, url: 'https://www.lego.com/75192' });
+  const day = (d: string) => new Date(`2026-11-${d}T12:00:00Z`);
+  await wish('75192-1', 'Millennium Falcon', 650, 800); // BrickLink average stays above target
+  await offer(700, '2026-11-05T09:00:00Z'); // above target
+  await offer(500, '2026-11-05T09:00:00Z', { condition: 'U' }); // wrong condition for a New wish
+  await offer(500, '2026-11-05T09:00:00Z', { currency: 'EUR' }); // other currency
+  expect(await notifyUnderTarget(db, send, day('06'))).toBeNull();
+  expect(sent).toHaveLength(0);
+
+  await offer(599.99, '2026-11-06T09:00:00Z', { source: 'retailer:target' });
+  expect(await underTargetCount(db)).toBe(1);
+  await notifyUnderTarget(db, send, day('06'));
+  expect(sent).toHaveLength(1);
+  expect(sent[0]).toMatchObject({ title: 'Millennium Falcon: Target offer under your target', url: 'https://www.lego.com/75192', items: [{ setNo: '75192', offer: 599.99, source: 'retailer:target', target: 650 }] });
+  expect(sent[0].message).toBe('75192 Millennium Falcon: Target offer $599.99, your target $650.00 (https://www.lego.com/75192)');
+
+  await offer(550, '2026-11-06T10:00:00Z'); // lower, same day: no second alert
+  await notifyUnderTarget(db, send, day('06'));
+  expect(sent).toHaveLength(1);
+
+  // A BrickLink drop still alerts on its own.
+  await setPrice('75192-1', 640);
+  await notifyUnderTarget(db, send, day('06'));
+  expect(sent).toHaveLength(2);
+  expect(sent[1].items).toEqual([{ setNo: '75192', name: 'Millennium Falcon', avgSold: 640, target: 650 }]);
+
+  // Four days on, the offers are too old: re-armed, so a new offer alerts again.
+  await notifyUnderTarget(db, send, day('10'));
+  expect((await db.select().from(wishlist).get())!.offerAlertedAt).toBeNull();
+  await offer(620, '2026-11-10T09:00:00Z');
+  await notifyUnderTarget(db, send, day('10'));
+  expect(sent).toHaveLength(3);
+});

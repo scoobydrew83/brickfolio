@@ -1,0 +1,122 @@
+{
+  "name": "Brickfolio retailer offers",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 6
+            }
+          ]
+        }
+      },
+      "id": "2874ac90-1723-44b1-b532-ed504c88017c",
+      "name": "Every 6 hours",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://example.com/replace-with-a-deals-feed-you-may-use",
+        "options": {}
+      },
+      "id": "ddca5829-81cb-47e8-bf3d-764ec4bcaf92",
+      "name": "Fetch deals (replace me)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        220,
+        300
+      ],
+      "notes": "Replace with a source you're allowed to use: a retailer's public API or feed, or a Google Sheets node reading deals you type in. Don't scrape sites against their terms."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Turns each fetched deal into a Brickfolio price observation. Adapt the field names to your source.\n// Expected input per item (e.g. a Google Sheet row you fill in by hand): set, price, currency, url, retailer, condition.\nconst out = [];\nfor (const item of $input.all()) {\n  const d = item.json;\n  const set = String(d.set ?? d['Set'] ?? '').trim();\n  const price = Number(d.price ?? d['Price']);\n  if (!set || !(price > 0)) continue;\n  const retailer = String(d.retailer ?? d['Retailer'] ?? 'lego').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');\n  out.push({\n    kind: 'set',\n    id: set,                                  // 75192, 75192-1 or the box barcode\n    source: `retailer:${retailer}`,          // never bricklink, brickowl, brickeconomy or brickset\n    type: 'offer',\n    condition: String(d.condition ?? 'N').toUpperCase().startsWith('U') ? 'U' : 'N',\n    currency: String(d.currency ?? 'USD').toUpperCase(),\n    amount: Math.round(price * 100) / 100,\n    url: typeof d.url === 'string' && d.url.startsWith('https://') ? d.url : undefined,\n    observedAt: new Date().toISOString(),\n  });\n}\nreturn [{ json: { observations: out.slice(0, 200) } }];\n"
+      },
+      "id": "72a76d6d-cecf-434a-a828-e1960df66968",
+      "name": "To observations",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.BRICKFOLIO_URL }}/api/v1/prices",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Idempotency-Key",
+              "value": "={{ $workflow.id }}-{{ $now.toFormat('yyyyMMddHH') }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "2c94c0da-a87d-4fba-86de-776d12be4d67",
+      "name": "Post to Brickfolio",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        660,
+        300
+      ],
+      "notes": "Header Auth credential: name Authorization, value Bearer <API token from Brickfolio Settings \u2192 API tokens>. Set BRICKFOLIO_URL in n8n's environment, or type your address here."
+    }
+  ],
+  "connections": {
+    "Every 6 hours": {
+      "main": [
+        [
+          {
+            "node": "Fetch deals (replace me)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch deals (replace me)": {
+      "main": [
+        [
+          {
+            "node": "To observations",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "To observations": {
+      "main": [
+        [
+          {
+            "node": "Post to Brickfolio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}

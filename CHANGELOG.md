@@ -4,6 +4,14 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-11-06
+
+### Added
+- **Deal alerts from retailer offers:** `POST /api/v1/prices` takes offers your own flows find (n8n, a script, a spreadsheet), at most 200 per request with an `Idempotency-Key`. Ids can be set numbers or box barcodes; ones that don't match come back in `unresolved`. When the lowest offer from the last `OFFER_MAX_AGE_DAYS` (default 3) for a wish, in its condition and your currency, is at or under your target, the wishlist webhook alerts once, naming the retailer and linking to the offer, and again only after it re-arms. The Wishlist page shows the best offer. Offers never change Est. Value. The sources the app syncs itself can't be posted. Example n8n flow: `docs/examples/n8n-retailer-offers.json`. `GET /api/v1/prices` lists stored rows for checking a flow.
+
+### Changed
+- The scanner's batch add and the new prices endpoint share one idempotency helper (`lib/service/idempotency.ts`).
+
 ## [0.11.0] - 2026-11-06
 
 **Before upgrading, back up your database.** One migration drops the old `sets` columns `qty`, `condition`, `location` and `missing_pct`, unused since 0.9.0 moved them to copies. It changes the table in place; your sets, copies and prices are kept.

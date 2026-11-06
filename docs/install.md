@@ -120,6 +120,20 @@ With a Brickset key, the same webhook also warns once when a wishlist set will r
 
 Watched BrickLink Designer Program projects (Radar → Designer Program) alert `DESIGNER_ALERT_DAYS` days before their pre-order opens (default 7; `0` turns it off) and 3 days before it closes.
 
+**Deal alerts from retailer offers.** Your own flow (n8n, a script, a spreadsheet) can post offers it finds to `POST /api/v1/prices`. When the lowest recent offer for a wish, in its condition and your currency, is at or under your target, the same webhook alerts once, naming the retailer and linking to the offer. The Wishlist page shows the best offer next to the BrickLink price. Offers count for `OFFER_MAX_AGE_DAYS` (default 3) and never change Est. Value. Brickfolio doesn't scrape stores; feed it only from sources you're allowed to use.
+
+1. Create a token in **Settings → API tokens**.
+2. Post a batch (at most 200) with an `Idempotency-Key` header, so a retried run doesn't post twice:
+   ```bash
+   curl -X POST https://your-host/api/v1/prices -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+     -H "Idempotency-Key: deals-2026-11-06-12" \
+     -d '{"observations":[{"id":"75192","source":"retailer:lego","type":"offer","condition":"N","currency":"USD","amount":599.99,"url":"https://www.lego.com/…"}]}'
+   ```
+   `id` can be a set number (`75192` or `75192-1`) or the box barcode. `source` is `retailer:<name>` or `manual`; the sources the app syncs itself (BrickLink, Brickset and so on) are refused. The answer lists ids it couldn't match in `unresolved`.
+3. For n8n, import `docs/examples/n8n-retailer-offers.json`: a schedule, a placeholder for your deals source, a step that maps rows to observations, and the post. Add a Header Auth credential (`Authorization`, `Bearer <token>`) to the last step.
+
+`GET /api/v1/prices?id=75192&type=offer&days=14` lists what was stored, to check a flow.
+
 Set `APP_URL` to your Brickfolio address so alerts link back to the wishlist. Settings → About this server shows whether alerts are on.
 
 ### Optional: ask Claude about your collection (MCP)

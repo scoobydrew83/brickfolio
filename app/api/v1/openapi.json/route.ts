@@ -74,6 +74,16 @@ const spec = {
         description: 'BrickLink new vs. used sold averages. Null unless both have sales, in one currency, priced within 30 days of each other.',
         properties: { n: { type: 'number' }, u: { type: 'number' }, diff: { type: 'number' }, pct: { type: 'number', description: 'How much more new sells for, in %' }, nDate: { type: 'string', format: 'date' }, uDate: { type: 'string', format: 'date' }, nSample: nullable('integer'), uSample: nullable('integer') },
       },
+      PriceObservationInput: {
+        type: 'object', required: ['id', 'source', 'currency', 'amount'],
+        properties: {
+          kind: { enum: ['set', 'minifig'], default: 'set' }, id: { type: 'string', description: '75192, 75192-1, a box barcode, or an id in `scheme`' },
+          scheme: { enum: ['bricklink', 'lego', 'gtin', 'brickset', 'rebrickable'] }, source: { type: 'string', description: 'retailer:<name> or manual' },
+          type: { enum: ['offer', 'retail'], default: 'offer' }, condition: { enum: ['N', 'U'], default: 'N' }, currency: { type: 'string', pattern: '^[A-Za-z]{3}$' },
+          amount: { type: 'number', exclusiveMinimum: 0, maximum: 1000000 }, url: { type: 'string', description: 'https, at most 500 characters' },
+          observedAt: { type: 'string', format: 'date-time', description: 'Not in the future, at most 30 days old; default now' }, sampleSize: { type: 'integer' }, sourceRef: { type: 'string' },
+        },
+      },
       PriceObservation: {
         type: 'object',
         description: 'One price from one source on one day. Sources: bricklink, brickowl, brickeconomy, brickset, manual or retailer:<slug>.',
@@ -251,6 +261,23 @@ const spec = {
     },
     '/barcodes/export': {
       get: { summary: 'Your own confirmed barcodes and minifigure box codes in the community list format (CC0), for sharing. Codes and names only.', responses: { 200: ok({ type: 'object', properties: { license: { type: 'string' }, sets: { type: 'array', items: { type: 'object' } }, minifigs: { type: 'array', items: { type: 'object' } } } }) } },
+    },
+    '/prices': {
+      post: {
+        summary: 'Post retailer offers (or retail prices) found by your own flows, at most 200. Wishlist alerts follow when an offer is at or under target. Sources bricklink, brickowl, brickeconomy and brickset are refused. Send an Idempotency-Key header: the same key again returns the first answer with `replayed: true`.',
+        parameters: [{ name: 'Idempotency-Key', in: 'header', required: true, schema: { type: 'string', maxLength: 100 } }],
+        requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['observations'], properties: { observations: { type: 'array', maxItems: 200, items: ref('PriceObservationInput') } } } } } },
+        responses: { 201: ok({ type: 'object', properties: { saved: { type: 'integer' }, unresolved: { type: 'array', items: { type: 'object', properties: { index: { type: 'integer' }, id: { type: 'string' } } } }, replayed: { type: 'boolean' } } }, 'Saved'), 400: err, 409: err },
+      },
+      get: {
+        summary: 'Stored prices for one item, newest first',
+        parameters: [
+          { name: 'id', in: 'query', required: true, schema: { type: 'string' } }, { name: 'kind', in: 'query', schema: { enum: ['set', 'minifig'] } },
+          { name: 'type', in: 'query', schema: { enum: ['sold_avg', 'asking', 'estimate', 'retail', 'offer'] } }, { name: 'source', in: 'query', schema: { type: 'string' } },
+          { name: 'days', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 365, default: 14 } },
+        ],
+        responses: { 200: ok({ type: 'object', properties: { observations: { type: 'array', items: ref('PriceObservation') } } }), 400: err },
+      },
     },
     '/barcodes/batch': {
       post: {

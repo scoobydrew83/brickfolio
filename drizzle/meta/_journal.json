@@ -183,6 +183,13 @@
       "when": 1793858366205,
       "tag": "0025_drop_legacy_set_columns",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "6",
+      "when": 1793934570798,
+      "tag": "0026_wishlist_offer_alerts",
+      "breakpoints": true
     }
   ]
 }

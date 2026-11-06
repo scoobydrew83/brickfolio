@@ -276,6 +276,7 @@ export const wishlist = sqliteTable(
     blError: text('bl_error'),
     lastUpdated: text('last_updated'),
     alertedAt: text('alerted_at'), // when an "under target" alert was sent; cleared when it goes back above
+    offerAlertedAt: text('offer_alerted_at'), // the same for a retailer offer under target (POST /api/v1/prices)
     retireAlertedAt: text('retire_alerted_at'), // when a "retires soon" alert was sent; cleared if the date moves away
     // Filled in by the optional Brickset sync: original retail price and availability
     retailPrice: real('retail_price'),
