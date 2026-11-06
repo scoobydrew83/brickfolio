@@ -87,6 +87,7 @@ export default function Settings({ locations, currency, valueSource, tokens, sha
           <label className="text-sm">Name on the report <span className="text-fg-3">(optional)</span>
             <input name="owner" maxLength={80} placeholder="Your name" className={`${field} w-56`} />
           </label>
+          <label className="flex items-center gap-2 pb-2 text-sm"><input type="checkbox" name="photos" value="1" /> Include photos</label>
           <Button type="submit">Download PDF</Button>
         </form>
       </section>
@@ -283,7 +284,7 @@ function BarcodeSection({ status: { caps, saved, community } }: { status: Barcod
             {caps.brickset ? 'The Brickset sync also saves the barcodes of sets you own or want.' : <>With {code('BRICKSET_API_KEY')} set, the Brickset sync also saves the barcodes of sets you own or want.</>}
           </p>
           <p className="text-sm text-fg-3">
-            Optional keys: {code('COMPARETHEBRICKS_API_KEY')} (free key, 250 lookups a day) and {code('BRICKECONOMY_API_KEY')}. Order with {code('BARCODE_PROVIDERS')}. See docs/install.md. Only the barcode is sent, never anything about your collection.
+            Optional keys: {code('COMPARETHEBRICKS_API_KEY')} (free key, 250 lookups a day) and {code('BRICKECONOMY_API_KEY')} (needs BrickEconomy Premium; unverified). Order with {code('BARCODE_PROVIDERS')}. See docs/install.md. Only the barcode is sent, never anything about your collection.
           </p>
           <p className="text-sm text-fg-3">
             Minifigure boxes are recognised from their square code using the fan-collected L-Scan table, the community list and the codes you confirm.

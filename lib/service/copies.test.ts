@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { eq } from 'drizzle-orm';
 import type { Lookup } from '../bricklink/client';
 import { openNodeDb } from '../db/node';
-import { priceObservations, sets } from '../db/schema';
+import { priceObservations } from '../db/schema';
 import { recordPrice } from './prices';
 import type { DB } from '../db/types';
 import { addCopy, editCopy, ownedSummary, removeCopy, repriceCopies } from './copies';
@@ -65,8 +65,8 @@ describe('copies', () => {
     await svc.addSet(db, { setNo: '10280-1', name: 'x', condition: 'New' }, { lookup });
     await addCopy(db, '10280-1', { status: 'built' }, lookup); // 1 sealed, 1 built: tie → U, so it looks up again
     expect(calls).toEqual(['10280-1:N', '10280-1:U']);
-    await addCopy(db, '10280-1', { status: 'sealed' }, lookup); // 2 sealed vs 1 built → N
-    expect(calls.at(-1)).toBe('10280-1:N');
+    await addCopy(db, '10280-1', { status: 'sealed' }, lookup); // 2 sealed vs 1 built → N, already priced today
+    expect(calls).toEqual(['10280-1:N', '10280-1:U']); // no new lookup: today's N price is still fresh
     // Each guide keeps its own row per day, so the built copy is still valued from today's used sales.
     expect((await get()).copies.map((c) => c.estGuide)).toEqual(['N', 'U', 'N']);
   });
@@ -106,7 +106,5 @@ describe('copies', () => {
     expect(await svc.deleteLocation(db, 'Storage')).toMatchObject({ ok: false, error: '2 copies still use Storage. Move them first.' });
     expect(await svc.renameLocation(db, 'Storage', 'Vault')).toEqual({ ok: true });
     expect((await get()).copies.map((c) => c.location)).toEqual(['Vault', 'Vault', 'Display']);
-    // The set row's own legacy columns aren't used any more.
-    expect((await db.select({ qty: sets.qty }).from(sets).get())!.qty).toBe(1);
   });
 });

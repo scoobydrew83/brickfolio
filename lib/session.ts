@@ -36,6 +36,8 @@ export const bricklink = () => blClient()?.lookup ?? null;
 export const brickMinifig = () => blClient()?.minifig ?? null;
 /** Part sold prices (part-out value), or null when the BrickLink keys aren't set. */
 export const brickPartPrice = () => blClient()?.partPrice ?? null;
+/** One sold price guide (1 call): the other condition's prices for the new vs. used gap. Null without BrickLink keys. */
+export const brickPrice = () => blClient()?.price ?? null;
 /** Fetches BrickLink color names, or null when the keys aren't set. */
 export const brickColors = () => blClient()?.colors ?? null;
 /** Your BrickLink store's inventory and orders, or null when the keys aren't set. */

@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import type { Lookup } from '../bricklink/client';
+import type { Lookup, PriceLookup } from '../bricklink/client';
+import { eq } from 'drizzle-orm';
+import { priceObservations } from '../db/schema';
 import { openNodeDb } from '../db/node';
 import type { DB } from '../db/types';
 import * as svc from './sets';
@@ -88,6 +90,42 @@ describe('sync', () => {
     expect(h).toMatchObject({ sets: 2, copies: 2, estValue: 20 });
     expect((await svc.priceHistory(db, '10280-1')).length).toBe(1);
     expect((await svc.startSync(db)).ok).toBe(true); // lock released
+  });
+
+  it('stops BrickLink lookups when the daily limit is used up, and says so', async () => {
+    for (const no of ['10280-1', '10497-1', '21325-1']) await add(no);
+    const { BrickLinkError, QUOTA_MESSAGE } = await import('../bricklink/client');
+    const seen: string[] = [];
+    const limited: Lookup = async (no) => { seen.push(no); throw new BrickLinkError(QUOTA_MESSAGE, 'quota'); };
+    const s = await svc.startSync(db);
+    if (!s.ok) throw new Error(s.error);
+    await svc.runSync(db, s.runId, limited);
+    expect(seen).toHaveLength(1); // not once per set
+    expect(await svc.syncStatus(db)).toMatchObject({ running: false, errors: 1, message: expect.stringContaining('daily limit') });
+    expect(await svc.listHistory(db)).toHaveLength(1); // the rest of the sync still ran
+  });
+
+  it('fetches the other guide after the primary lookups, one price call each, or not at all when turned off', async () => {
+    await add('10280-1');
+    calls.length = 0;
+    const price: PriceLookup = async (_t, no, guide) => { calls.push(`price ${no}:${guide}`); return { avgSold: 40, minSold: 30, maxSold: 50, qtySold: 3 }; };
+    let s = await svc.startSync(db);
+    if (!s.ok) throw new Error(s.error);
+    await svc.runSync(db, s.runId, lookup, undefined, undefined, undefined, { price });
+    expect(calls).toEqual(['10280-1:U', 'price 10280-1:N']);
+    expect((await svc.priceHistory(db, '10280-1')).map((p) => p.guide).sort()).toEqual(['N', 'U']);
+
+    process.env.OTHER_GUIDE_DAILY_CALLS = '0';
+    try {
+      calls.length = 0;
+      await db.delete(priceObservations).where(eq(priceObservations.condition, 'N'));
+      s = await svc.startSync(db);
+      if (!s.ok) throw new Error(s.error);
+      await svc.runSync(db, s.runId, lookup, undefined, undefined, undefined, { price });
+      expect(calls).toEqual(['10280-1:U']);
+    } finally {
+      delete process.env.OTHER_GUIDE_DAILY_CALLS;
+    }
   });
 
   it('refreshes the store after the sets and records store errors on the run', async () => {

@@ -5,7 +5,7 @@ import { openNodeDb } from '../db/node';
 import type { DB } from '../db/types';
 import { clean, pdfMoney, valuationPdf } from '../report/pdf';
 import { addMinifig } from './minifigs';
-import { valuation } from './report';
+import { reportPhotos, valuation } from './report';
 import * as svc from './sets';
 
 let db: DB;
@@ -43,4 +43,28 @@ it('keeps text and money printable in Helvetica', () => {
   expect(pdfMoney(1234.5, 'EUR')).toBe('€1,234.50');
   expect(pdfMoney(1234.5, 'INR')).toBe('INR 1,234.50');
   expect(pdfMoney(null, 'USD')).toBe('-');
+});
+
+it('adds photos to the lines when asked: PNG and JPEG only, each fetched once', async () => {
+  await svc.addSet(db, { setNo: '10497-1', name: 'Galaxy Explorer', condition: 'New', location: 'Display', qty: 2 }, { lookup });
+  await addMinifig(db, { figNo: 'sw0001', location: 'Display' }, { lookup: fig });
+  const v = await valuation(db);
+  const png = Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='), (c) => c.charCodeAt(0)).buffer;
+  const asked: string[] = [];
+  const photos = await reportPhotos([...v.lines, ...v.lines], async (kind, ref) => {
+    asked.push(`${kind}:${ref}`);
+    return kind === 'set' ? { body: png, type: 'image/png' } : { body: png, type: 'image/webp' };
+  });
+  expect(asked.sort()).toEqual(['minifig:sw0001', 'set:10497-1']); // once each, by the full number
+  expect([...photos.keys()]).toEqual(['set:10497-1']); // a PDF can't hold WebP
+
+  const withPhotos = await valuationPdf(v, { photos });
+  const text = new TextDecoder('latin1').decode(withPhotos);
+  expect(text).toMatch(/\/Subtype\s*\/Image/);
+  expect(new TextDecoder('latin1').decode(await valuationPdf(v))).not.toMatch(/\/Subtype\s*\/Image/);
+  // Taller rows: a big collection needs more pages with photos.
+  for (let i = 0; i < 60; i++) await svc.addSet(db, { setNo: `${70000 + i}-1`, name: `Set ${i}`, condition: 'Used' }, { lookup: null });
+  const big = await valuation(db);
+  const pages = async (o?: Parameters<typeof valuationPdf>[1]) => (await PDFDocument.load(await valuationPdf(big, o))).getPageCount();
+  expect(await pages({ photos })).toBeGreaterThan(await pages());
 });

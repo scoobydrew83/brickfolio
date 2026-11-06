@@ -8,11 +8,10 @@ import { partPrices, setMissingParts, setParts, sets } from '../db/schema';
 import type { DB } from '../db/types';
 import { isActive, priceGuide, setGuide, type Condition } from '../sets';
 import { copiesBySet } from './sets';
+import { DAILY_LIMIT, RESERVE } from './budget';
 
 const NO_COLOR = -1;
 const TTL_DAYS = 30;
-const DAILY_LIMIT = 5000; // BrickLink's daily API limit
-const RESERVE = 500; // calls left unused for adding sets by hand during the day
 
 /** PARTOUT_DAILY_CALLS: most part prices fetched per daily sync (default 1,500; 0 turns part-out pricing off). */
 export const partoutDailyCalls = () => {

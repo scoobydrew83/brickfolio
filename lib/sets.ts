@@ -445,3 +445,19 @@ export function parseQuickList(text: string): QuickList {
   const room = Math.max(0, QUICK_MAX - all.length);
   return { sets: all.slice(0, QUICK_MAX), minifigs: mf.slice(0, room), invalid: [...invalid, ...all.slice(QUICK_MAX).map((s) => s.setNo), ...mf.slice(room).map((f) => f.figNo)] };
 }
+
+/** One side of the new vs. used gap: a BrickLink sold average. */
+export type GuideObs = { amount: number | null; currency: string; observedOn: string; sampleSize: number | null };
+export type ConditionGap = { n: number; u: number; diff: number; pct: number; nDate: string; uDate: string; nSample: number | null; uSample: number | null };
+const GAP_DAYS = 30;
+
+/**
+ * How much more a set sells for new than used. Null unless both sides have sales, are in the same currency and
+ * were priced within 30 days of each other.
+ */
+export function conditionGap(n: GuideObs | null | undefined, u: GuideObs | null | undefined): ConditionGap | null {
+  if (!n || !u || n.amount == null || u.amount == null || !(u.amount > 0) || n.currency !== u.currency) return null;
+  if (Math.abs(Date.parse(n.observedOn) - Date.parse(u.observedOn)) > GAP_DAYS * 86_400_000) return null;
+  const diff = Math.round((n.amount - u.amount) * 100) / 100;
+  return { n: n.amount, u: u.amount, diff, pct: Math.round((diff / u.amount) * 1000) / 10, nDate: n.observedOn, uDate: u.observedOn, nSample: n.sampleSize, uSample: u.sampleSize };
+}

@@ -8,6 +8,7 @@ import { getCurrency, listSets, syncStatus } from './sets';
 export type ReportLine = {
   kind: 'set' | 'minifig';
   no: string; // display number: 10497, sw0001
+  ref: string; // the number photos are looked up by: 10497-1, sw0001, fig-000123
   name: string;
   year: number | null;
   condition: string | null;
@@ -46,12 +47,12 @@ export async function valuation(db: DB, opts: { owner?: string | null } = {}): P
   };
   const lines: ReportLine[] = [
     ...sets.flatMap(groups).map((s): ReportLine => ({
-      kind: 'set', no: displayNo(s.setNo), name: s.name, year: s.year, condition: s.condition, missingPct: s.missingPct, qty: s.qty,
+      kind: 'set', no: displayNo(s.setNo), ref: s.setNo, name: s.name, year: s.year, condition: s.condition, missingPct: s.missingPct, qty: s.qty,
       location: s.location, each: s.estValue, total: s.valueTotal, sales: s.qtySold,
       pricedAt: day(s.lastUpdated), retail: s.retailPrice && s.retailCurrency === currency ? s.retailPrice : null,
     })),
     ...figs.map((m): ReportLine => ({
-      kind: 'minifig', no: m.figNo ?? m.rbFigNo ?? '', name: m.name, year: m.year, condition: m.condition, missingPct: null, qty: m.qty,
+      kind: 'minifig', no: m.figNo ?? m.rbFigNo ?? '', ref: m.figNo ?? m.rbFigNo ?? '', name: m.name, year: m.year, condition: m.condition, missingPct: null, qty: m.qty,
       location: m.location, each: m.estValue, total: m.estValue == null ? null : round(m.estValue * m.qty), sales: m.qtySold,
       pricedAt: day(m.lastUpdated), retail: null,
     })),
@@ -79,4 +80,21 @@ export async function valuation(db: DB, opts: { owner?: string | null } = {}): P
     lines,
     partialWithParts: sets.reduce((t, s) => t + s.copies.filter((c) => isActive(c) && c.condition === 'Partial' && c.missingMarked).length, 0),
   };
+}
+
+/** Photos for the report's lines, by `${kind}:${ref}`: from the image cache, fetched once if missing. PNG and JPEG only (what a PDF can hold). */
+export async function reportPhotos(lines: Pick<ReportLine, 'kind' | 'ref'>[], get: (kind: 'set' | 'minifig', ref: string) => Promise<{ body: ArrayBuffer; type: string } | null>, opts: { max?: number; concurrency?: number } = {}): Promise<Map<string, { body: ArrayBuffer; type: string }>> {
+  const keys = [...new Set(lines.filter((l) => l.ref).map((l) => `${l.kind}:${l.ref}`))].slice(0, opts.max ?? 1000);
+  const out = new Map<string, { body: ArrayBuffer; type: string }>();
+  let next = 0;
+  const worker = async () => {
+    while (next < keys.length) {
+      const k = keys[next++];
+      const [kind, ref] = [k.slice(0, k.indexOf(':')) as 'set' | 'minifig', k.slice(k.indexOf(':') + 1)];
+      const img = await get(kind, ref).catch(() => null);
+      if (img && (img.type === 'image/png' || img.type === 'image/jpeg')) out.set(k, img);
+    }
+  };
+  await Promise.all(Array.from({ length: opts.concurrency ?? 4 }, worker));
+  return out;
 }

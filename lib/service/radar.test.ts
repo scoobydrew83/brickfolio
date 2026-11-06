@@ -44,10 +44,14 @@ it('groups upcoming retirements by month and ranks retired sets by growth', asyn
   await upd('21325-1', { exitDate: '2025-11-01', retired: true, retailPrice: 180, retailCurrency: 'USD' });
   await upd('910001-1', { exitDate: '2026-01-01', retired: true, themeId: 2, retailPrice: 150, retailCurrency: 'USD' });
   await recordPrice(db, { itemKind: 'set', itemId: '10305-1', source: 'bricklink', type: 'sold_avg', condition: 'N', currency: 'USD', amount: 120, observedOn: '2024-11-05' });
+  await recordPrice(db, { itemKind: 'set', itemId: '10305-1', source: 'bricklink', type: 'sold_avg', condition: 'U', currency: 'USD', amount: 150 }); // today, next to N 200
   await wish.addWish(db, { setNo: '10316-1', name: 'Rivendell', target: 430 }, null);
   await db.update(wishlist).set({ exitDate: '2026-12-15' });
 
   const r = await getRadar(db, TODAY);
+  expect(r.retired.find((i) => i.setNo === '10305-1')!.gapPct).toBe(33.3); // new 200 over used 150
+  expect(r.retired.find((i) => i.setNo === '21325-1')!.gapPct).toBeNull(); // no used price
+  expect(r.totals.medianGap).toBe(33.3);
   expect(r.retiring).toHaveLength(1);
   expect(r.retiring[0]).toMatchObject({ month: '2026-12' });
   expect(r.retiring[0].items.map((i) => [i.kind, i.setNo])).toEqual([['wish', '10316-1'], ['set', '10497-1']]);

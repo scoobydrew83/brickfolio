@@ -34,7 +34,7 @@ export default function RadarView({ radar, projects, hasBrickset }: { radar: Rad
         <>
           <section aria-label="Summary" className="grid grid-cols-2 gap-3 lg:grid-cols-4">
             <Stat label="Retiring within 6 months" value={String(t.retiringSoon)} note={t.wishesRetiringSoon ? `${t.wishesRetiringSoon} on your wishlist` : 'Owned and wished'} />
-            <Stat label="Retired sets you own" value={String(t.retiredOwned)} note={`Est. Value ${money(t.retiredValue)}`} />
+            <Stat label="Retired sets you own" value={String(t.retiredOwned)} note={`Est. Value ${money(t.retiredValue)}${t.medianGap != null ? ` · new sells ${pct(t.medianGap)} over used (median, with retiring sets)` : ''}`} />
             <Stat label="Median growth since retiring" value={t.medianGrowth == null ? '—' : `${pct(t.medianGrowth)}/yr`} note="Per year, over retired sets with a starting price" />
             <Stat label="Designer Program · SMART Play" value={`${t.flagged.designer} · ${t.flagged.smart}`} note="Sets and wishes in these lines" />
           </section>
@@ -91,6 +91,7 @@ function Row({ i, money, today }: { i: RadarItem; money: Money; today: string })
             ? <span>Retired{i.exitDate ? ` ${i.exitDate}` : ''}</span>
             : days != null && <span className={cx(days <= 60 && 'font-semibold text-warn')}>Retires {i.exitDate} · in {days} day{days === 1 ? '' : 's'}</span>}
           {i.retailPrice != null && <span>· Retail {moneyIn(i.retailCurrency ?? 'USD')(i.retailPrice)}</span>}
+          {i.gapPct != null && <span title="BrickLink new sold average against used">· New over used {pct(i.gapPct)}</span>}
         </span>
       </span>
       <span className="text-right">

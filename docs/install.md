@@ -83,7 +83,7 @@ Brickfolio finds the set for a barcode, in this order:
 1. **Barcodes it already knows:** ones you've confirmed, and the EAN and UPC that the Brickset sync saves for sets you own or want (with `BRICKSET_API_KEY`). Brickset has no barcode search, so it can't identify a box you don't have yet.
 2. **A lookup service**, if you've set one up:
    - **[CompareTheBricks](https://comparethebricks.com/en-us/api-access/):** free key (250 lookups a day). Set `COMPARETHEBRICKS_API_KEY`.
-   - **[BrickEconomy](https://www.brickeconomy.com/api-reference):** paid key. Set `BRICKECONOMY_API_KEY`. Its barcode search isn't in its public docs, so treat this one as experimental.
+   - **[BrickEconomy](https://www.brickeconomy.com/api-reference):** needs a BrickEconomy Premium subscription for the key. Set `BRICKECONOMY_API_KEY`. **Unverified:** the API reference is only visible to Premium members, so this lookup was written without it and hasn't been tested with a real key. It may not work.
    - `BARCODE_PROVIDERS` sets the order (default `comparethebricks,brickeconomy`). `BARCODE_PROVIDER_TIMEOUT_MS` caps each call (default 5000).
 3. **The community list:** barcodes other Brickfolio users confirmed and a maintainer reviewed, downloaded in the daily sync (see below).
 4. **You:** for a box nobody knows, type the set number (or use **Read the set number**) once and Brickfolio remembers the barcode.
@@ -106,7 +106,7 @@ To contribute, use **Settings → Barcode scanning → Share my codes**. It expo
 
 ### Part-out value and BrickLink's daily limit
 
-A set's page shows what it would fetch sold as parts. Each part's price is one BrickLink call, kept for 30 days and shared by every set that uses the part. The daily sync prices parts with what's left of the 5,000 calls a day after sets, minifigs and the wishlist (2 calls each), keeping 500 spare and fetching at most `PARTOUT_DAILY_CALLS` (default 1,500; `0` turns it off). Most valuable sets go first. **Price parts now** on a set's page prices that set straight away.
+A set's page shows what it would fetch sold as parts. Each part's price is one BrickLink call, kept for 30 days and shared by every set that uses the part. The daily sync shares BrickLink's 5,000 calls a day, keeping 500 spare, in this order: sets, minifigs and the wishlist (2 calls each), your store, then the other condition's price guide for each set (1 call each, about weekly; at most `OTHER_GUIDE_DAILY_CALLS`, by default your number of sets ÷ 7 plus 10, up to 1,000; `0` turns it off), then part prices with what's left (at most `PARTOUT_DAILY_CALLS`, default 1,500; `0` turns it off). The other guide gives each set's page and the Radar BrickLink's new and used prices side by side, and values a built copy of a mostly sealed set (or the other way round) from its own condition. Most valuable sets go first. **Price parts now** on a set's page prices that set straight away.
 
 ### Optional: wishlist alerts
 

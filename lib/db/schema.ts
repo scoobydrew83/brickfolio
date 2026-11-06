@@ -11,11 +11,7 @@ export const sets = sqliteTable(
     id: integer('id').primaryKey({ autoIncrement: true }),
     setNo: text('set_no').notNull(), // normalized, always with suffix: 10280-1
     name: text('name').notNull(),
-    location: text('location'), // legacy, replaced by set_copies; dropped in a later release
-    condition: text('condition', { enum: ['New', 'Used', 'Partial'] }), // legacy, replaced by set_copies; dropped in a later release
     registered: text('registered'),
-    missingPct: real('missing_pct'), // legacy, replaced by set_copies; dropped in a later release
-    qty: integer('qty').notNull().default(1), // legacy, replaced by set_copies; dropped in a later release
     notes: text('notes'),
     // Filled in by the BrickLink lookup
     blName: text('bl_name'),

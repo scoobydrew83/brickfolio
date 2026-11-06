@@ -13,6 +13,7 @@ A self-hosted tracker for your brick-set collection: what you own, where it is, 
 - **Valuation report:** a PDF for insurance, with every item's value, where the price came from and when, and totals by location.
 - **Ask Claude:** a built-in MCP server (`/api/mcp`) lets Claude and other assistants answer questions about your collection, read-only.
 - **Minifigures:** loose figures as items of their own, priced from BrickLink, plus a Collectible Minifigures checklist per series (Rebrickable).
+- **New vs. used:** each set's page shows BrickLink's new and used sold prices side by side and how much more new sells for; the Radar shows it per set and as a median. Built and sealed copies are each valued from their own condition.
 - **Part-out value:** what a set would fetch sold as parts against its complete price, from BrickLink part prices. Once a set is priced, Missing % is weighted by what the missing parts are worth.
 - **Scan barcodes:** point your phone at the barcode on a box to find the set and add it, one at a time or a whole shelf in a row. It also reads the set number off the box, tells you which Collectible Minifigure is in a sealed box from its square code, and works offline. Works without any paid service; a shared community list and optional lookups identify boxes you haven't scanned before.
 - **Quick add:** paste a list of set and minifig numbers ("10497 x2") to add them all at once.
@@ -79,7 +80,7 @@ In Sheets, use **File → Download → Comma-separated values** on the Sets, His
 - **Parts:** open a set's parts list from its card, or search every set's parts on the Parts page (e.g. which sets have a given part).
 - **Radar:** upcoming retirements by month and growth since retiring. Rates marked * start from the retail price or a short price history.
 - **Designer Program:** on the Radar page. **Follow a project**, add its pre-order dates, and the bell turns its alerts on or off.
-- **Valuation report:** **Settings → Valuation report** downloads the PDF.
+- **Valuation report:** **Settings → Valuation report** downloads the PDF. Tick **Include photos** for a small photo on every line (from the image cache; it takes longer the first time).
 - **Minifigs:** the switch above the Sets page. Add figures by BrickLink number, or pick a Collectible Minifigures series and tick off the ones you have.
 - **Part-out value:** on a set's page, under its value. **Price parts now** fetches that set's part prices; the daily sync prices the rest with leftover BrickLink calls.
 - **Scan:** **Scan** on the Sets page (or the barcode icon in the header on a phone). **One at a time** to check each box, **Many in a row** to work through a shelf and add the list at once. **Minifigures** reads the square code on Collectible Minifigures boxes. **Read the set number** reads it off the box front. An unknown box asks for its set number once. Offline, scans and adds wait on the phone. See [the install guide](docs/install.md#optional-barcode-scanning).

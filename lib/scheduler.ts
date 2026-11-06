@@ -35,7 +35,7 @@ async function maybeSync() {
   const last = await syncStatus(db);
   if (last && new Date(last.startedAt).toLocaleDateString('en-CA', { timeZone: process.env.TZ || undefined }) === today()) return;
   const s = await startSync(db);
-  if (s.ok) await runSync(db, s.runId, bl.lookup, bl.store, rebrickableFromEnv() ?? undefined, bricksetFromEnv() ?? undefined, { minifig: bl.minifig, partPrice: bl.partPrice, images: (await imageStore()) ?? undefined });
+  if (s.ok) await runSync(db, s.runId, bl.lookup, bl.store, rebrickableFromEnv() ?? undefined, bricksetFromEnv() ?? undefined, { minifig: bl.minifig, partPrice: bl.partPrice, price: bl.price, images: (await imageStore()) ?? undefined });
 }
 
 /** Copies the database to BACKUP_DIR (default: backups/ next to the database) once a day and keeps BACKUP_KEEP (default 7). */

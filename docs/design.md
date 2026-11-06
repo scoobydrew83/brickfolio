@@ -150,7 +150,7 @@ Cool paper and ink, with one warm signal.
 ### Named Rules
 **The One Signal Rule.** Brick Yellow marks what you can do next or what is selected, nothing else. If two yellow things compete on a screen, one of them is wrong.
 
-**The Source Rule.** Every money figure says where it came from (BrickLink sold prices, a BrickOwl asking price, a BrickEconomy estimate, stored or live) within one line of it. Sources are listed side by side, never averaged into one number.
+**The Source Rule.** Every money figure says where it came from (BrickLink sold prices, a retailer offer, a BrickEconomy estimate, stored or live) within one line of it. Sources are listed side by side, never averaged into one number.
 
 ## Typography
 
@@ -228,7 +228,7 @@ All shared UI lives in `components/ui` (`import { Button, Callout, … } from '@
 1. ~~Set detail page~~ Shipped: `/sets/[setNo]` with photo, value callout and price history, parts list with counts, notes, edit and remove. Cards and table rows link to it. The 3D and step views shipped too (upload an LDraw model; parts from `LDRAW_LIBRARY_DIR` / `LDRAW_LIBRARY_URL`).
 2. ~~First-run checklist~~ Shipped: the empty Sets page walks through keys → first set → sync.
 3. ~~Demo data~~ Shipped: `npm run seed`, used for the screenshots, the README tour GIF and demo mode (`DEMO_MODE=on`).
-4. ~~Loading skeletons~~ Shipped. Still to do: friendlier error states (database, BrickLink rate limit at 5,000 calls/day).
+4. ~~Loading skeletons~~ Shipped. BrickLink errors now say what's wrong (daily limit used up, keys rejected, token registered for another IP, unknown item), and a sync stops its BrickLink calls once the daily limit is reached. Still to do: friendlier database error states.
 
 ### P1: what collectors ask for
 - ~~Wishlist~~ Shipped: `/wishlist` and `/api/v1/wishlist`, target prices, an "under target" alert, priced in the daily sync, and "Got it" moves a set into the collection. Alerts shipped too: webhook (ntfy, Discord, JSON) after each sync, and a count on the Wishlist tab.
@@ -246,21 +246,21 @@ All shared UI lives in `components/ui` (`import { Button, Callout, … } from '@
 - ~~3D model viewer~~ Shipped on the set page.
 - **Multiple collections or users** (family members, a store vs. a personal shelf).
 
-- ~~Retirement Radar~~ Shipped (0.5.0): `/radar`, retiring timeline, growth per year since retiring, Designer Program and SMART Play flags, and retire-soon alerts. Still to do: sealed vs. used value gap (needs both price guides per set, which costs BrickLink calls).
+- ~~Retirement Radar~~ Shipped (0.5.0): `/radar`, retiring timeline, growth per year since retiring, Designer Program and SMART Play flags, and retire-soon alerts. ~~Sealed vs. used value gap~~ shipped: both BrickLink guides per set, the gap per set and as a median.
 
 ### Next ideas (ranked, November 2026)
 Trends behind them: the BrickLink Designer Program is the fastest-growing area of the resale market (about 16% a year against about 6% overall, BrickEconomy mid-2026); 2026 retirement dates were reshuffled across many themes; some SMART Play sets retire early. The order below also follows a gap review: the biggest trust problem in the number is condition blindness (sealed vs. built), and the biggest technical limit is the BrickLink call budget.
 
-Already shipped from earlier lists: ~~Designer Program tracker~~ (0.6.0, still to do: fill projects automatically if BrickLink offers a feed), ~~MCP server~~ (0.6.0, still to do: OAuth for a claude.ai connector and opt-in write tools), ~~Insurance and valuation report~~ (0.6.0, still to do: photos in the report).
+Already shipped from earlier lists: ~~Designer Program tracker~~ (0.6.0, still to do: fill projects automatically if BrickLink offers a feed), ~~MCP server~~ (0.6.0, still to do: OAuth for a claude.ai connector and opt-in write tools), ~~Insurance and valuation report~~ (0.6.0; photos optional since the image cache).
 
 1. ~~**Read-only share link**~~ Shipped: `/share/<token>`, hashed tokens, opt-in values, locations and notes, a Funnel overlay and Access bypass rules. ~~Image cache~~ shipped too: share pages and offline scanning show photos from `/data/images` (R2 on Cloudflare), not BrickLink. Still to do: move the rest of the app's photos to the cache, and photos in the valuation report.
-2. ~~**Copies, not just quantities.**~~ Shipped: a `set_copies` table (status, condition, location, dates, cost basis, gift with purchase, per-copy value, `collection_id` for step 10), with missing parts per copy. `sets.qty`, `condition`, `location` and `missing_pct` are legacy: no longer read or written, and dropped (with `ALTER TABLE DROP COLUMN`) once every installation has run the backfill.
+2. ~~**Copies, not just quantities.**~~ Shipped: a `set_copies` table (status, condition, location, dates, cost basis, gift with purchase, per-copy value, `collection_id` for step 10), with missing parts per copy. `sets.qty`, `condition`, `location` and `missing_pct` were dropped with `ALTER TABLE DROP COLUMN` (migration 0025, after the 0.9.0 backfill; no table rebuild).
 3. **One identifier table and a local catalog.** See [Identifiers](#identifiers). Ingest Rebrickable's daily CSVs (themes, sets, inventories, parts, elements) and move set parts lists from BrickLink to Rebrickable. On Cloudflare D1, ingest only the inventories for owned, wishlisted and alternate-build sets; `inventory_parts` has over a million rows.
-4. **Prices from several sources, and the sealed vs. used gap.** ~~One price table~~ Shipped: `price_observations` holds every price, Est. Value comes from one primary source (Settings → Value source), and the set page lists the other sources. See [Prices from several sources](#prices-from-several-sources). Still to do: fetch both BrickLink guides per set (the second one weekly, paid for by the calls freed in step 3) and show the gap on the set page and Radar.
+4. **Prices from several sources, and the sealed vs. used gap.** ~~One price table~~ Shipped: `price_observations` holds every price, Est. Value comes from one primary source (Settings → Value source), and the set page lists the other sources. See [Prices from several sources](#prices-from-several-sources). ~~New vs. used gap~~ Shipped too: the other guide is fetched weekly with one price call per set (`lib/service/other-guide.ts`, within a shared `Budget`), the set page shows both with the gap, and Radar shows it per set and as a median. Calls freed by step 3 will go to it.
 5. **Loose-parts lots and build allocations.** Storage locations for parts outside sets (a `part_lots` table: part, color, qty, location, source bin or set copy), filled by BrickLink XML or Rebrickable CSV import and by marking a copy "parted out". Builds reserve parts from it, so parts set aside for a MOC don't count as free in "What can I build?".
 6. **Brickognize photo scan** to add minifigs (now) and loose parts (after step 5) from a phone. Off unless turned on, since photos go to a third party.
 7. **Retailer deal alerts:** the n8n flows in `docs/n8n/` post `offer` prices to `POST /api/v1/prices`; the wishlist's "under target" alert reads the lowest recent offer. No scraping inside the app.
-8. **BrickOwl and BrickEconomy as value sources:** clients in `lib/brickowl/` and `lib/brickeconomy/` writing price rows, shown next to the primary value. BrickOwl store and orders support comes later. Check BrickEconomy's API terms and quotas first.
+8. **More value sources:** ~~BrickOwl~~ not possible (#45): Brick Owl doesn't offer its prices (`catalog/availability`) to third-party tools, and its API terms forbid AI-generated code. BrickEconomy (a client in `lib/brickeconomy/` writing price rows, shown next to the primary value) is deferred: its API needs a Premium subscription for each user, and its reference and terms are only visible to Premium members (#46).
 9. **MILS / layout planner:** a 2D baseplate grid (32×32 modules), modules placed on it and linked to set copies or builds, and a combined "what I still need" parts list from step 5's allocations. A layout is a group of builds plus a grid, so it needs steps 2 and 5. 3D rendering of the layout comes later, if at all.
 10. **Multiple collections, then users.** Collections first (copies already carry `collection_id`); users need per-user permissions on top of today's login.
 
@@ -275,7 +275,7 @@ One `identifiers` table maps every ID scheme to one item, replacing `set_barcode
   - Rebrickable API `external_ids` (colors in one call, parts in about 60 pages). Rebrickable's CSVs carry no BrickLink IDs (checked November 2026).
   - Rebrickable `elements.csv` for element IDs.
   - Brickset.
-  - BrickOwl's ID lookup.
+  - ~~BrickOwl's ID lookup~~ (not used: see #45).
   - Your scans.
 - **Barcode details and the community list:** provider details for barcodes (name, year, image) go in a small side table. The community barcode file and its review by PR don't change.
 - **Box codes:** minifigure box codes stay in `minifig_codes`; they need the factory letter and year digit.
@@ -300,9 +300,9 @@ Shipped: one `price_observations` table holds every price the app knows (`lib/se
 | **LDraw** | Open 3D parts library and the Official Model Repository (OMR) of set models | Files from ldraw.org | Library is CC BY 2.0: add attribution to `NOTICE`. Render in the browser with three.js `LDrawLoader`. Only sets in the OMR, or with community models, will have a 3D view. |
 | **LeoCAD** | Open-source (GPL) desktop builder that opens LDraw files | Link out, no API | Offer "Download .mpd" and "Open in LeoCAD / BrickLink Studio" on the set page. Don't bundle GPL code into this Apache-2.0 app. |
 | **Brickset** | Retail prices by region, launch and retirement dates, instructions links, owned/wanted sync | Free API key, user hash for collection sync | Powers value vs. retail and retirement watch. |
-| BrickOwl | Second marketplace for prices and store inventory | API key | Later: lets non-BrickLink sellers use the Store and Orders pages. |
+| BrickOwl | Second marketplace | API key | Not possible (#45): prices aren't available to third-party tools, and the API terms forbid AI-generated code (store and orders too). |
 | Brickognize | Recognize a part, set or minifig from a photo | Public API | Later: phone "scan to add". |
-| BrickEconomy | Value estimates and growth; already an optional barcode lookup | API key | Later: a second value source, shown next to the primary value, never blended into it. |
+| BrickEconomy | Value estimates and growth; already an optional barcode lookup (unverified) | API key with a Premium subscription | Deferred (#46): needs the API reference and terms, which only Premium members can see. |
 
 ### How Rebrickable works with BrickLink
 - **BrickLink = money.** Sold prices, Est. Value, value history, store and orders come only from BrickLink. Rebrickable has no price data.

@@ -1,7 +1,7 @@
 // Collection logic shared by server actions, the REST API and the scheduler.
 // Every function takes the database (and BrickLink lookup) as arguments, so tests can pass an in-memory one.
 import { and, asc, desc, eq, inArray, lt, sql } from 'drizzle-orm';
-import type { Lookup, MinifigLookup, PartPriceLookup, Store } from '../bricklink/client';
+import { QUOTA_MESSAGE, type Lookup, type MinifigLookup, type PartPriceLookup, type PriceLookup, type Store } from '../bricklink/client';
 import type { BuildSource, Catalog, IdCatalog } from '../rebrickable/client';
 import type { DB } from '../db/types';
 import { history, locations, minifigs, setCopies, sets, settings, syncRuns, wishlist } from '../db/schema';
@@ -14,6 +14,8 @@ import { syncIdentifiers } from './identifiers';
 import { syncRetail } from './retail';
 import { reapplyMissing } from './missing';
 import { partoutBudget, refreshPartPrices } from './partout';
+import { Budget, otherGuideDailyCalls } from './budget';
+import { refreshOtherGuide } from './other-guide';
 import type { RetailSource } from '../brickset/client';
 import { syncOmrModels } from './models';
 import { alertsFromEnv, notifyUnderTarget } from './alerts';
@@ -330,7 +332,7 @@ export async function startSync(db: DB): Promise<Result<{ runId: number }>> {
  * (when `store` is given) and Rebrickable themes and minifigs (when `catalog` is given). Updates progress as it goes.
  */
 /** Optional BrickLink extras for the sync: minifigure prices and part prices for part-out value. */
-export type SyncExtras = { minifig?: MinifigLookup; partPrice?: PartPriceLookup; images?: ImageStore };
+export type SyncExtras = { minifig?: MinifigLookup; partPrice?: PartPriceLookup; price?: PriceLookup; images?: ImageStore };
 
 export async function runSync(db: DB, runId: number, lookup: Lookup, store?: Store, catalog?: Catalog & Partial<BuildSource> & Partial<IdCatalog>, retail?: RetailSource, extras: SyncExtras = {}): Promise<void> {
   try {
@@ -338,18 +340,26 @@ export async function runSync(db: DB, runId: number, lookup: Lookup, store?: Sto
     const copies = await copiesBySet(db);
     const all = (await db.select({ id: sets.id, setNo: sets.setNo }).from(sets).all()).map((r) => ({ ...r, copies: copies.get(r.id) ?? [] }));
     let errors = 0;
+    // Once BrickLink's daily limit is used up, every later call fails the same way: skip the remaining BrickLink
+    // steps (they keep their last prices) and still do the rest.
+    let quotaAt: number | null = null;
     for (const [i, s] of all.entries()) {
-      if (await lookupInto(db, s, lookup, currency)) errors++;
+      const error = await lookupInto(db, s, lookup, currency);
+      if (error) errors++;
       await db.update(syncRuns).set({ processed: i + 1, errors }).where(eq(syncRuns.id, runId));
+      if (error === QUOTA_MESSAGE) { quotaAt = i; break; }
     }
-    const figErrors = extras.minifig ? await syncMinifigs(db, extras.minifig, currency) : 0;
-    let calls = all.length * 2 + (extras.minifig ? Number((await db.select({ n: sql<number>`count(*)` }).from(minifigs).where(sql`fig_no is not null`).all())[0].n) * 2 : 0);
+    const bl = quotaAt === null;
+    const figErrors = extras.minifig && bl ? await syncMinifigs(db, extras.minifig, currency) : 0;
+    // BrickLink calls, in priority order: sets, minifigs, wishlist and store first; then the other guide; then part prices.
+    const budget = new Budget();
+    budget.spend(all.length * 2 + (extras.minifig ? Number((await db.select({ n: sql<number>`count(*)` }).from(minifigs).where(sql`fig_no is not null`).all())[0].n) * 2 : 0));
     await saveHistory(db);
-    const wishErrors = await syncWishlist(db, lookup, currency);
-    calls += Number((await db.select({ n: sql<number>`count(*)` }).from(wishlist).all())[0].n) * 2 + (store ? 3 : 0);
+    const wishErrors = bl ? await syncWishlist(db, lookup, currency) : 0;
+    budget.spend(Number((await db.select({ n: sql<number>`count(*)` }).from(wishlist).all())[0].n) * 2 + (store ? 3 : 0));
     const send = alertsFromEnv();
     const alertError = send ? await notifyUnderTarget(db, send) : null;
-    const storeErrors = store ? await syncStore(db, store) : [];
+    const storeErrors = store && bl ? await syncStore(db, store) : [];
     const catalogErrors = catalog ? await syncCatalog(db, catalog) : [];
     if (catalog?.colors && catalog.partsPage) catalogErrors.push(...(await syncIdentifiers(db, { colors: catalog.colors, partsPage: catalog.partsPage })));
     if (catalog?.alternates && catalog.buildParts) catalogErrors.push(...(await syncBuilds(db, { alternates: catalog.alternates, buildParts: catalog.buildParts })));
@@ -367,13 +377,20 @@ export async function runSync(db: DB, runId: number, lookup: Lookup, store?: Sto
     if (hasLibrary && process.env.LDRAW_OMR_SYNC !== 'off') catalogErrors.push(...(await syncOmrModels(db)));
     // Photos not in the image cache yet (CDN fetches, not BrickLink API calls), after the lookups filled in image URLs.
     if (extras.images) catalogErrors.push(...(await warmImages(db, extras.images)).errors);
+    // The other condition's price guide (new vs. used gap), about weekly per set, 1 call each.
+    if (extras.price && bl) {
+      const r = await refreshOtherGuide(db, extras.price, currency, { maxCalls: Math.min(otherGuideDailyCalls(all.length), budget.left()) });
+      budget.spend(r.fetched + r.errors);
+      if (r.errors) catalogErrors.push(`${r.errors} new/used price lookup${r.errors === 1 ? '' : 's'} failed`);
+    }
     // Part prices for part-out value, with whatever is left of today's BrickLink budget.
-    if (extras.partPrice) {
-      const r = await refreshPartPrices(db, extras.partPrice, currency, { maxCalls: partoutBudget(calls) });
+    if (extras.partPrice && bl) {
+      const r = await refreshPartPrices(db, extras.partPrice, currency, { maxCalls: partoutBudget(budget.used) });
       if (r.fetched) await reapplyMissing(db);
       if (r.errors) catalogErrors.push(`${r.errors} part price lookup${r.errors === 1 ? '' : 's'} failed`);
     }
-    const message = [...storeErrors, alertError ?? '', wishErrors ? `${wishErrors} wishlist lookup${wishErrors === 1 ? '' : 's'} failed` : '', figErrors ? `${figErrors} minifig lookup${figErrors === 1 ? '' : 's'} failed` : '', ...catalogErrors.slice(0, 3), catalogErrors.length > 3 ? `and ${catalogErrors.length - 3} more errors` : ''].filter(Boolean).join('; ');
+    const quotaNote = bl ? '' : `${QUOTA_MESSAGE} ${quotaAt} of ${all.length} sets were looked up first.`;
+    const message = [quotaNote, ...storeErrors, alertError ?? '', wishErrors ? `${wishErrors} wishlist lookup${wishErrors === 1 ? '' : 's'} failed` : '', figErrors ? `${figErrors} minifig lookup${figErrors === 1 ? '' : 's'} failed` : '', ...catalogErrors.slice(0, 3), catalogErrors.length > 3 ? `and ${catalogErrors.length - 3} more errors` : ''].filter(Boolean).join('; ');
     await db.update(syncRuns).set({ status: 'done', finishedAt: nowIso(), message: message || null }).where(eq(syncRuns.id, runId));
   } catch (e) {
     await db.update(syncRuns).set({ status: 'failed', finishedAt: nowIso(), message: e instanceof Error ? e.message : String(e) }).where(eq(syncRuns.id, runId));

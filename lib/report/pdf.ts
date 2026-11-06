@@ -25,7 +25,10 @@ export function pdfMoney(v: number | null, currency: string): string {
 
 const INK = rgb(0.09, 0.09, 0.11), MUTED = rgb(0.38, 0.38, 0.42), LINE = rgb(0.85, 0.85, 0.83), BAND = rgb(0.96, 0.96, 0.95);
 
-export async function valuationPdf(v: Valuation): Promise<Uint8Array> {
+export type ReportPhotos = Map<string, { body: ArrayBuffer; type: string }>;
+
+/** The report as a PDF. With `photos` (keyed `${kind}:${ref}`), each line gets a small photo and a taller row. */
+export async function valuationPdf(v: Valuation, opts: { photos?: ReportPhotos } = {}): Promise<Uint8Array> {
   const doc = await PDFDocument.create();
   doc.setTitle(clean(`${APP_NAME} valuation report ${v.generatedAt.slice(0, 10)}`));
   doc.setProducer(APP_NAME);
@@ -97,7 +100,17 @@ export async function valuationPdf(v: Valuation): Promise<Uint8Array> {
   y -= 14;
 
   // ---- items ----
-  const C = { no: M, name: M + 58, year: W - M - 334, cond: W - M - 304, qty: W - M - 214, each: W - M - 152, total: W - M - 88, sales: W - M - 52, priced: W - M };
+  const photos = opts.photos?.size ? opts.photos : null;
+  const ROW = photos ? 30 : 13, PIC = 26, X0 = photos ? M + PIC + 6 : M;
+  const embedded = new Map<string, Awaited<ReturnType<PDFDocument['embedPng']>> | null>();
+  const photo = async (key: string) => {
+    if (!photos || embedded.has(key)) return embedded.get(key) ?? null;
+    const img = photos.get(key);
+    const e = img ? await (img.type === 'image/png' ? doc.embedPng(img.body) : doc.embedJpg(img.body)).catch(() => null) : null;
+    embedded.set(key, e);
+    return e;
+  };
+  const C = { no: X0, name: X0 + 58, year: W - M - 334, cond: W - M - 304, qty: W - M - 214, each: W - M - 152, total: W - M - 88, sales: W - M - 52, priced: W - M };
   const head = () => {
     text('Items', M, 11, bold); y -= 14;
     for (const [k, label] of [['no', 'Number'], ['name', 'Name'], ['year', 'Year'], ['cond', 'Condition']] as const) text(label, C[k], 8, bold, MUTED);
@@ -113,9 +126,15 @@ export async function valuationPdf(v: Valuation): Promise<Uint8Array> {
       need(28, head);
       y -= 3; text(l.location ?? 'No location', M, 9, bold); y -= 13; lastLoc = l.location; band = false;
     }
-    need(13, head);
-    if (band) page.drawRectangle({ x: M - 2, y: y - 3, width: W - 2 * M + 4, height: 12, color: BAND });
+    need(ROW, head);
+    if (band) page.drawRectangle({ x: M - 2, y: y - 3 - (ROW - 13), width: W - 2 * M + 4, height: ROW - 1, color: BAND });
     band = !band;
+    const pic = await photo(`${l.kind}:${l.ref}`);
+    if (pic) {
+      const s = Math.min(PIC / pic.width, PIC / pic.height);
+      page.drawImage(pic, { x: M + (PIC - pic.width * s) / 2, y: y - 2 - (ROW - 13) + (PIC - pic.height * s) / 2, width: pic.width * s, height: pic.height * s });
+    }
+    if (photos) y -= (ROW - 13) / 2; // text centred on the photo
     const cond = l.condition ? `${l.condition}${l.missingPct ? ` -${Math.round(l.missingPct * 10) / 10}%` : ''}` : '-';
     text(fit(l.no, 54), C.no);
     text(fit(`${l.kind === 'minifig' ? '[Minifig] ' : ''}${l.name}`, C.year - C.name - 6), C.name);
@@ -123,7 +142,7 @@ export async function valuationPdf(v: Valuation): Promise<Uint8Array> {
     text(fit(cond, C.qty - C.cond - 14), C.cond);
     right(String(l.qty), C.qty); right(money(l.each), C.each); right(money(l.total), C.total, 9, bold);
     right(l.sales != null ? String(l.sales) : '-', C.sales); right(l.pricedAt ?? '-', C.priced, 8, font, MUTED);
-    y -= 13;
+    y -= photos ? 13 + (ROW - 13) / 2 : 13;
   }
   need(20);
   y -= 4; rule(); y -= 14;

@@ -113,14 +113,39 @@ export async function latestGuide(db: DB, kind: ItemKind, id: string): Promise<G
  * The newest amount from a source for an item in one condition and currency, observed on or after `since`.
  * Only value types (sold average, asking, estimate); for BrickLink, only its sold average.
  */
-export async function recentAmount(db: DB, kind: ItemKind, id: string, f: { source: string; condition: Guide; currency: string; since?: string }): Promise<Observation | null> {
+export async function recentAmount(db: DB, kind: ItemKind, id: string, f: { source: string; condition: Guide; currency: string; since?: string; withEmpty?: boolean }): Promise<Observation | null> {
   const where = [
     eq(priceObservations.itemKind, kind), eq(priceObservations.itemId, id), eq(priceObservations.source, f.source),
-    eq(priceObservations.condition, f.condition), eq(priceObservations.currency, f.currency.toUpperCase()), isNotNull(priceObservations.amount),
+    eq(priceObservations.condition, f.condition), eq(priceObservations.currency, f.currency.toUpperCase()),
     f.source === 'bricklink' ? eq(priceObservations.type, 'sold_avg') : inArray(priceObservations.type, VALUE_TYPES),
   ];
+  if (!f.withEmpty) where.push(isNotNull(priceObservations.amount)); // withEmpty: a "no sales" answer counts too
   if (f.since) where.push(gte(priceObservations.observedOn, f.since));
   return (await db.select().from(priceObservations).where(and(...where)).orderBy(desc(priceObservations.observedOn), desc(priceObservations.observedAt)).limit(1).get()) ?? null;
+}
+
+/** The newest BrickLink sold average in each condition for an item, in a currency ("no sales" answers included). */
+export async function brickLinkGuides(db: DB, kind: ItemKind, id: string, currency: string): Promise<Record<Guide, Observation | null>> {
+  const [N, U] = await Promise.all((['N', 'U'] as const).map((condition) => recentAmount(db, kind, id, { source: 'bricklink', condition, currency, withEmpty: true })));
+  return { N, U };
+}
+
+/** The same for many items at once: setNo → { N, U }. Chunked for D1's 100 bound parameters. */
+export async function brickLinkGuidesMany(db: DB, kind: ItemKind, ids: string[], currency: string): Promise<Map<string, Record<Guide, Observation | null>>> {
+  const out = new Map<string, Record<Guide, Observation | null>>();
+  const uniq = [...new Set(ids)];
+  for (let i = 0; i < uniq.length; i += 90) {
+    const rows = await db.select().from(priceObservations).where(and(
+      eq(priceObservations.itemKind, kind), inArray(priceObservations.itemId, uniq.slice(i, i + 90)), eq(priceObservations.source, 'bricklink'),
+      eq(priceObservations.type, 'sold_avg'), eq(priceObservations.currency, currency.toUpperCase()),
+    )).orderBy(desc(priceObservations.observedOn), desc(priceObservations.observedAt)).all();
+    for (const r of rows) {
+      const g = out.get(r.itemId) ?? { N: null, U: null };
+      if (!g[r.condition]) g[r.condition] = r;
+      out.set(r.itemId, g);
+    }
+  }
+  return out;
 }
 
 // ---- primary source ----

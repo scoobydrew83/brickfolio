@@ -12,6 +12,18 @@ import { latestGuide, primarySource, recentAmount } from './prices';
 /** A BrickLink price in the other guide is used for a copy's value when it's at most this old. */
 const SNAPSHOT_DAYS = 90;
 const nowIso = () => new Date().toISOString();
+const daysAgo = (n: number) => new Date(Date.parse(today()) - n * 86_400_000).toISOString().slice(0, 10);
+/** A set's needed guide is looked up again when its newest price in it is older than this. */
+const FRESH_DAYS = 7;
+
+/**
+ * After copies changed, whether the set needs a BrickLink lookup now: it has been priced before, but not in the guide
+ * most of its copies now need within the last week.
+ */
+export async function needsRelookup(db: DB, setNo: string, copies: Pick<CopyRow, 'status' | 'condition'>[]): Promise<boolean> {
+  if (!(await latestGuide(db, 'set', setNo))) return false;
+  return !(await recentAmount(db, 'set', setNo, { source: 'bricklink', condition: setGuide(copies), currency: await getCurrency(db), since: daysAgo(FRESH_DAYS), withEmpty: true }));
+}
 
 /** Inserts `n` copies of a set with the same fields. Sealed means New; a gift with purchase costs 0. */
 export async function insertCopies(db: DB, setId: number, c: CopyInput, n: number): Promise<number[]> {
@@ -53,14 +65,18 @@ export async function repriceCopies(db: DB, setId: number, fetched?: 'N' | 'U'):
     }
     return;
   }
-  const got = fetched ?? (await latestGuide(db, 'set', s.setNo)) ?? setGuide(copies);
-  const since = new Date(Date.parse(today()) - SNAPSHOT_DAYS * 86_400_000).toISOString().slice(0, 10);
-  const other = got === 'N' ? 'U' : 'N';
-  const snap = copies.some((c) => copyGuide(c) === other)
-    ? await recentAmount(db, 'set', s.setNo, { source: 'bricklink', condition: other, currency, since })
-    : null;
+  // Each copy's own guide: its newest BrickLink answer from the last 90 days ("no sales" included). Without one,
+  // the other guide's newest price, labelled; without that, today's lookup.
+  const since = daysAgo(SNAPSHOT_DAYS);
+  const own = {
+    N: await recentAmount(db, 'set', s.setNo, { source: 'bricklink', condition: 'N', currency, since, withEmpty: true }),
+    U: await recentAmount(db, 'set', s.setNo, { source: 'bricklink', condition: 'U', currency, since, withEmpty: true }),
+  };
+  const got = fetched ?? setGuide(copies);
   for (const c of copies) {
-    const [price, guide]: [number | null, 'N' | 'U'] = copyGuide(c) === got || !snap ? [s.avgSold, got] : [snap.amount, other];
+    const g = copyGuide(c), other = g === 'N' ? 'U' : 'N';
+    const alt = own[other]?.amount != null ? own[other] : null;
+    const [price, guide]: [number | null, 'N' | 'U'] = own[g] ? [own[g]!.amount, g] : alt ? [alt.amount, other] : [s.avgSold, got];
     await save(c, price, guide);
   }
 }
@@ -133,8 +149,7 @@ const touch = (db: DB, setId: number) => db.update(sets).set({ updatedAt: nowIso
 
 /** After copies changed: a fresh lookup when the set now needs the other guide (and BrickLink is set up), else re-value. */
 async function reprice(db: DB, s: SetRow, lookup: Lookup | null): Promise<void> {
-  const latest = await latestGuide(db, 'set', s.setNo);
-  if (lookup && latest && latest !== setGuide(s.copies)) await lookupInto(db, s, lookup, await getCurrency(db));
+  if (lookup && (await needsRelookup(db, s.setNo, s.copies))) await lookupInto(db, s, lookup, await getCurrency(db));
   else await repriceCopies(db, s.id);
 }
 

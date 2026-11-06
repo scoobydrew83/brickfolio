@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { copiesSummary, copyGuide, costBasis, dailyHistory, displayNo, estValue, filterSets, groupTotals, parseCopyInput, parseQuickList, parseSetInput, parseSetWithCopy, setGuide, setNo, totals, withCopies, type CopyRow, type SetRow } from './sets';
+import { conditionGap, copiesSummary, copyGuide, costBasis, dailyHistory, displayNo, estValue, filterSets, groupTotals, parseCopyInput, parseQuickList, parseSetInput, parseSetWithCopy, setGuide, setNo, totals, withCopies, type CopyRow, type SetRow } from './sets';
 
 const LOCS = ['Out', 'Storage', 'Sell'];
 const parse = (f: Record<string, unknown>, partial = true) => parseSetInput(f, partial, LOCS);
@@ -168,5 +168,22 @@ describe('parseQuickList', () => {
     const r = parseQuickList(Array.from({ length: 502 }, (_, i) => String(10000 + i)).join('\n'));
     expect(r.sets).toHaveLength(500);
     expect(r.invalid).toEqual(['10500-1', '10501-1']);
+  });
+});
+
+describe('conditionGap', () => {
+  const o = (amount: number | null, observedOn = '2026-11-01', currency = 'USD', sampleSize: number | null = 5) => ({ amount, observedOn, currency, sampleSize });
+  it('works out how much more new sells for than used', () => {
+    expect(conditionGap(o(150), o(100, '2026-10-28', 'USD', 9))).toEqual({ n: 150, u: 100, diff: 50, pct: 50, nDate: '2026-11-01', uDate: '2026-10-28', nSample: 5, uSample: 9 });
+    expect(conditionGap(o(90), o(120))?.pct).toBe(-25); // used can sell for more
+  });
+  it('needs both sides with sales, one currency and dates within 30 days', () => {
+    expect(conditionGap(o(150), null)).toBeNull();
+    expect(conditionGap(undefined, o(100))).toBeNull();
+    expect(conditionGap(o(150), o(null))).toBeNull(); // no used sales
+    expect(conditionGap(o(150), o(0))).toBeNull();
+    expect(conditionGap(o(150), o(100, '2026-11-01', 'EUR'))).toBeNull();
+    expect(conditionGap(o(150), o(100, '2026-09-15'))).toBeNull(); // 47 days apart
+    expect(conditionGap(o(150), o(100, '2026-10-02'))).not.toBeNull(); // 30 days apart
   });
 });

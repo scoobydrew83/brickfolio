@@ -69,6 +69,11 @@ const spec = {
       InventoryItem: { type: 'object', properties: { inventoryId: { type: 'integer' }, itemNo: { type: 'string' }, name: { type: 'string' }, type: { type: 'string' }, colorId: nullable('integer'), colorName: nullable('string'), qty: { type: 'integer' }, condition: { enum: ['N', 'U'] }, unitPrice: nullable('number'), description: nullable('string'), remarks: nullable('string') } },
       Order: { type: 'object', properties: { orderId: { type: 'integer' }, direction: { enum: ['in', 'out'], description: 'in = you sold, out = you bought' }, dateOrdered: nullable('string'), status: { type: 'string' }, counterparty: nullable('string'), items: nullable('integer'), lots: nullable('integer'), currency: nullable('string'), subtotal: nullable('number'), grandTotal: nullable('number') } },
       Part: { type: 'object', properties: { matchNo: { type: 'integer' }, partNo: { type: 'string' }, name: { type: 'string' }, type: { type: 'string' }, colorId: nullable('integer'), colorName: nullable('string'), rgb: nullable('string'), qty: { type: 'integer' }, extra: { type: 'integer' }, alternate: { type: 'boolean' }, counterpart: { type: 'boolean' } } },
+      ConditionGap: {
+        type: 'object', nullable: true,
+        description: 'BrickLink new vs. used sold averages. Null unless both have sales, in one currency, priced within 30 days of each other.',
+        properties: { n: { type: 'number' }, u: { type: 'number' }, diff: { type: 'number' }, pct: { type: 'number', description: 'How much more new sells for, in %' }, nDate: { type: 'string', format: 'date' }, uDate: { type: 'string', format: 'date' }, nSample: nullable('integer'), uSample: nullable('integer') },
+      },
       PriceObservation: {
         type: 'object',
         description: 'One price from one source on one day. Sources: bricklink, brickowl, brickeconomy, brickset, manual or retailer:<slug>.',
@@ -94,7 +99,7 @@ const spec = {
     },
     '/sets/{setNo}': {
       parameters: [setNo],
-      get: { summary: 'Get one set', responses: { 200: ok({ type: 'object', properties: { set: ref('Set') } }), 404: err } },
+      get: { summary: 'Get one set, with BrickLink\'s new vs. used gap', responses: { 200: ok({ type: 'object', properties: { set: ref('Set'), gap: ref('ConditionGap') } }), 404: err } },
       patch: { summary: 'Edit a set', requestBody: { required: true, content: { 'application/json': { schema: ref('SetInput') } } }, responses: { 200: ok({ type: 'object', properties: { set: ref('Set') } }), 400: err, 404: err } },
       delete: { summary: 'Remove the newest copy (the set goes with its last one)', responses: { 200: ok({ type: 'object', properties: { remaining: { type: 'integer' } } }), 404: err } },
     },

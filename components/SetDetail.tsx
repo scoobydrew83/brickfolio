@@ -11,7 +11,7 @@ import type { Partout } from '@/lib/service/partout';
 import { partKey } from '@/lib/bricklink/wanted';
 import type { PartRow } from '@/lib/service/parts';
 import type { ValueSources } from '@/lib/service/prices';
-import { copiesSummary, copyGuide, costBasis, displayNo, num, setGuide, STATUS_LABEL, type CopyRow, type SetRow } from '@/lib/sets';
+import { copiesSummary, copyGuide, costBasis, displayNo, num, setGuide, STATUS_LABEL, type ConditionGap, type CopyRow, type SetRow } from '@/lib/sets';
 import { ModelViewer } from './ModelViewer';
 import { PartList } from './board/PartsDialog';
 import { locationLabel, RemoveButton, RetireChip } from './board/SetCard';
@@ -21,10 +21,12 @@ import { SetForm } from './board/SetForm';
 import { blLink, moneyIn } from './board/ui';
 import { Banner, Button, Callout, CONDITION_TONE, Chip, EmptyState, FilterChip, buttonClass, cx } from './ui';
 
-type Props = { set: SetRow; parts: PartRow[]; prices: { date: string; avgSold: number | null }[]; currency: string; locations: string[]; priced: boolean; model: { fileName: string; author: string | null } | null; library: boolean; builds: BuildMatch[]; view?: '3d'; missing: MissingSummary; missingCopyId: number | null; guide: 'N' | 'U' | null; partout: (Partout & { unpriced: number }) | null; partsPriced: boolean; sources: ValueSources };
+type Props = { set: SetRow; parts: PartRow[]; prices: { date: string; avgSold: number | null }[]; currency: string; locations: string[]; priced: boolean; model: { fileName: string; author: string | null } | null; library: boolean; builds: BuildMatch[]; view?: '3d'; missing: MissingSummary; missingCopyId: number | null; guide: 'N' | 'U' | null; partout: (Partout & { unpriced: number }) | null; partsPriced: boolean; sources: ValueSources; conditions: Conditions };
+type Side = { amount: number | null; observedOn: string; sampleSize: number | null } | null;
+type Conditions = { n: Side; u: Side; gap: ConditionGap | null };
 
 /** One set: its photo, value and price history, parts list and copies. */
-export default function SetDetail({ set: s, parts, prices, currency, locations, priced, model, library, builds, view, missing, missingCopyId, guide, partout, partsPriced, sources }: Props) {
+export default function SetDetail({ set: s, parts, prices, currency, locations, priced, model, library, builds, view, missing, missingCopyId, guide, partout, partsPriced, sources, conditions }: Props) {
   const router = useRouter();
   const money = useMemo(() => moneyIn(currency), [currency]);
   const [editing, setEditing] = useState(false);
@@ -144,6 +146,7 @@ export default function SetDetail({ set: s, parts, prices, currency, locations, 
                 {s.valueTotal === null ? ` ${sources.primaryLabel} has no value for this set yet, so none is shown.` : ''}
               </p>
             )}
+            <NewVsUsed c={conditions} money={money} />
             <OtherSources sources={sources} money={money} />
             {(s.retailPrice || s.launchDate || s.exitDate) && (
               <dl className="mt-3 grid grid-cols-3 gap-2 border-t border-line pt-2 text-sm tabular-nums">
@@ -356,6 +359,29 @@ function CopiesSection({ s, money, pending, label, onAdd, onEdit, onRemove }: { 
 }
 
 /** Avg sold per sync for this set, from the saved price snapshots. A note until there are two. */
+/** BrickLink's new and used sold prices side by side, and how much more new sells for, when both are fresh. */
+function NewVsUsed({ c, money }: { c: Conditions; money: (v: unknown) => string }) {
+  if (!c.n && !c.u) return null;
+  const date = (d: string) => new Date(`${d}T00:00:00Z`).toLocaleDateString(undefined, { day: 'numeric', month: 'short', timeZone: 'UTC' });
+  const side = (label: string, s: Side) => (
+    <div>
+      <dt className="text-xs text-fg-3">{label}</dt>
+      <dd className="font-semibold tabular-nums">{s?.amount != null ? money(s.amount) : '—'}</dd>
+      <dd className="text-xs text-fg-3">{s ? `BrickLink, ${s.sampleSize ? `${s.sampleSize} sales` : 'no sales'}, ${date(s.observedOn)}` : 'Priced weekly'}</dd>
+    </div>
+  );
+  return (
+    <div className="mt-3 border-t border-line pt-2">
+      <dl className="grid grid-cols-2 gap-2 text-sm">{side('New', c.n)}{side('Used', c.u)}</dl>
+      <p className="mt-1 text-xs text-fg-3">
+        {c.gap
+          ? <>New sells for <b className={cx('tabular-nums', c.gap.pct >= 0 ? 'text-ok' : 'text-danger')}>{c.gap.pct >= 0 ? '+' : '−'}{Math.abs(c.gap.pct)}%</b> ({c.gap.diff >= 0 ? '+' : '−'}{money(Math.abs(c.gap.diff))}) over used.</>
+          : 'The other condition is priced weekly; the gap shows once both have recent sales.'}
+      </p>
+    </div>
+  );
+}
+
 /** The newest price from each source other than the primary one, each figure on the same line as its source. */
 function OtherSources({ sources, money }: { sources: ValueSources; money: (v: unknown) => string }) {
   if (!sources.others.length) return null;

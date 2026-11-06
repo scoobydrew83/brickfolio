@@ -4,6 +4,25 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-11-06
+
+**Before upgrading, back up your database.** One migration drops the old `sets` columns `qty`, `condition`, `location` and `missing_pct`, unused since 0.9.0 moved them to copies. It changes the table in place; your sets, copies and prices are kept.
+
+### Added
+- **New vs. used:** the daily sync also fetches the other condition's BrickLink price guide for each set (used for a mostly sealed set, new for a built or partial one), about weekly, with one price call each. A set's page shows new and used side by side with sales and dates, and how much more new sells for. The Radar shows it per retired or retiring set and as a median. `OTHER_GUIDE_DAILY_CALLS` caps it (default: sets ÷ 7 + 10, up to 1,000; `0` turns it off). `GET /api/v1/sets/{setNo}` returns `gap`; MCP `get_set` and `retirement_radar` include it.
+- **Photos in the valuation report:** **Settings → Valuation report → Include photos** (or `GET /api/v1/report.pdf?photos=1`) adds each item's photo, from the image cache (fetched once if missing). PNG and JPEG photos only.
+
+### Changed
+- Each copy is valued from its own condition's newest BrickLink price (within 90 days), so a built copy of a mostly sealed set uses used sales once the other guide is fetched.
+- Changing a set's copies only looks it up again when the guide it now needs has no price from the last week, saving BrickLink calls.
+- The sync shares BrickLink's daily calls in a fixed order: sets, minifigs, wishlist, store, the other guide, then part prices.
+- The docs now mark the BrickEconomy barcode lookup as unverified: BrickEconomy's API needs a Premium subscription, and it was written without the API reference and never tested with a real key.
+- BrickLink errors say what's wrong: the daily limit is used up, the keys were rejected, the access token is registered for another IP address, or BrickLink has no such item. BrickLink's own words follow in brackets.
+- When BrickLink's daily limit runs out during a sync, the sync stops its BrickLink lookups (the rest keep their last prices) and still does everything else, and the sync message says how far it got.
+
+### Removed
+- The `sets` columns `qty`, `condition`, `location` and `missing_pct` (see above).
+
 ## [0.10.0] - 2026-11-05
 
 **Before upgrading, back up your database.** One migration moves `price_snapshots` and `minifig_price_snapshots` into the new `price_observations` table and drops the old tables.

@@ -40,6 +40,30 @@ it('maps store inventory and orders, and reports API errors', async () => {
   });
   expect(await bl.store.inventory()).toEqual([{ inventoryId: 9, itemNo: '3001', name: 'Brick 2 x 4', type: 'PART', colorId: 5, colorName: 'Red', qty: 4, condition: 'N', unitPrice: 0.15, description: null, remarks: 'bin 3' }]);
   expect(await bl.store.orders('in')).toEqual([{ orderId: 1, direction: 'in', dateOrdered: '2026-10-01T00:00:00.000Z', status: 'SHIPPED', counterparty: 'buyer1', items: 3, lots: 2, currency: 'USD', subtotal: 10, grandTotal: 12.5 }]);
-  await expect(bl.store.orders('out')).rejects.toThrow('orders: Invalid IP');
+  await expect(bl.store.orders('out')).rejects.toThrow("BrickLink refused the access token from this server's IP address");
   expect(await bl.colors()).toEqual([{ id: 5, name: 'Red', rgb: 'B40000' }, { id: 0, name: '(Not Applicable)', rgb: null }]);
+});
+
+it('turns BrickLink errors into readable ones', async () => {
+  const { brickLinkError, QUOTA_MESSAGE } = await import('./client');
+  expect(brickLinkError(200, { code: 429, message: 'TOO_MANY_REQUESTS' }, '/items/SET/1-1')).toMatchObject({ kind: 'quota', message: QUOTA_MESSAGE });
+  expect(brickLinkError(429, undefined, '/items/SET/1-1').kind).toBe('quota');
+  expect(brickLinkError(200, { code: 401, message: 'BAD_OAUTH_REQUEST', description: 'TOKEN_IP_MISMATCHED' }, '/items/SET/1-1')).toMatchObject({ kind: 'ip' });
+  expect(brickLinkError(200, { code: 401, message: 'BAD_OAUTH_REQUEST', description: 'SIGNATURE_INVALID' }, '/items/SET/1-1')).toMatchObject({ kind: 'auth', message: expect.stringContaining('BRICKLINK_*') });
+  expect(brickLinkError(200, { code: 404, message: 'RESOURCE_NOT_FOUND' }, '/items/SET/99999-1')).toMatchObject({ kind: 'not_found', message: 'BrickLink has no set 99999-1 (RESOURCE_NOT_FOUND).' });
+  expect(brickLinkError(500, undefined, '/items/SET/1-1/price', 'Server Error')).toMatchObject({ kind: 'other', message: 'price: Server Error' });
+});
+
+it('price: one call for one guide, and no sales is null', async () => {
+  const urls: string[] = [];
+  let sold = 4;
+  const bl = createBrickLink(keys, async (input) => {
+    urls.push(String(input).replace('https://api.bricklink.com/api/store/v1', ''));
+    return ok({ avg_price: sold ? '50.5000' : '0.0000', min_price: sold ? '40.0000' : '0.0000', max_price: sold ? '60.0000' : '0.0000', total_quantity: sold });
+  });
+  expect(await bl.price('SET', '10280-1', 'N', 'EUR')).toEqual({ avgSold: 50.5, minSold: 40, maxSold: 60, qtySold: 4 });
+  expect(urls).toEqual(['/items/SET/10280-1/price?guide_type=sold&new_or_used=N&currency_code=EUR']);
+  sold = 0;
+  expect(await bl.price('MINIFIG', 'sw0001', 'U', 'USD')).toEqual({ avgSold: null, minSold: null, maxSold: null, qtySold: 0 });
+  expect(urls).toHaveLength(2);
 });

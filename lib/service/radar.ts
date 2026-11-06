@@ -3,7 +3,8 @@
 import { and, asc, eq, gte, inArray, isNotNull, isNull, lte, or, sql } from 'drizzle-orm';
 import type { DB } from '../db/types';
 import { priceObservations, wishlist } from '../db/schema';
-import { displayNo, money, setGuide } from '../sets';
+import { conditionGap, displayNo, money, setGuide } from '../sets';
+import { brickLinkGuidesMany } from './prices';
 import { retirement } from '../retail';
 import { daysUntil, flagsFor, growthSince, type Flag, type Growth, type PricePoint } from '../radar';
 import { getCurrency, listSets } from './sets';
@@ -24,6 +25,7 @@ export type RadarItem = {
   retailCurrency: string | null;
   gainPct: number | null; // value against retail, same currency only
   growth: Growth | null; // retired sets only
+  gapPct: number | null; // owned sets: how much more BrickLink new sells for than used (conditionGap)
 };
 
 export type Radar = {
@@ -37,6 +39,7 @@ export type Radar = {
     retiredOwned: number;
     retiredValue: number; // Est. Value of retired sets you own (all copies)
     medianGrowth: number | null; // median growth per year over retired sets with a growth figure
+    medianGap: number | null; // median new-over-used gap (%) over retired and retiring sets you own
     flagged: Record<Flag, number>;
   };
 };
@@ -66,6 +69,10 @@ export async function getRadar(db: DB, todayIso = new Date().toISOString().slice
   const guideOf = new Map(retiredOwned.map((s) => [s.setNo, setGuide(s.copies)]));
   for (const p of obs) if (p.guide === guideOf.get(p.setNo)) bySet.set(p.setNo, [...(bySet.get(p.setNo) ?? []), p]);
 
+  // BrickLink new vs. used for owned sets (the gap needs both, fetched within 30 days of each other).
+  const guides = await brickLinkGuidesMany(db, 'set', owned.map((s) => s.setNo), currency);
+  const gapOf = (no: string) => { const g = guides.get(no); return conditionGap(g?.N, g?.U)?.pct ?? null; };
+
   const status = (r: { exitDate?: string | null; retired?: boolean | null }): RadarItem['status'] => retirement(r, todayIso)?.kind ?? (r.exitDate && r.exitDate >= todayIso ? 'retiring' : 'available');
   const items: RadarItem[] = [
     ...owned.map((s): RadarItem => ({
@@ -76,11 +83,12 @@ export async function getRadar(db: DB, todayIso = new Date().toISOString().slice
       growth: status(s) === 'retired'
         ? growthSince(s.exitDate, s.avgSold, bySet.get(s.setNo) ?? [], { price: s.retailPrice, currency: s.retailCurrency }, currency, todayIso)
         : null,
+      gapPct: gapOf(s.setNo),
     })),
     ...wishes.map((w): RadarItem => ({
       kind: 'wish', setNo: w.setNo, name: w.name ?? `Set ${displayNo(w.setNo)}`, imageUrl: w.imageUrl, theme: null, flags: flagsFor(w.name),
       exitDate: w.exitDate, status: status(w), qty: 0, value: w.avgSold, retailPrice: w.retailPrice, retailCurrency: w.retailCurrency,
-      gainPct: gain(w.avgSold, w.retailPrice, w.retailCurrency, currency), growth: null,
+      gainPct: gain(w.avgSold, w.retailPrice, w.retailCurrency, currency), growth: null, gapPct: null,
     })),
   ];
 
@@ -105,6 +113,7 @@ export async function getRadar(db: DB, todayIso = new Date().toISOString().slice
       retiredOwned: retired.length,
       retiredValue: Math.round(retired.reduce((t, i) => t + (i.value ?? 0) * i.qty, 0) * 100) / 100,
       medianGrowth: median(retired.flatMap((i) => (i.growth ? [i.growth.perYear] : []))),
+      medianGap: median([...retired, ...upcoming.filter((i) => i.kind === 'set')].flatMap((i) => (i.gapPct != null ? [i.gapPct] : []))),
       flagged,
     },
   };

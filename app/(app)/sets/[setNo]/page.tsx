@@ -11,9 +11,9 @@ import { listMissing, pickCopy } from '@/lib/service/missing';
 import { partout, unpricedLots } from '@/lib/service/partout';
 import { modelAuthor } from '@/lib/ldraw/omr';
 import { listSetParts } from '@/lib/service/parts';
-import { valueSourcesFor } from '@/lib/service/prices';
+import { brickLinkGuides, valueSourcesFor } from '@/lib/service/prices';
 import { getCurrency, getSet, listLocations, listSets, priceHistory } from '@/lib/service/sets';
-import { copyGuide, displayNo, setNo } from '@/lib/sets';
+import { conditionGap, copyGuide, displayNo, setGuide, setNo } from '@/lib/sets';
 import { brickPartPrice, bricklink, currentUser } from '@/lib/session';
 
 export async function generateMetadata({ params }: PageProps<'/sets/[setNo]'>) {
@@ -40,15 +40,17 @@ async function Content({ params, searchParams }: Pick<PageProps<'/sets/[setNo]'>
   const copy = pickCopy(s, /^\d+$/.test(String(sp.copy ?? '')) ? Number(sp.copy) : null, false) ?? pickCopy(s, null, false);
   const cond = copy ? (copyGuide(copy) === 'N' ? 'New' : 'Used') : null;
   const [parts, prices, currency, locations, all, model, alternates, missing] = await Promise.all([listSetParts(db, s.id), priceHistory(db, s.setNo), getCurrency(db), listLocations(db), listSets(db), getModel(db, s.id), buildMatches(db, { sourceSetNo: s.setNo }), listMissing(db, s.id, copy?.id ?? null)]);
-  const [po, unpriced, sources] = await Promise.all([partout(db, s.id, cond, currency, copy?.id ?? null), unpricedLots(db, s.id, cond, currency), valueSourcesFor(db, 'set', s.setNo, currency)]);
+  const [po, unpriced, sources, guides] = await Promise.all([partout(db, s.id, cond, currency, copy?.id ?? null), unpricedLots(db, s.id, cond, currency), valueSourcesFor(db, 'set', s.setNo, currency), brickLinkGuides(db, 'set', s.setNo, currency)]);
+  const main = setGuide(s.copies); // the guide the set's lookups use; the other one is fetched weekly
   const inUse = all.flatMap((x) => x.copies.map((c) => c.location)).filter((l): l is string => !!l);
   return (
     <SetDetail
       set={s}
       parts={parts}
-      // One line per guide: the guide of the latest lookup (the set's current prices are in it).
-      prices={prices.filter((p) => p.guide === prices.at(-1)?.guide).map((p) => ({ date: p.date, avgSold: p.avgSold }))}
-      guide={prices.at(-1)?.guide ?? null}
+      // One line: the set's own guide (its current prices are in it).
+      prices={prices.filter((p) => p.guide === main).map((p) => ({ date: p.date, avgSold: p.avgSold }))}
+      guide={main}
+      conditions={{ n: guides.N, u: guides.U, gap: conditionGap(guides.N, guides.U) }}
       currency={currency}
       locations={[...new Set([...locations, ...inUse])]}
       priced={!!bricklink()}

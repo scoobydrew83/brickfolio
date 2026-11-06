@@ -12,7 +12,7 @@ import * as svc from '@/lib/service/sets';
 import * as tokens from '@/lib/service/tokens';
 import * as share from '@/lib/service/share';
 import { importCsv } from '@/lib/service/csv';
-import { barcodeProviders, brickColors, brickMinifig, brickPartPrice, brickStore, bricklink, brickset, currentUser, rebrickable } from '@/lib/session';
+import { barcodeProviders, brickColors, brickMinifig, brickPartPrice, brickPrice, brickStore, bricklink, brickset, currentUser, rebrickable } from '@/lib/session';
 import * as barcodes from '@/lib/service/barcodes';
 import { describeSet, resolveBarcode, type Resolution, type ScanCandidate } from '@/lib/barcode/resolve';
 import { formatHint } from '@/lib/barcode/gtin';
@@ -110,7 +110,7 @@ export async function runSync(): Promise<Result> {
     const db = await getDb();
     const s = await svc.startSync(db);
     const images = (await imageStore()) ?? undefined;
-    if (s.ok) after(() => svc.runSync(db, s.runId, lookup, brickStore() ?? undefined, rebrickable() ?? undefined, brickset() ?? undefined, { minifig: brickMinifig() ?? undefined, partPrice: brickPartPrice() ?? undefined, images }));
+    if (s.ok) after(() => svc.runSync(db, s.runId, lookup, brickStore() ?? undefined, rebrickable() ?? undefined, brickset() ?? undefined, { minifig: brickMinifig() ?? undefined, partPrice: brickPartPrice() ?? undefined, price: brickPrice() ?? undefined, images }));
     return s;
   });
 }

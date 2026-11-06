@@ -4,7 +4,8 @@
 import pkg from '../../package.json';
 import { APP_NAME } from '../brand';
 import type { DB } from '../db/types';
-import { copyGuide, costBasis, dailyHistory, displayNo, filterSets, groupTotals, setGuide, setNo as fullSetNo, STATUSES, totals, type Filters, type SetRow } from '../sets';
+import { conditionGap, copyGuide, costBasis, dailyHistory, displayNo, filterSets, groupTotals, setGuide, setNo as fullSetNo, STATUSES, totals, type Filters, type SetRow } from '../sets';
+import { brickLinkGuides } from '../service/prices';
 import { collectionGain, retirement } from '../retail';
 import { getCurrency, getSet, listHistory, listSets, priceHistory, syncStatus } from '../service/sets';
 import { listWishlist } from '../service/wishlist';
@@ -93,11 +94,12 @@ export const TOOLS: Tool[] = [
       const s = await getSet(db, fullSetNo(str(a.setNo, 12)));
       if (!s) throw new Error(`Set ${str(a.setNo, 12)} isn't in the collection.`);
       const currency = await getCurrency(db);
-      const [prices, po, unpriced, missing] = await Promise.all([priceHistory(db, s.setNo), partout(db, s.id, guideCondition(s), currency), unpricedLots(db, s.id, guideCondition(s), currency), listMissing(db, s.id, pickCopy(s, null, false)?.id ?? null)]);
+      const [prices, po, unpriced, missing, guides] = await Promise.all([priceHistory(db, s.setNo), partout(db, s.id, guideCondition(s), currency), unpricedLots(db, s.id, guideCondition(s), currency), listMissing(db, s.id, pickCopy(s, null, false)?.id ?? null), brickLinkGuides(db, 'set', s.setNo, currency)]);
       return {
         currency, ...brief(s), notes: s.notes,
         copyList: s.copies.map((c) => ({ id: c.id, status: c.status, condition: c.condition, location: c.location, missingPct: c.missingPct, acquired: c.acquiredDate, built: c.buildDate, costBasis: costBasis(c), giftWithPurchase: c.gwp, estValue: r2(c.estValue), pricedFrom: c.estGuide && c.estGuide !== copyGuide(c) ? (c.estGuide === 'U' ? 'used sales' : 'new sales') : null, notes: c.notes })),
         bricklink: { avgSold: s.avgSold, minSold: s.minSold, maxSold: s.maxSold, sales: s.qtySold, lookedUp: s.lastUpdated, error: s.blError },
+        newVsUsed: conditionGap(guides.N, guides.U),
         priceHistory: prices.slice(-12).map((p) => ({ date: p.date, avgSold: p.avgSold })),
         partout: po.lots ? { value: po.value, coveragePct: po.coverage, pricedLots: po.pricedLots, lots: po.lots, unpricedLots: unpriced, ageDays: po.ageDays } : null,
         missingParts: missing.items.map((m) => ({ partNo: m.partNo, name: m.name, color: m.colorName, qty: m.qty })),
@@ -128,7 +130,7 @@ export const TOOLS: Tool[] = [
     async run(db, a) {
       const r = await getRadar(db);
       const until = new Date(Date.parse(r.today) + int(a.months, 24, 1, 60) * 30.44 * 86_400_000).toISOString().slice(0, 7);
-      const item = (i: (typeof r.retired)[number]) => ({ kind: i.kind, setNo: displayNo(i.setNo), name: i.name, flags: i.flags, exitDate: i.exitDate, qty: i.qty, value: r2(i.value), retail: i.retailPrice, gainPct: i.gainPct, growth: i.growth });
+      const item = (i: (typeof r.retired)[number]) => ({ kind: i.kind, setNo: displayNo(i.setNo), name: i.name, flags: i.flags, exitDate: i.exitDate, qty: i.qty, value: r2(i.value), retail: i.retailPrice, gainPct: i.gainPct, growth: i.growth, newOverUsedPct: i.gapPct });
       return { currency: r.currency, today: r.today, totals: r.totals, retiring: r.retiring.filter((m) => m.month <= until).map((m) => ({ month: m.month, items: m.items.map(item) })), retired: r.retired.map(item) };
     },
   },

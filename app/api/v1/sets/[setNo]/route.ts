@@ -1,14 +1,17 @@
 import { api, body, fromResult, json } from '@/lib/api';
-import { parseSetWithCopy, setNo } from '@/lib/sets';
+import { conditionGap, parseSetWithCopy, setNo } from '@/lib/sets';
+import { brickLinkGuides } from '@/lib/service/prices';
 import * as svc from '@/lib/service/sets';
 import { bricklink } from '@/lib/session';
 
 type P = { setNo: string };
 
-/** GET /api/v1/sets/:setNo – one set. 10280 and 10280-1 both work. */
+/** GET /api/v1/sets/:setNo – one set, with BrickLink's new vs. used gap. 10280 and 10280-1 both work. */
 export const GET = api<P>(async (_req, { db, params }) => {
   const s = await svc.getSet(db, setNo(params.setNo));
-  return s ? json({ set: s }) : json({ error: 'Not found' }, 404);
+  if (!s) return json({ error: 'Not found' }, 404);
+  const g = await brickLinkGuides(db, 'set', s.setNo, await svc.getCurrency(db));
+  return json({ set: s, gap: conditionGap(g.N, g.U) });
 });
 
 /**

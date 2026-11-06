@@ -3,7 +3,7 @@ import { eq } from 'drizzle-orm';
 import { barcodeRows, saveBarcode } from '../identifiers/barcodes';
 import { openNodeDb } from '../db/node';
 import type { DB } from '../db/types';
-import { sets, wishlist, locations } from '../db/schema';
+import { sets, wishlist, locations, setCopies } from '../db/schema';
 import { addScanned, forgetBarcode, parseScanFigs, parseScanItems, rememberBarcode, saveBarcodesFromBrickset, type ScanItem } from './barcodes';
 import { minifigs } from '../db/schema';
 import { syncRetail } from './retail';
@@ -66,7 +66,7 @@ it('replays a batch sent twice with the same key instead of adding it twice', as
   const again = await addScanned(db, [item('75192-1')], { ...opts, key: 'k1' });
   expect(first).toMatchObject({ ok: true, added: 1 });
   expect(again).toMatchObject({ ok: true, added: 1, replayed: true });
-  expect((await db.select().from(sets).all())[0].qty).toBe(1);
+  expect(await db.select().from(setCopies).all()).toHaveLength(1); // one copy, not two
 });
 
 it('a failed batch writes nothing and can be retried with the same key', async () => {
@@ -82,7 +82,7 @@ it('saves Brickset barcodes once and skips bad ones', async () => {
 });
 
 it('the Brickset sync saves barcodes for owned sets', async () => {
-  await db.insert(sets).values({ setNo: '75192-1', name: 'Falcon', qty: 1 });
+  await db.insert(sets).values({ setNo: '75192-1', name: 'Falcon' });
   const src: RetailSource = {
     async check() {},
     async sets(nos) { return { found: [{ setNo: '75192-1', retail: { USD: 849.99 }, launchDate: null, exitDate: null, retired: false, ean: '5702015869935', upc: '673419264150' }], asked: nos }; },

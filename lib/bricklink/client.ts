@@ -6,7 +6,26 @@ import { oauthHeader, type OAuthKeys } from './oauth';
 const BASE = 'https://api.bricklink.com/api/store/v1';
 const GAP_MS = 250; // spacing between calls, so a full sync doesn't burst
 
-export class BrickLinkError extends Error {}
+export type BrickLinkErrorKind = 'quota' | 'auth' | 'ip' | 'not_found' | 'other';
+export class BrickLinkError extends Error {
+  constructor(message: string, public kind: BrickLinkErrorKind = 'other') { super(message); }
+}
+
+/** Shown when BrickLink's daily limit is used up. The sync stops its lookups for the day when it sees it. */
+export const QUOTA_MESSAGE = "BrickLink's daily limit of 5,000 calls is used up. Prices update at the next sync.";
+
+/** A readable error for a BrickLink answer, keeping BrickLink's own words in brackets. */
+export function brickLinkError(status: number, meta: { code?: number; message?: string; description?: string } | undefined, path: string, statusText = ''): BrickLinkError {
+  const code = meta?.code ?? status;
+  const said = [meta?.message, meta?.description].filter(Boolean).join(': ') || statusText;
+  const raw = said ? ` (${said})` : '';
+  if (code === 429 || /TOO_MANY_REQUESTS|quota|limit exceeded/i.test(said)) return new BrickLinkError(QUOTA_MESSAGE, 'quota');
+  if (/TOKEN_IP_MISMATCHED|invalid ip|ip mismatch/i.test(said)) return new BrickLinkError(`BrickLink refused the access token from this server's IP address. On BrickLink's API page, register the token for IP 0.0.0.0 or this server's address${raw}.`, 'ip');
+  if (code === 401 || code === 403) return new BrickLinkError(`BrickLink rejected the API keys. Check the four BRICKLINK_* values${raw}.`, 'auth');
+  const item = decodeURIComponent(path.split('/items/')[1]?.split('/').slice(0, 2).join(' ') ?? '');
+  if (code === 404) return new BrickLinkError(item ? `BrickLink has no ${item.replace(/^(\w+) /, (_, t: string) => `${t.toLowerCase()} `)}${raw}.` : `BrickLink couldn't find that${raw}.`, 'not_found');
+  return new BrickLinkError(`${path.split('/').pop()}: ${said || 'request failed'}`);
+}
 
 export type LookupResult = {
   blName: string;
@@ -57,7 +76,10 @@ export type MinifigLookup = (figNo: string, guide: 'N' | 'U', currency: string) 
 /** Sold price for one part in one colour (1 call), for part-out value. avgSold is null when nothing sold. */
 export type PartPrice = { avgSold: number | null; qtySold: number };
 export type PartPriceLookup = (type: string, partNo: string, colorId: number | null, guide: 'N' | 'U', currency: string) => Promise<PartPrice>;
-export type BrickLink = { lookup: Lookup; minifig: MinifigLookup; partPrice: PartPriceLookup; store: Store; colors(): Promise<Color[]> };
+/** One sold price guide for an item, without its catalog entry (1 call). */
+export type SoldPrice = { avgSold: number | null; minSold: number | null; maxSold: number | null; qtySold: number };
+export type PriceLookup = (type: 'SET' | 'MINIFIG', itemNo: string, guide: 'N' | 'U', currency: string) => Promise<SoldPrice>;
+export type BrickLink = { lookup: Lookup; minifig: MinifigLookup; partPrice: PartPriceLookup; price: PriceLookup; store: Store; colors(): Promise<Color[]> };
 
 type Item = { name: string; year_released?: number; category_id?: number; image_url?: string };
 type Price = { avg_price: string; min_price: string; max_price: string; total_quantity: number; unit_quantity: number };
@@ -97,26 +119,27 @@ export function createBrickLink(keys: OAuthKeys, fetchImpl: typeof fetch = fetch
       if (retry && attempt < 2) { await new Promise((r) => setTimeout(r, 1000 * 2 ** attempt)); continue; }
       const body = (await res.json().catch(() => null)) as { meta?: { code: number; message: string; description?: string }; data?: T } | null;
       const code = body?.meta?.code ?? res.status;
-      if (code !== 200 || !body) throw new BrickLinkError(`${path.split('/').pop()}: ${body?.meta?.description || body?.meta?.message || res.statusText}`);
+      if (code !== 200 || !body) throw brickLinkError(res.status, body?.meta, path, res.statusText);
       return body.data as T;
     }
   }
 
+  /** The sold price guide for one item (1 call). With no sales BrickLink reports 0.0000; that's "—", not $0. */
+  const soldPrice: PriceLookup = async (type, itemNo, guide, currency) => {
+    const p = await get<Price>(`/items/${type}/${encodeURIComponent(itemNo)}/price`, { guide_type: 'sold', new_or_used: guide, currency_code: currency });
+    const sold = p.total_quantity > 0;
+    return { avgSold: sold ? price(p.avg_price) : null, minSold: sold ? price(p.min_price) : null, maxSold: sold ? price(p.max_price) : null, qtySold: p.total_quantity };
+  };
+
   /** Catalog entry and sold price guide for one item (2 calls). */
   async function item(type: 'SET' | 'MINIFIG', itemNo: string, guide: 'N' | 'U', currency: string): Promise<LookupResult> {
-    const no = encodeURIComponent(itemNo);
-    const item = await get<Item>(`/items/${type}/${no}`);
-    const p = await get<Price>(`/items/${type}/${no}/price`, { guide_type: 'sold', new_or_used: guide, currency_code: currency });
-    const sold = p.total_quantity > 0; // with no sales BrickLink reports 0.0000; show "—" instead of $0
+    const item = await get<Item>(`/items/${type}/${encodeURIComponent(itemNo)}`);
     return {
       blName: decode(item.name),
       year: item.year_released ?? null,
       categoryId: item.category_id ?? null,
       imageUrl: item.image_url ? (item.image_url.startsWith('//') ? 'https:' + item.image_url : item.image_url) : null,
-      avgSold: sold ? price(p.avg_price) : null,
-      minSold: sold ? price(p.min_price) : null,
-      maxSold: sold ? price(p.max_price) : null,
-      qtySold: p.total_quantity,
+      ...(await soldPrice(type, itemNo, guide, currency)),
     };
   }
 
@@ -158,7 +181,7 @@ export function createBrickLink(keys: OAuthKeys, fetchImpl: typeof fetch = fetch
   };
   const colors = async () =>
     (await get<ApiColor[]>('/colors')).map((c) => ({ id: c.color_id, name: c.color_name, rgb: c.color_code || null }));
-  return { lookup, minifig, partPrice, store, colors };
+  return { lookup, minifig, partPrice, price: soldPrice, store, colors };
 }
 
 /**
