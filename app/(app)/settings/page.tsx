@@ -15,6 +15,7 @@ import { communityStatus } from '@/lib/barcode/community';
 import { retailStats } from '@/lib/service/retail';
 import { rebrickableStats } from '@/lib/service/catalog';
 import { rebrickableRun } from '@/lib/rebrickable/run';
+import { cachedUpdateStatus } from '@/lib/service/updates';
 import { primarySource, sourceLabel, valueSources } from '@/lib/service/prices';
 
 export const metadata = { title: 'Settings' };
@@ -36,5 +37,5 @@ async function Content() {
   const db = await getDb();
   const [locations, currency, tokens, shares, source, sources] = await Promise.all([listLocations(db), getCurrency(db), listTokens(db), listShareLinks(db), primarySource(db), valueSources(db)]);
   const valueSource = { current: source, options: sources.map((s): [string, string] => [s, sourceLabel(s)]) };
-  return <Settings locations={locations} currency={currency} valueSource={valueSource} tokens={tokens} shares={shares} user={user.user} authMode={authMode()} priced={!!bricklink()} alerts={!!alertsFromEnv()} rebrickable={{ key: !!rebrickable(), stats: await rebrickableStats(db), run: rebrickableRun() }} brickset={{ key: !!brickset(), stats: await retailStats(db) }} ldraw={await libraryStatus()} barcodes={{ caps: barcodeCaps(), saved: await barcodeStats(db), community: await communityStatus(db) }} />;
+  return <Settings version={await cachedUpdateStatus(db)} locations={locations} currency={currency} valueSource={valueSource} tokens={tokens} shares={shares} user={user.user} authMode={authMode()} priced={!!bricklink()} alerts={!!alertsFromEnv()} rebrickable={{ key: !!rebrickable(), stats: await rebrickableStats(db), run: rebrickableRun() }} brickset={{ key: !!brickset(), stats: await retailStats(db) }} ldraw={await libraryStatus()} barcodes={{ caps: barcodeCaps(), saved: await barcodeStats(db), community: await communityStatus(db) }} />;
 }

@@ -5,6 +5,7 @@ import { headers } from 'next/headers';
 import { after } from 'next/server';
 import { getDb } from '@/lib/db';
 import { imageStore } from '@/lib/images/cache';
+import { checkForUpdate, type UpdateStatus } from '@/lib/service/updates';
 import { parseCopyInput, parseQuickList, parseSetWithCopy } from '@/lib/sets';
 import * as copies from '@/lib/service/copies';
 import * as prices from '@/lib/service/prices';
@@ -270,6 +271,13 @@ export async function downloadLdrawLibrary(): Promise<Result> {
 }
 
 export type ImageCacheStatus = { kind: 'disk' | 'r2' | null; count: number; bytes: number };
+
+/** Settings → the running version and the latest release (asks GitHub when the stored answer is a day old, or `force`). */
+export async function updateStatus(force = false): Promise<UpdateStatus | null> {
+  if (!(await currentUser())) return null;
+  if (force && isDemo()) return null;
+  return checkForUpdate(await getDb(), { force });
+}
 
 /** Settings → where cached photos live and how many there are. */
 export async function imageCacheStatus(): Promise<ImageCacheStatus | null> {

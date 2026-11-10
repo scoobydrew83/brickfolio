@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useState, useTransition } from 'react';
-import { clearImageCache, imageCacheStatus, type ImageCacheStatus, shareCodes, syncCommunityNow, bricksetStatus, downloadLdrawLibrary, ldrawLibraryStatus, rebrickableStatus, syncBricksetNow, syncRebrickableNow, testBricksetKey, testRebrickableKey, type BricksetStatus, type RebrickableStatus, addLocation, createShareLink, createToken, deleteLocation, revokeShareLink, importFile, renameLocation, revokeToken, setCurrency, setValueSource, type Result } from '@/app/actions';
+import { updateStatus, clearImageCache, imageCacheStatus, type ImageCacheStatus, shareCodes, syncCommunityNow, bricksetStatus, downloadLdrawLibrary, ldrawLibraryStatus, rebrickableStatus, syncBricksetNow, syncRebrickableNow, testBricksetKey, testRebrickableKey, type BricksetStatus, type RebrickableStatus, addLocation, createShareLink, createToken, deleteLocation, revokeShareLink, importFile, renameLocation, revokeToken, setCurrency, setValueSource, type Result } from '@/app/actions';
 import { Copy } from 'lucide-react';
 import { Banner, Button, Select, field } from './ui';
 import { PageHeader } from './shell/PageHeader';
@@ -12,14 +12,15 @@ import Link from 'next/link';
 type BarcodeStatus = { caps: BarcodeCapabilities; saved: { total: number; user: number; community: number; brickset: number; providers: number }; community: CommunityStatus };
 
 import type { ShareLinkRow } from '@/lib/service/share';
+import type { UpdateStatus } from '@/lib/service/updates';
 
 type Token = { id: number; name: string; prefix: string; createdAt: string; lastUsedAt: string | null };
-type Props = { locations: string[]; currency: string; valueSource: { current: string; options: [string, string][] }; tokens: Token[]; shares: ShareLinkRow[]; user: string; authMode: string; priced: boolean; alerts: boolean; rebrickable: RebrickableStatus; brickset: BricksetStatus; ldraw: LibraryStatus; barcodes: BarcodeStatus };
+type Props = { version: UpdateStatus; locations: string[]; currency: string; valueSource: { current: string; options: [string, string][] }; tokens: Token[]; shares: ShareLinkRow[]; user: string; authMode: string; priced: boolean; alerts: boolean; rebrickable: RebrickableStatus; brickset: BricksetStatus; ldraw: LibraryStatus; barcodes: BarcodeStatus };
 
 const h2 = 'text-lg font-extrabold [font-stretch:110%]';
 const section = 'space-y-3 border-t border-line pt-6';
 
-export default function Settings({ locations, currency, valueSource, tokens, shares, user, authMode, priced, alerts, rebrickable, brickset, ldraw, barcodes }: Props) {
+export default function Settings({ version, locations, currency, valueSource, tokens, shares, user, authMode, priced, alerts, rebrickable, brickset, ldraw, barcodes }: Props) {
   const [pending, start] = useTransition();
   const [message, setMessage] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
   const [newToken, setNewToken] = useState<string | null>(null);
@@ -130,6 +131,7 @@ export default function Settings({ locations, currency, valueSource, tokens, sha
 
       <section className={`${section} text-sm text-fg-2`}>
         <h2 className={`${h2} text-fg`}>About this server</h2>
+        <VersionInfo initial={version} />
         <p>Signed in as <b>{user}</b> · Auth mode <b>{authMode}</b> · BrickLink keys <b>{priced ? 'set' : 'not set'}</b> · Rebrickable key <b>{rebrickable.key ? 'set' : 'not set'}</b> · Brickset key <b>{brickset.key ? 'set' : 'not set'}</b> · Wishlist alerts <b>{alerts ? 'on' : 'off'}</b></p>
         {!alerts && <p>To get a message when a wishlist set drops under your target, set <code className="rounded-chip bg-muted px-1">ALERT_WEBHOOK_URL</code> to an ntfy topic, a Discord webhook or any URL that accepts JSON.</p>}
       </section>
@@ -364,6 +366,39 @@ function LdrawSection({ initial }: { initial: LibraryStatus }) {
         </>
       )}
     </section>
+  );
+}
+
+/** The running version, and whether a newer release is out (refreshed in the background when a day old). */
+function VersionInfo({ initial }: { initial: UpdateStatus }) {
+  const [st, setSt] = useState(initial);
+  const [checking, startCheck] = useTransition();
+  useEffect(() => {
+    if (!initial.enabled) return;
+    if (initial.checkedAt && Date.now() - Date.parse(initial.checkedAt) < 86_400_000) return;
+    updateStatus().then((s) => s && setSt(s), () => {});
+  }, [initial]);
+  const when = st.checkedAt ? new Date(st.checkedAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : null;
+  const check = () => startCheck(async () => { const s = await updateStatus(true); if (s) setSt(s); });
+  return (
+    <div className="space-y-2">
+      <p>
+        Brickfolio <b className="tabular-nums">{st.current}</b>
+        {!st.enabled ? <> · update check off (<code className="rounded-chip bg-muted px-1">UPDATE_CHECK=off</code>)</>
+          : st.updateAvailable ? null
+          : st.latest ? <> · up to date{when ? ` (checked ${when})` : ''}</>
+          : <> · {st.error ?? 'not checked for updates yet'}</>}
+      </p>
+      {st.updateAvailable && (
+        <Banner kind="ok">
+          Brickfolio <b className="tabular-nums">{st.latest}</b> is available.{' '}
+          {st.url && <a href={st.url} target="_blank" rel="noreferrer noopener" className="font-semibold underline">What&apos;s new</a>}{' · '}
+          <a href="https://github.com/scoobydrew83/brickfolio/blob/main/docs/install.md#updating" target="_blank" rel="noreferrer noopener" className="font-semibold underline">How to update</a>
+        </Banner>
+      )}
+      {st.enabled && st.latest && st.error && <p className="text-xs text-fg-3">{st.error}</p>}
+      {st.enabled && <Button variant="secondary" size="sm" loading={checking} onClick={check}>Check for updates</Button>}
+    </div>
   );
 }
 

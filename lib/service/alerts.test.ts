@@ -89,7 +89,7 @@ it('alerts once on a retailer offer under target, separately from the BrickLink 
   expect(sent).toHaveLength(0);
 
   await offer(599.99, '2026-11-06T09:00:00Z', { source: 'retailer:target' });
-  expect(await underTargetCount(db)).toBe(1);
+  expect(await underTargetCount(db, day('06'))).toBe(1);
   await notifyUnderTarget(db, send, day('06'));
   expect(sent).toHaveLength(1);
   expect(sent[0]).toMatchObject({ title: 'Millennium Falcon: Target offer under your target', url: 'https://www.lego.com/75192', items: [{ setNo: '75192', offer: 599.99, source: 'retailer:target', target: 650 }] });

@@ -23,6 +23,7 @@ import { notifyRetiring } from './radar';
 import { notifyDesigner } from './designer';
 import { addMinifig, syncMinifigs } from './minifigs';
 import { syncCommunity } from '../barcode/community';
+import { checkForUpdate } from './updates';
 import type { ImageStore } from '../images/cache';
 import { warmImages } from './images';
 import { estValue, parseLocation, placeholderName, setGuide, totals, withCopies, type Condition, type CopyInput, type CopyRow, type HistoryRow, type QuickList, type SetInput, type SetRow } from '../sets';
@@ -371,6 +372,8 @@ export async function runSync(db: DB, runId: number, lookup: Lookup, store?: Sto
     const retireError = send ? await notifyRetiring(db, send) : null;
     if (retireError) catalogErrors.push(retireError);
     const designerError = send ? await notifyDesigner(db, send) : null;
+    // Whether a newer Brickfolio release is out (at most once a day; shown in Settings, never in the sync message).
+    await checkForUpdate(db);
     if (designerError) catalogErrors.push(designerError);
     // 3D models from LDraw's OMR, only when a parts library is set up (the 3D view needs it anyway).
     const hasLibrary = !!(process.env.LDRAW_LIBRARY_DIR || process.env.LDRAW_LIBRARY_URL);

@@ -6,27 +6,17 @@ import Link from 'next/link';
 import { acquireWish, addWish, editWish, removeWish, type Result } from '@/app/actions';
 import type { WishRow } from '@/lib/service/wishlist';
 import { displayNo } from '@/lib/sets';
+import { timeAgo, wishStatus } from '@/lib/wishlist-status';
 import { blLink, moneyIn, type Money } from './board/ui';
 import { RetireChip } from './board/SetCard';
 import { retirement } from '@/lib/retail';
 import { PageHeader } from './shell/PageHeader';
-import { Banner, Button, Chip, Dialog, EmptyState, IconButton, buttonClass, cx, field, type Tone } from './ui';
-
-type Status = { tone: Tone; label: string; rank: number };
-
-/** Where a wish stands against its target. Lower rank sorts first. */
-function status(w: WishRow): Status {
-  if (w.blError) return { tone: 'danger', label: 'Lookup failed', rank: 4 };
-  if (w.avgSold === null) return { tone: 'neutral', label: 'No recent sales', rank: 3 };
-  if (w.target === null) return { tone: 'neutral', label: 'No target', rank: 2 };
-  if (w.avgSold <= w.target) return { tone: 'ok', label: 'Under target', rank: 0 };
-  return { tone: 'neutral', label: `${Math.round(((w.avgSold - w.target) / w.target) * 100)}% above`, rank: 1 };
-}
+import { Banner, Button, Chip, Dialog, EmptyState, IconButton, buttonClass, cx, field } from './ui';
 
 export type WishOffer = { amount: number; label: string; url: string | null; observedAt: string };
 const ago = (iso: string) => { const d = Math.floor((Date.now() - Date.parse(iso)) / 86_400_000); return d <= 0 ? 'today' : d === 1 ? 'yesterday' : `${d} days ago`; };
 
-export default function WishlistView({ items, currency, priced, offers = {} }: { items: WishRow[]; currency: string; priced: boolean; offers?: Record<string, WishOffer> }) {
+export default function WishlistView({ items, currency, priced, offers = {}, lastSync = null }: { items: WishRow[]; currency: string; priced: boolean; offers?: Record<string, WishOffer>; lastSync?: string | null }) {
   const money = useMemo(() => moneyIn(currency), [currency]);
   const [editing, setEditing] = useState<WishRow | 'new' | null>(null);
   const [message, setMessage] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
@@ -38,8 +28,9 @@ export default function WishlistView({ items, currency, priced, offers = {} }: {
       if (r.ok) after?.();
     });
 
-  const rows = useMemo(() => items.map((w) => ({ w, s: status(w) })).sort((a, b) => a.s.rank - b.s.rank || (a.w.avgSold ?? 0) / (a.w.target || 1) - (b.w.avgSold ?? 0) / (b.w.target || 1)), [items]);
-  const under = rows.filter((r) => r.s.rank === 0).map((r) => r.w);
+  const rows = useMemo(() => items.map((w) => ({ w, s: wishStatus(w, offers[w.setNo]) })).sort((a, b) => a.s.rank - b.s.rank || (a.w.avgSold ?? 0) / (a.w.target || 1) - (b.w.avgSold ?? 0) / (b.w.target || 1)), [items, offers]);
+  const underRows = rows.filter((r) => r.s.rank === 0);
+  const under = underRows.map((r) => r.w);
 
   return (
     <div className="space-y-6">
@@ -48,12 +39,17 @@ export default function WishlistView({ items, currency, priced, offers = {} }: {
         badge={<span className="text-sm text-fg-3 tabular-nums">{items.length} {items.length === 1 ? 'set' : 'sets'}</span>}
         actions={<span className="flex flex-wrap gap-2"><Link href="/scan" className={buttonClass()}><ScanBarcode aria-hidden className="size-4" />Scan</Link><Button variant="primary" icon={Plus} onClick={() => setEditing('new')}>Add to wishlist</Button></span>}
       >
-        <p>{priced ? 'Prices are BrickLink average sold prices for the condition you want, refreshed in the daily sync.' : 'Add BrickLink API keys to price your wishlist.'}</p>
+        <p>{priced ? <>Prices are BrickLink average sold prices for the condition you want, checked in the daily sync{lastSync ? <> (last run {timeAgo(lastSync)})</> : null} and when you add a set. Offers your own flows post show under the price.</> : 'Add BrickLink API keys to price your wishlist.'}</p>
       </PageHeader>
 
       {message && <Banner kind={message.kind} onDismiss={() => setMessage(null)}>{message.text}</Banner>}
       {under.length === 1 && (
-        <Banner kind="ok">{under[0].name ?? displayNo(under[0].setNo)} is under your target: average sold {money(under[0].avgSold)}, target {money(under[0].target)}.</Banner>
+        <Banner kind="ok">
+          {under[0].name ?? displayNo(under[0].setNo)} is under your target:{' '}
+          {underRows[0].s.by === 'offer' && offers[under[0].setNo]
+            ? <>{offers[under[0].setNo].label} offer {money(offers[under[0].setNo].amount)}</>
+            : <>average sold {money(under[0].avgSold)}</>}, target {money(under[0].target)}.
+        </Banner>
       )}
       {under.length > 1 && <Banner kind="ok">{under.length} sets are under your target. They’re at the top of the list.</Banner>}
 
@@ -82,6 +78,7 @@ export default function WishlistView({ items, currency, priced, offers = {} }: {
               <span className="flex flex-col items-end gap-1 text-right">
                 <span className="text-lg font-extrabold tabular-nums [font-stretch:112%]" title="BrickLink average sold">{money(w.avgSold)}</span>
                 <Chip tone={s.tone}>{s.label}</Chip>
+                <span className="text-xs text-fg-3" suppressHydrationWarning>{w.lastUpdated ? `Checked ${timeAgo(w.lastUpdated)}` : 'Not checked yet'}</span>
                 {offers[w.setNo] && (() => {
                   const o = offers[w.setNo];
                   const text = <>Offer <b className={cx('tabular-nums', w.target != null && o.amount <= w.target && 'text-ok')}>{money(o.amount)}</b> at {o.label}, {ago(o.observedAt)}</>;

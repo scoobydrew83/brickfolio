@@ -262,6 +262,12 @@ const spec = {
     '/barcodes/export': {
       get: { summary: 'Your own confirmed barcodes and minifigure box codes in the community list format (CC0), for sharing. Codes and names only.', responses: { 200: ok({ type: 'object', properties: { license: { type: 'string' }, sets: { type: 'array', items: { type: 'object' } }, minifigs: { type: 'array', items: { type: 'object' } } } }) } },
     },
+    '/version': {
+      get: {
+        summary: 'The running version and, unless UPDATE_CHECK=off, the latest release on GitHub (checked at most once a day)',
+        responses: { 200: ok({ type: 'object', properties: { current: { type: 'string' }, enabled: { type: 'boolean' }, latest: nullable('string'), updateAvailable: { type: 'boolean' }, url: nullable('string'), checkedAt: nullable('string'), error: nullable('string') } }) },
+      },
+    },
     '/prices': {
       post: {
         summary: 'Post retailer offers (or retail prices) found by your own flows, at most 200. Wishlist alerts follow when an offer is at or under target. Sources bricklink, brickowl, brickeconomy and brickset are refused. Send an Idempotency-Key header: the same key again returns the first answer with `replayed: true`.',

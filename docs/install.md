@@ -374,6 +374,8 @@ Don't turn demo mode on for your own collection: it stops all changes and syncs.
 
 ## Updating
 
+**Settings → About this server** shows the version you're running and, once a day, checks GitHub for a newer release; a dot on the Settings tab means one is out. Only GitHub's public releases list is fetched (nothing about your collection is sent); set `UPDATE_CHECK=off` to turn it off.
+
 ```bash
 docker compose pull
 docker compose up -d
@@ -381,7 +383,7 @@ docker compose up -d
 
 Database changes are applied automatically when the app starts. Your data lives in the `data` volume and is kept. The app also backs it up daily to `/data/backups`, so you can roll back. See [Data and backups](../README.md#data-and-backups).
 
-For Cloudflare Workers, pull the latest code and run `npm run cf:deploy` again.
+For Cloudflare Workers set up with the **Deploy to Cloudflare** button, open your copy of the repo on GitHub and click **Sync fork**; Workers Builds deploys it, migrations included. Deployed from the CLI instead: pull the latest code and run `npm run cf:deploy` again.
 
 ## Troubleshooting
 

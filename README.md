@@ -97,6 +97,7 @@ In Sheets, use **File → Download → Comma-separated values** on the Sets, His
 
 - Docker keeps the database at `/data/app.db` in the `data` volume, and writes a copy to `/data/backups` daily (keeps `BACKUP_KEEP`, default 7).
 - Restore by stopping the app and copying a backup over `app.db`.
+- **Settings → About this server** shows the version and whether a newer release is out (a daily check of GitHub's public releases; `UPDATE_CHECK=off` turns it off). See [Updating](docs/install.md#updating).
 - **Settings → Download all sets as CSV** gives a portable export at any time.
 - Photos for share pages and offline scanning are cached in `/data/images` (R2 on Cloudflare). It can be deleted at any time, or emptied in **Settings → Image cache**; photos are fetched again when needed.
 

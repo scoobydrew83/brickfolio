@@ -3,6 +3,7 @@ import { connection } from 'next/server';
 import { Suspense } from 'react';
 import { getDb } from '@/lib/db';
 import { underTargetCount } from '@/lib/service/alerts';
+import { cachedUpdateStatus } from '@/lib/service/updates';
 import { currentUser } from '@/lib/session';
 import { APP_NAME } from '@/lib/brand';
 import { INSTALL_URL, isDemo } from '@/lib/demo';
@@ -37,8 +38,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
 /** The nav with the count of wishlist sets under target. Never blocks or breaks the page. */
 async function NavWithAlerts({ variant }: { variant?: 'top' | 'bottom' }) {
-  const alerts = (await currentUser()) ? await getDb().then(underTargetCount).catch(() => 0) : 0;
-  return <Nav variant={variant} alerts={alerts} />;
+  const user = await currentUser();
+  const alerts = user ? await getDb().then(underTargetCount).catch(() => 0) : 0;
+  // Only the stored answer: the nav never waits on GitHub.
+  const update = user ? await getDb().then(cachedUpdateStatus).then((u) => u.updateAvailable).catch(() => false) : false;
+  return <Nav variant={variant} alerts={alerts} update={update} />;
 }
 
 /** DEMO_MODE=on: a strip under the header. Read per request, so the same build serves both. */

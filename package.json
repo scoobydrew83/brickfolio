@@ -19,37 +19,37 @@
     "cf:typegen": "wrangler types --env-interface CloudflareEnv cloudflare-env.d.ts"
   },
   "dependencies": {
-    "@opennextjs/cloudflare": "^1.20.14",
+    "@opennextjs/cloudflare": "^1.20.16",
     "@tesseract.js-data/eng": "^1.0.0",
     "@zxing/browser": "^0.2.1",
     "@zxing/library": "^0.23.0",
     "better-sqlite3": "^13.0.3",
     "drizzle-orm": "^0.45.4",
     "jose": "^6.2.14",
-    "lucide-react": "^1.66.0",
-    "next": "16.4.3",
+    "lucide-react": "^1.69.0",
+    "next": "16.4.5",
     "pdf-lib": "^1.17.1",
     "react": "19.3.1",
     "react-dom": "19.3.1",
     "server-only": "^0.0.1",
     "tesseract.js": "^7.0.0",
-    "three": "0.186.1"
+    "three": "0.187.0"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^5.20261030.1",
+    "@cloudflare/workers-types": "^5.20261104.1",
     "@tailwindcss/turbopack": "^4",
     "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^26.6.6",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "@types/three": "0.186.0",
+    "@types/three": "0.187.0",
     "drizzle-kit": "^0.31.11",
     "eslint": "^10",
-    "eslint-config-next": "16.4.3",
+    "eslint-config-next": "16.4.5",
     "tailwindcss": "^4",
     "typescript": "^5",
     "vitest": "^5.0.5",
-    "wrangler": "^4.156.0"
+    "wrangler": "^4.158.0"
   },
   "license": "Apache-2.0",
   "cloudflare": {

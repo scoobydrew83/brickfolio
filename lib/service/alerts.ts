@@ -66,9 +66,9 @@ async function offersUnderTarget(db: DB, wishes: Wish[], currency: string, now =
 }
 
 /** How many wishes are under target right now, on BrickLink's average or a recent offer (for the nav badge). */
-export async function underTargetCount(db: DB): Promise<number> {
+export async function underTargetCount(db: DB, now = new Date()): Promise<number> {
   const avg = new Set((await db.select({ id: wishlist.id }).from(wishlist).where(under).all()).map((r) => r.id));
-  const offers = await offersUnderTarget(db, await db.select().from(wishlist).all(), await getCurrency(db));
+  const offers = await offersUnderTarget(db, await db.select().from(wishlist).all(), await getCurrency(db), now);
   return new Set([...avg, ...offers.keys()]).size;
 }
 
