@@ -190,6 +190,20 @@
       "when": 1793934570798,
       "tag": "0026_wishlist_offer_alerts",
       "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "6",
+      "when": 1794393175703,
+      "tag": "0027_layouts",
+      "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "6",
+      "when": 1794395512800,
+      "tag": "0028_loose_parts",
+      "breakpoints": true
     }
   ]
 }

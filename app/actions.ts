@@ -28,6 +28,11 @@ import * as missing from '@/lib/service/missing';
 import * as figs from '@/lib/service/minifigs';
 import * as partout from '@/lib/service/partout';
 import * as designer from '@/lib/service/designer';
+import * as layouts from '@/lib/service/layouts';
+import * as lots from '@/lib/service/lots';
+import * as alloc from '@/lib/service/allocations';
+import * as builds from '@/lib/service/builds';
+import { detectKind, FILE_KINDS, MAX_BYTES, type FileKind } from '@/lib/service/partfile';
 import type { MissingItem } from '@/lib/service/missing';
 import * as ldraw from '@/lib/ldraw/download';
 import { DEMO_ERROR, isDemo } from '@/lib/demo';
@@ -35,7 +40,7 @@ import { rebrickableStats, type RebrickableStats } from '@/lib/service/catalog';
 import { retailStats, syncRetail, type RetailStats } from '@/lib/service/retail';
 import { rebrickableRun, startRebrickableSync, type RebrickableRun } from '@/lib/rebrickable/run';
 
-export type Result = svc.Result<{ token?: string; url?: string }>;
+export type Result = svc.Result<{ token?: string; url?: string; id?: number }>;
 
 /** Runs `fn` for a signed-in user, turns thrown errors into a Result, and refreshes the page on success. */
 async function act(fn: () => Promise<svc.Result<object>>): Promise<Result> {
@@ -44,7 +49,7 @@ async function act(fn: () => Promise<svc.Result<object>>): Promise<Result> {
   try {
     const r = await fn();
     if (r.ok) refresh();
-    return r.ok ? { ok: true, ...('token' in r ? { token: String(r.token) } : {}), ...('url' in r ? { url: String(r.url) } : {}) } : r;
+    return r.ok ? { ok: true, ...('token' in r ? { token: String(r.token) } : {}), ...('url' in r ? { url: String(r.url) } : {}), ...('id' in r ? { id: Number(r.id) } : {}) } : r;
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }
@@ -83,12 +88,17 @@ export async function addCopy(setNo: string, form: Record<string, unknown>): Pro
   });
 }
 
-export async function editCopy(copyId: number, form: Record<string, unknown>): Promise<Result> {
-  return act(async () => {
+/** Changes a copy. Parting it out makes loose-part lots of its parts (the message says how many). */
+export async function editCopy(copyId: number, form: Record<string, unknown>): Promise<Result & { message?: string }> {
+  let message = '';
+  const r = await act(async () => {
     const db = await getDb();
     const p = parseCopyInput(form, true, await svc.listLocations(db));
-    return p.ok ? copies.editCopy(db, copyId, p.value, bricklink()) : p;
+    const res = p.ok ? await copies.editCopy(db, copyId, p.value, bricklink()) : p;
+    if (res.ok && 'lots' in res && res.lots !== undefined) message = res.lots ? `Saved. Its parts are now ${res.lots} loose-part ${res.lots === 1 ? 'lot' : 'lots'} (Parts → Loose parts).` : "Saved. It has no parts list yet, so no loose-part lots were made.";
+    return res;
   });
+  return r.ok ? { ...r, message } : r;
 }
 
 /** Removes a copy; the set goes with its last one. */
@@ -495,6 +505,212 @@ export async function editDesignerProject(id: number, form: Record<string, unkno
 
 export async function removeDesignerProject(id: number): Promise<Result> {
   return act(async () => designer.removeProject(await getDb(), id));
+}
+
+// ---- loose parts ----
+
+const plural = (n: number, one: string, many = `${one}s`) => `${n.toLocaleString()} ${n === 1 ? one : many}`;
+
+/** Loose-part lots for the Loose parts page. */
+export async function searchLots(f: lots.LotFilter): Promise<{ lots: lots.LotRow[]; total: number; pieces: number }> {
+  if (!(await currentUser())) return { lots: [], total: 0, pieces: 0 };
+  const db = await getDb();
+  await parts.ensureColors(db, brickColors());
+  return lots.listLots(db, { q: String(f.q ?? '').slice(0, 100), location: f.location === undefined ? undefined : String(f.location), limit: 200, offset: Number(f.offset) || 0 });
+}
+
+export async function addLot(form: Record<string, unknown>): Promise<Result> {
+  return act(async () => {
+    const db = await getDb();
+    const p = lots.parseLotInput(form, await svc.listLocations(db));
+    return p.ok ? lots.addLot(db, p.value) : p;
+  });
+}
+
+export async function editLot(id: number, form: Record<string, unknown>): Promise<Result> {
+  return act(async () => {
+    const db = await getDb();
+    const p = lots.parseLotInput(form, await svc.listLocations(db), true);
+    return p.ok ? lots.editLot(db, Number(id), p.value) : p;
+  });
+}
+
+/** `force` removes a reserved lot too, with its reservations. */
+export async function removeLot(id: number, force = false): Promise<Result> {
+  return act(async () => lots.removeLot(await getDb(), Number(id), !!force));
+}
+
+/** Imports an uploaded BrickLink XML or Rebrickable CSV into one location. Returns the batch (for undo) and a summary. */
+export async function importLotsFile(form: FormData): Promise<Result & { message?: string; batch?: string }> {
+  const file = form.get('file');
+  if (!(file instanceof File) || !file.size) return { ok: false, error: 'Choose a BrickLink XML or Rebrickable CSV file.' };
+  if (file.size > MAX_BYTES) return { ok: false, error: 'The file is over 5 MB.' };
+  let message = '', batch = '';
+  const r = await act(async () => {
+    const db = await getDb();
+    const text = await file.text();
+    const asked = String(form.get('kind') ?? '');
+    const kind = (FILE_KINDS as readonly string[]).includes(asked) ? asked as FileKind : detectKind(text, file.name);
+    if (!kind) return { ok: false, error: "Couldn't tell what kind of file this is. Choose BrickLink XML or Rebrickable CSV." };
+    const location = String(form.get('location') ?? '').trim() || null;
+    if (location && !(await svc.listLocations(db)).includes(location)) return { ok: false, error: `Unknown location "${location}".` };
+    const mode = form.get('mode') === 'replace' ? 'replace' : 'add';
+    const res = await lots.importLots(db, { kind, text, location, mode, approximate: form.get('approximate') === 'on', fileName: file.name }, { rebrickable: rebrickable() });
+    if (res.ok) {
+      batch = res.batch;
+      message = [
+        `Imported ${plural(res.pieces, 'piece')}: ${plural(res.lots, 'new lot')}${res.merged ? `, ${res.merged} ${mode === 'add' ? 'added to' : 'replaced in'} existing lots` : ''}${location ? ` in ${location}` : ''}.`,
+        res.unmapped ? `${plural(res.unmapped, 'line')} had no BrickLink match and won't count for builds.` : '',
+        res.skipped ? `${plural(res.skipped, 'line')} with quantity 0 skipped.` : '',
+        res.note ?? '',
+      ].filter(Boolean).join(' ');
+    }
+    return res;
+  });
+  return r.ok ? { ...r, message, batch } : r;
+}
+
+export async function undoLotImport(batch: string): Promise<Result & { message?: string }> {
+  let message = '';
+  const r = await act(async () => {
+    const res = await lots.undoImport(await getDb(), String(batch));
+    if (res.ok) message = `Import undone: ${plural(res.removed, 'lot')} removed, ${plural(res.restored, 'lot')} back to ${res.restored === 1 ? 'its' : 'their'} earlier quantity.${res.kept ? ` ${plural(res.kept, 'lot')} changed by a later import ${res.kept === 1 ? 'was' : 'were'} left as ${res.kept === 1 ? 'it is' : 'they are'}.` : ''}`;
+    return res;
+  });
+  return r.ok ? { ...r, message } : r;
+}
+
+// ---- builds and reservations ----
+
+/** Adds a Rebrickable MOC ({ kind: 'moc', mocNo }) or your own build ({ kind: 'custom', name }). */
+export async function addBuild(form: Record<string, unknown>): Promise<Result & { mocNo?: string }> {
+  let mocNo = '';
+  const r = await act(async () => {
+    const p = builds.parseBuildInput(form);
+    if (!p.ok) return p;
+    const res = await builds.addBuild(await getDb(), p.value, rebrickable());
+    if (res.ok) mocNo = res.mocNo;
+    return res;
+  });
+  return r.ok ? { ...r, mocNo } : r;
+}
+
+export async function removeBuild(mocNo: string): Promise<Result> {
+  return act(async () => builds.removeBuild(await getDb(), String(mocNo)));
+}
+
+/** Uploads a MOC's or your own build's parts list (BrickLink XML or Rebrickable CSV). */
+export async function uploadBuildParts(mocNo: string, form: FormData): Promise<Result & { message?: string }> {
+  const file = form.get('file');
+  if (!(file instanceof File) || !file.size) return { ok: false, error: 'Choose a BrickLink XML or Rebrickable CSV file.' };
+  if (file.size > MAX_BYTES) return { ok: false, error: 'The file is over 5 MB.' };
+  let message = '';
+  const r = await act(async () => {
+    const text = await file.text();
+    const kind = detectKind(text, file.name);
+    if (!kind) return { ok: false, error: "Couldn't tell what kind of file this is. Use BrickLink XML (.xml) or a Rebrickable CSV (.csv)." };
+    const res = await builds.setBuildParts(await getDb(), String(mocNo), kind, text, rebrickable());
+    if (res.ok) message = [`Parts list saved: ${plural(res.pieces, 'piece')} in ${plural(res.lines, 'lot')}.`, res.unmapped ? `${plural(res.unmapped, 'lot')} had no BrickLink match.` : '', res.skipped ? `${plural(res.skipped, 'line')} skipped (not parts).` : '', res.note ?? ''].filter(Boolean).join(' ');
+    return res;
+  });
+  return r.ok ? { ...r, message } : r;
+}
+
+/** Loose parts reserved for a build, for its reservations dialog. */
+export async function buildReservations(mocNo: string): Promise<alloc.Reservation[]> {
+  if (!(await currentUser())) return [];
+  return alloc.listReservations(await getDb(), { mocNo: String(mocNo) });
+}
+
+export async function reserveParts(mocNo: string, lotId: number, qty: number): Promise<Result> {
+  return act(async () => alloc.reserve(await getDb(), String(mocNo), Number(lotId), Number(qty)));
+}
+
+const reservedMessage = (r: { pieces: number; short: number }) =>
+  r.pieces ? `Reserved ${plural(r.pieces, 'piece')} from loose parts.${r.short ? ` ${plural(r.short, 'piece')} still not covered by loose parts.` : ''}`
+    : r.short ? `Nothing more to reserve: no free loose parts match the ${plural(r.short, 'piece')} still needed.` : 'Everything it needs is already reserved.';
+
+/** Reserves what a build still needs from free loose parts. */
+export async function autoReserveParts(mocNo: string): Promise<Result & { message?: string }> {
+  let message = '';
+  const r = await act(async () => {
+    const res = await alloc.autoReserve(await getDb(), String(mocNo));
+    if (res.ok) message = reservedMessage(res);
+    return res;
+  });
+  return r.ok ? { ...r, message } : r;
+}
+
+/** Releases one lot, or everything reserved for the build. */
+export async function releaseParts(mocNo: string, lotId?: number): Promise<Result> {
+  return act(async () => alloc.release(await getDb(), String(mocNo), lotId === undefined ? undefined : Number(lotId)));
+}
+
+// ---- MILS layouts ----
+
+/** Ids from the client: positive whole numbers only. */
+const ids = (v: unknown) => (Array.isArray(v) ? v.map(Number).filter((n) => Number.isInteger(n) && n > 0) : []);
+
+/** Returns the new layout's id. */
+export async function createLayout(form: Record<string, unknown>): Promise<Result> {
+  return act(async () => {
+    const p = layouts.parseLayoutInput(form);
+    return p.ok ? layouts.createLayout(await getDb(), p.value) : p;
+  });
+}
+
+/** Renames or resizes a layout. */
+export async function editLayout(id: number, form: Record<string, unknown>): Promise<Result> {
+  return act(async () => {
+    const p = layouts.parseLayoutInput(form, true);
+    return p.ok ? layouts.editLayout(await getDb(), Number(id), p.value) : p;
+  });
+}
+
+export async function deleteLayout(id: number): Promise<Result> {
+  return act(async () => layouts.deleteLayout(await getDb(), Number(id)));
+}
+
+/** Places a module; returns its id. */
+export async function addLayoutModule(layoutId: number, form: Record<string, unknown>): Promise<Result> {
+  return act(async () => {
+    const p = layouts.parseModuleInput(form);
+    return p.ok ? layouts.addModule(await getDb(), Number(layoutId), p.value) : p;
+  });
+}
+
+/** Moves, turns, retypes or renames a module. */
+export async function editLayoutModule(moduleId: number, form: Record<string, unknown>): Promise<Result> {
+  return act(async () => {
+    const p = layouts.parseModuleInput(form, true);
+    return p.ok ? layouts.editModule(await getDb(), Number(moduleId), p.value) : p;
+  });
+}
+
+export async function removeLayoutModule(moduleId: number): Promise<Result> {
+  return act(async () => layouts.removeModule(await getDb(), Number(moduleId)));
+}
+
+/** Replaces the set copies and builds on a module. */
+export async function setLayoutModuleItems(moduleId: number, items: { setCopyIds: unknown; buildIds: unknown }): Promise<Result> {
+  return act(async () => layouts.setModuleItems(await getDb(), Number(moduleId), { setCopyIds: ids(items?.setCopyIds), buildIds: ids(items?.buildIds) }));
+}
+
+/** Reserves loose parts for every build on a layout. */
+export async function reserveForLayout(id: number): Promise<Result & { message?: string }> {
+  let message = '';
+  const r = await act(async () => {
+    const res = await layouts.reserveForLayout(await getDb(), Number(id));
+    if (res.ok) message = res.builds ? `${reservedMessage(res)} (${plural(res.builds, 'build')} on this layout)` : 'No builds on this layout to reserve for.';
+    return res;
+  });
+  return r.ok ? { ...r, message } : r;
+}
+
+/** Set copies and builds to link to a module, for the Link dialog. */
+export async function searchLayoutItems(q: string): Promise<layouts.Linkable[]> {
+  if (!(await currentUser())) return [];
+  return layouts.searchLinkables(await getDb(), String(q ?? '').slice(0, 100));
 }
 
 // ---- barcode scanner ----

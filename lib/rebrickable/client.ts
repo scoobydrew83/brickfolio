@@ -50,6 +50,16 @@ export type IdCatalog = {
   partsPage(url?: string | null): Promise<{ parts: RbPart[]; next: string | null }>;
 };
 
+/** Looks up named parts (for mapping an imported Rebrickable CSV to BrickLink numbers), and colours. */
+export type PartLookup = {
+  colors(): Promise<RbColor[]>;
+  /** The given Rebrickable part numbers with their BrickLink and LDraw numbers; unknown ones are left out. */
+  partsByNumbers(partNos: string[]): Promise<RbPart[]>;
+};
+
+/** One Rebrickable MOC's name and photo, for a MOC added by number. */
+export type MocSource = { moc(mocNo: string): Promise<RbBuild | null> };
+
 /** Alternate builds and their parts, for "What can I build?". */
 export type BuildSource = {
   alternates(setNo: string): Promise<RbBuild[]>;
@@ -87,7 +97,7 @@ class NotFound extends Error {}
 /** Only links back to the API are followed, so the key is never sent anywhere else. */
 const ours = (url: string | null | undefined) => (url?.startsWith(BASE + '/') ? url : null);
 
-export function createRebrickable(key: string, fetchImpl: typeof fetch = fetch, gapMs = GAP_MS): Catalog & BuildSource & FigSource & IdCatalog {
+export function createRebrickable(key: string, fetchImpl: typeof fetch = fetch, gapMs = GAP_MS): Catalog & BuildSource & FigSource & IdCatalog & PartLookup & MocSource {
   let last = 0;
   async function get<T>(urlOrPath: string): Promise<T> {
     const url = urlOrPath.startsWith('http') ? urlOrPath : BASE + urlOrPath;
@@ -173,6 +183,25 @@ export function createRebrickable(key: string, fetchImpl: typeof fetch = fetch, 
       const page = await get<Page<ApiPart>>(url || first);
       return { parts: page.results.map((p) => ({ partNo: p.part_num, name: p.name ?? p.part_num, ...partIds(p.external_ids) })), next: ours(page.next) };
     },
+    async partsByNumbers(partNos) {
+      const out: RbPart[] = [];
+      const nos = [...new Set(partNos.filter(Boolean))];
+      for (let i = 0; i < nos.length; i += 100) {
+        const q = nos.slice(i, i + 100).map(encodeURIComponent).join(',');
+        const rows = await all<ApiPart>(`/lego/parts/?part_nums=${q}&page_size=100&inc_part_details=1`);
+        out.push(...rows.map((p) => ({ partNo: p.part_num, name: p.name ?? p.part_num, ...partIds(p.external_ids) })));
+      }
+      return out;
+    },
+    async moc(mocNo) {
+      try {
+        const b = await get<ApiBuild>(`/lego/mocs/${encodeURIComponent(mocNo)}/`);
+        return { mocNo: b.set_num, name: b.name, numParts: b.num_parts ?? null, imageUrl: b.moc_img_url ?? null, url: b.moc_url ?? null, designer: b.designer_name ?? null };
+      } catch (e) {
+        if (e instanceof NotFound) return null;
+        throw e;
+      }
+    },
     async themeFigs(themeId) {
       return (await all<ApiFig>(`/lego/minifigs/?in_theme_id=${themeId}&page_size=1000`)).map((f) => ({
         figNo: f.set_num, name: f.name, numParts: f.num_parts ?? null, imageUrl: f.set_img_url ?? null,
@@ -190,7 +219,7 @@ export function createRebrickable(key: string, fetchImpl: typeof fetch = fetch, 
 }
 
 /** Client from REBRICKABLE_API_KEY, or null when it isn't set (the feature is optional). */
-export function rebrickableFromEnv(): (Catalog & BuildSource & FigSource & IdCatalog) | null {
+export function rebrickableFromEnv(): (Catalog & BuildSource & FigSource & IdCatalog & PartLookup & MocSource) | null {
   const key = process.env.REBRICKABLE_API_KEY;
   return key ? createRebrickable(key) : null;
 }

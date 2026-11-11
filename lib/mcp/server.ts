@@ -15,6 +15,9 @@ import { listMinifigs, minifigTotals } from '../service/minifigs';
 import { partout, unpricedLots } from '../service/partout';
 import { listMissing, pickCopy } from '../service/missing';
 import { searchParts } from '../service/parts';
+import { layoutNeeds, listLayouts } from '../service/layouts';
+import { listLots } from '../service/lots';
+import { sizeLabel } from '../layouts';
 import { resolveBarcode } from '../barcode/resolve';
 import { resolveFigCode } from '../barcode/figcodes';
 
@@ -165,6 +168,38 @@ export const TOOLS: Tool[] = [
     async run(db, a) {
       const r = await searchParts(db, { q: str(a.query, 80), limit: int(a.limit, 50, 1, 500) });
       return { total: r.total, parts: r.parts.map((p) => ({ partNo: p.partNo, name: p.name, color: p.colorName, type: p.type, qty: p.qty, alternate: p.alternate, setNo: displayNo(p.setNo), setName: p.setName })) };
+    },
+  },
+  {
+    name: 'list_part_lots',
+    title: 'Loose parts',
+    description: 'Loose parts the owner keeps outside sets (bins, drawers, parted-out sets), searchable by part number, name, colour or location, with what is reserved on each lot for which build.',
+    inputSchema: { type: 'object', properties: { query: { type: 'string' }, location: { type: 'string' }, limit: { type: 'integer', minimum: 1, maximum: 500, default: 100 } } },
+    async run(db, a) {
+      const r = await listLots(db, { q: str(a.query, 80) || undefined, location: str(a.location, 80) || undefined, limit: int(a.limit, 100, 1, 500) });
+      return {
+        total: r.total, pieces: r.pieces,
+        lots: r.lots.map((l) => ({ type: l.type, partNo: l.partNo, name: l.name, color: l.colorName, qty: l.qty, approximate: l.approximate, location: l.location, from: l.from, bricklinkMatch: l.mapped, reserved: l.reserved, reservedFor: l.reservedFor.map((b) => b.name) })),
+      };
+    },
+  },
+  {
+    name: 'layout_needs',
+    title: 'MILS layout parts to buy',
+    description: "The owner's MILS layouts (grids of 32 × 32-stud baseplate modules), and for one layout the parts it still needs: each build's whole parts list (parts in the owner's sets are not taken off, since those sets stand on the layout too) plus parts marked missing from linked set copies, totalled by part and colour. Without `layout`, lists the layouts.",
+    inputSchema: { type: 'object', properties: { layout: { type: 'string', description: 'Layout name or id' }, limit: { type: 'integer', minimum: 1, maximum: 1000, default: 200 } } },
+    async run(db, a) {
+      const all = await listLayouts(db);
+      const q = str(a.layout, 80).toLowerCase();
+      const list = all.map((l) => ({ id: l.id, name: l.name, size: sizeLabel(l.cols, l.rows), modules: l.modules }));
+      if (!q) return { layouts: list };
+      const l = all.find((x) => String(x.id) === q) ?? all.find((x) => x.name.toLowerCase() === q) ?? all.find((x) => x.name.toLowerCase().includes(q));
+      if (!l) return { error: `No layout matches "${str(a.layout, 80)}".`, layouts: list };
+      const n = (await layoutNeeds(db, l.id))!;
+      return {
+        layout: { id: l.id, name: l.name, size: sizeLabel(l.cols, l.rows) }, totals: n.totals, builds: n.builds, setCopies: n.copies, unmappedLines: n.unmapped, buildsWithoutPartsList: n.buildsWithoutParts,
+        lines: n.lines.slice(0, int(a.limit, 200, 1, 1000)).map((x) => ({ type: x.type, partNo: x.partNo, color: x.colorName, name: x.name, need: x.need, inLooseParts: x.inLots, toBuy: x.toBuy })),
+      };
     },
   },
   {

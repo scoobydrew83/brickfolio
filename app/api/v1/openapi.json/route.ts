@@ -9,6 +9,10 @@ const nullable = (type: string) => ({ type: [type, 'null'] });
 const copyQ = { name: 'copy', in: 'query', required: false, schema: { type: 'integer' }, description: 'Copy id. Defaults to the only copy, the only Partial copy, or the first; required for a PUT when that is ambiguous.' };
 const money = { ...nullable('number'), minimum: 0, maximum: 1_000_000 };
 const date = { ...nullable('string'), format: 'date' };
+const layoutId = { name: 'id', in: 'path', required: true, schema: { type: 'integer' }, description: 'Layout id' };
+const moduleId = { name: 'moduleId', in: 'path', required: true, schema: { type: 'integer' }, description: 'Module id (on this layout)' };
+const mocNo = { name: 'mocNo', in: 'path', required: true, schema: { type: 'string', example: 'MOC-12345' } };
+const KINDS = ['plain', 'road_straight', 'road_corner', 'road_t', 'road_cross', 'custom'];
 
 const spec = {
   openapi: '3.1.0',
@@ -45,6 +49,50 @@ const spec = {
           status: { enum: ['sealed', 'built', 'in_progress', 'parted_out'] }, acquiredDate: date, buildDate: date, pricePaid: money, tax: money, shipping: money, gwp: { type: 'boolean' }, copyNotes: nullable('string'),
         },
         description: 'Condition, location and Missing % apply to the copies: on add, to the new copies; on PATCH, to the only copy (409 with several). qty adds or removes copies. Copy fields (status, dates, cost, gwp, copyNotes) go on new copies.',
+      },
+      LotInput: {
+        type: 'object',
+        properties: {
+          partNo: { type: 'string', example: '3001' }, colorId: { ...nullable('integer'), description: 'BrickLink colour' }, qty: { type: 'integer', minimum: 1 },
+          type: { enum: ['PART', 'MINIFIG', 'GEAR', 'BOOK', 'CATALOG', 'INSTRUCTION', 'SET', 'ORIGINAL_BOX'] }, condition: { enum: ['N', 'U', null] },
+          location: { ...nullable('string'), description: 'One of your locations' }, approximate: { type: 'boolean' }, name: nullable('string'), notes: nullable('string'),
+        },
+        description: 'partNo and qty are required to add; any subset to change.',
+      },
+      LayoutInput: {
+        type: 'object',
+        properties: { name: { type: 'string', maxLength: 80 }, cols: { type: 'integer', minimum: 1, maximum: 24 }, rows: { type: 'integer', minimum: 1, maximum: 24 }, notes: nullable('string') },
+        description: 'name, cols and rows are required to create; any subset to change.',
+      },
+      LayoutSummary: { type: 'object', properties: { id: { type: 'integer' }, name: { type: 'string' }, cols: { type: 'integer' }, rows: { type: 'integer' }, notes: nullable('string'), modules: { type: 'integer' }, createdAt: { type: 'string' }, updatedAt: { type: 'string' } } },
+      Layout: {
+        type: 'object',
+        properties: { id: { type: 'integer' }, name: { type: 'string' }, cols: { type: 'integer' }, rows: { type: 'integer' }, notes: nullable('string'), modules: { type: 'array', items: ref('LayoutModule') }, createdAt: { type: 'string' }, updatedAt: { type: 'string' } },
+      },
+      ModuleInput: {
+        type: 'object',
+        properties: {
+          x: { type: 'integer', minimum: 0, maximum: 23, description: 'Top-left column, 0-based' }, y: { type: 'integer', minimum: 0, maximum: 23, description: 'Top-left row, 0-based' },
+          w: { type: 'integer', minimum: 1, maximum: 2 }, h: { type: 'integer', minimum: 1, maximum: 2 }, rotation: { enum: [0, 90, 180, 270], description: '90 and 270 swap the footprint\'s w and h' },
+          kind: { enum: KINDS }, name: { ...nullable('string'), maxLength: 60 }, notes: nullable('string'),
+        },
+      },
+      LayoutModule: {
+        type: 'object',
+        properties: {
+          id: { type: 'integer' }, x: { type: 'integer' }, y: { type: 'integer' }, w: { type: 'integer' }, h: { type: 'integer' }, rotation: { enum: [0, 90, 180, 270] }, kind: { enum: KINDS },
+          name: nullable('string'), notes: nullable('string'),
+          items: { type: 'array', items: { type: 'object', properties: { kind: { enum: ['copy', 'build'] }, refId: { type: 'integer', description: 'Set copy id or build id' }, name: { type: 'string' }, imageUrl: nullable('string'), setNo: { type: 'string' }, detail: { type: 'string' }, url: nullable('string') } } },
+        },
+      },
+      LayoutNeeds: {
+        type: 'object',
+        properties: {
+          lines: { type: 'array', items: { type: 'object', properties: { type: { type: 'string' }, partNo: { type: 'string' }, colorId: nullable('integer'), name: { type: 'string' }, colorName: nullable('string'), rgb: nullable('string'), need: { type: 'integer' }, inLots: { type: 'integer', description: 'Free loose parts that could cover it' }, toBuy: { type: 'integer' }, modules: { type: 'array', items: { type: 'integer' } } } } },
+          totals: { type: 'object', properties: { needLots: { type: 'integer' }, needPieces: { type: 'integer' }, inLots: { type: 'integer' }, toBuyLots: { type: 'integer' }, toBuyPieces: { type: 'integer' } } },
+          unmapped: { type: 'integer', description: 'Build lines without BrickLink numbers, left out' }, builds: { type: 'integer' }, copies: { type: 'integer' },
+          buildsWithoutParts: { type: 'integer' }, modules: { type: 'object', additionalProperties: { type: 'integer' }, description: 'Pieces to buy per module id' },
+        },
       },
       Copy: {
         type: 'object',
@@ -329,8 +377,74 @@ const spec = {
       patch: { summary: 'Change target, condition, name or notes', requestBody: { content: { 'application/json': {} } }, responses: { 200: ok({ type: 'object' }), 400: err, 404: err } },
       delete: { summary: 'Remove from the wishlist', responses: { 200: ok({ type: 'object' }), 404: err } },
     },
-    '/builds': { get: { summary: 'Alternate builds of your sets (Rebrickable) and how much of each you can make', parameters: [{ name: 'set', in: 'query', schema: { type: 'string' } }], responses: { 200: ok({ type: 'object', properties: { builds: { type: 'array', items: { type: 'object' } } } }) } } },
+    '/builds': {
+      get: { summary: 'Builds (alternates of your sets, Rebrickable MOCs, your own) and how much of each you can make from set parts, free loose parts and loose parts reserved for it', parameters: [{ name: 'set', in: 'query', schema: { type: 'string' } }, { name: 'kind', in: 'query', schema: { enum: ['alternate', 'moc', 'custom'] } }], responses: { 200: ok({ type: 'object', properties: { builds: { type: 'array', items: { type: 'object' } } } }), 400: err } },
+      post: { summary: "Add a Rebrickable MOC by number (its parts list comes with the next sync) or your own build", requestBody: { required: true, content: { 'application/json': { schema: { oneOf: [{ type: 'object', required: ['kind', 'mocNo'], properties: { kind: { const: 'moc' }, mocNo: { type: 'string', example: 'MOC-12345' }, name: { type: 'string' } } }, { type: 'object', required: ['kind', 'name'], properties: { kind: { const: 'custom' }, name: { type: 'string' } } }] } } } }, responses: { 201: ok({ type: 'object', properties: { mocNo: { type: 'string' } } }, 'Created'), 400: err, 404: err, 409: err } },
+    },
+    '/builds/{mocNo}': { delete: { summary: 'Remove a MOC or your own build, with its reservations. Alternates come from the sync and are refused (409).', parameters: [mocNo], responses: { 200: ok({ type: 'object' }), 404: err, 409: err } } },
+    '/builds/{mocNo}/parts': { put: { summary: "Replace a MOC's or your own build's parts list", parameters: [mocNo], requestBody: { required: true, content: { 'application/xml': {}, 'text/csv': {} } }, responses: { 200: ok({ type: 'object', properties: { lines: { type: 'integer' }, pieces: { type: 'integer' }, unmapped: { type: 'integer' }, skipped: { type: 'integer' } } }), 400: err, 404: err, 409: err, 413: err, 415: err } } },
+    '/builds/{mocNo}/reservations': {
+      parameters: [mocNo],
+      get: { summary: 'Loose parts reserved for the build, by lot', responses: { 200: ok({ type: 'object', properties: { reservations: { type: 'array', items: { type: 'object' } } } }), 404: err } },
+      post: { summary: 'Set how many of a lot are reserved for the build (0 releases). Only parts the build uses; never more than the lot has free of other builds.', requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['lotId', 'qty'], properties: { lotId: { type: 'integer' }, qty: { type: 'integer', minimum: 0 } } } } } }, responses: { 200: ok({ type: 'object' }), 400: err, 404: err, 409: err } },
+      delete: { summary: 'Release one lot, or everything reserved for the build', parameters: [{ name: 'lot', in: 'query', schema: { type: 'integer' } }], responses: { 200: ok({ type: 'object', properties: { pieces: { type: 'integer' } } }), 404: err } },
+    },
+    '/builds/{mocNo}/reservations/auto': { post: { summary: 'Reserve what the build still needs from free loose parts: exact counts first, then by location order, then the biggest lot', parameters: [mocNo], responses: { 200: ok({ type: 'object', properties: { reserved: { type: 'integer' }, pieces: { type: 'integer' }, short: { type: 'integer' } } }), 404: err } } },
+    '/parts/lots': {
+      get: { summary: 'Loose-part lots, with what is reserved on each', parameters: [{ name: 'q', in: 'query', schema: { type: 'string' } }, { name: 'location', in: 'query', schema: { type: 'string' }, description: '"-" for lots with no location' }, { name: 'limit', in: 'query', schema: { type: 'integer', maximum: 1000 } }, { name: 'offset', in: 'query', schema: { type: 'integer' } }], responses: { 200: ok({ type: 'object', properties: { lots: { type: 'array', items: { type: 'object' } }, total: { type: 'integer' }, pieces: { type: 'integer' } } }) } },
+      post: { summary: 'Add a lot', requestBody: { required: true, content: { 'application/json': { schema: ref('LotInput') } } }, responses: { 201: ok({ type: 'object', properties: { id: { type: 'integer' } } }, 'Created'), 400: err } },
+    },
+    '/parts/lots/{id}': {
+      parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }],
+      patch: { summary: "Change a lot. Its qty can't go below what's reserved on it (409).", requestBody: { required: true, content: { 'application/json': { schema: ref('LotInput') } } }, responses: { 200: ok({ type: 'object' }), 400: err, 404: err, 409: err } },
+      delete: { summary: 'Remove a lot. A reserved lot needs ?force=1, which releases its reservations.', parameters: [{ name: 'force', in: 'query', schema: { enum: ['1'] } }], responses: { 200: ok({ type: 'object' }), 404: err, 409: err } },
+    },
+    '/parts/lots/import': {
+      post: {
+        summary: 'Import BrickLink XML (Wanted List, inventory or Studio export) or a Rebrickable parts CSV into one location. A malformed file is refused whole.',
+        parameters: [{ name: 'location', in: 'query', schema: { type: 'string' } }, { name: 'mode', in: 'query', schema: { enum: ['add', 'replace'], default: 'add' } }, { name: 'approximate', in: 'query', schema: { enum: ['1', '0'] } }],
+        requestBody: { required: true, content: { 'application/xml': {}, 'text/csv': {} } },
+        responses: { 201: ok({ type: 'object', properties: { batch: { type: 'string' }, lots: { type: 'integer' }, pieces: { type: 'integer' }, merged: { type: 'integer' }, unmapped: { type: 'integer' }, skipped: { type: 'integer' } } }, 'Imported'), 400: err, 409: err, 413: err, 415: err },
+      },
+    },
+    '/parts/lots/import/{batch}': { delete: { summary: 'Undo an import', parameters: [{ name: 'batch', in: 'path', required: true, schema: { type: 'string' } }], responses: { 200: ok({ type: 'object', properties: { removed: { type: 'integer' }, restored: { type: 'integer' }, kept: { type: 'integer' } } }), 404: err, 409: err } } },
+    '/layouts/{id}/reserve': { post: { summary: 'Reserve loose parts for every build on the layout', parameters: [layoutId], responses: { 200: ok({ type: 'object', properties: { builds: { type: 'integer' }, reserved: { type: 'integer' }, pieces: { type: 'integer' }, short: { type: 'integer' } } }), 404: err } } },
     '/builds/{mocNo}/wanted.xml': { get: { summary: 'Missing parts for a build as a BrickLink Wanted List', parameters: [{ name: 'mocNo', in: 'path', required: true, schema: { type: 'string' } }], responses: { 200: { description: 'XML', content: { 'application/xml': {} } }, 404: err } } },
+    '/layouts': {
+      get: { summary: 'Your MILS layouts, with how many modules each has', responses: { 200: ok({ type: 'object', properties: { layouts: { type: 'array', items: ref('LayoutSummary') } } }) } },
+      post: { summary: 'Create a layout: a grid of cols × rows modules of 32 × 32 studs', requestBody: { required: true, content: { 'application/json': { schema: ref('LayoutInput') } } }, responses: { 201: ok({ type: 'object', properties: { layout: ref('Layout') } }, 'Created'), 400: err } },
+    },
+    '/layouts/{id}': {
+      parameters: [layoutId],
+      get: { summary: 'A layout with its modules and the set copies and builds on each', responses: { 200: ok({ type: 'object', properties: { layout: ref('Layout') } }), 404: err } },
+      patch: { summary: 'Rename or resize. A size that would cut off a module is refused.', requestBody: { required: true, content: { 'application/json': { schema: ref('LayoutInput') } } }, responses: { 200: ok({ type: 'object', properties: { layout: ref('Layout') } }), 400: err, 404: err, 409: err } },
+      delete: { summary: 'Delete the layout with its modules and links. Set copies and builds stay.', responses: { 200: ok({ type: 'object' }), 404: err } },
+    },
+    '/layouts/{id}/modules': {
+      parameters: [layoutId],
+      post: { summary: 'Place a module on empty cells', requestBody: { required: true, content: { 'application/json': { schema: { ...ref('ModuleInput'), required: ['x', 'y'] } } } }, responses: { 201: ok({ type: 'object', properties: { module: ref('LayoutModule') } }, 'Created'), 400: err, 404: err, 409: { ...err, description: 'Overlaps another module or leaves the layout' } } },
+    },
+    '/layouts/{id}/modules/{moduleId}': {
+      parameters: [layoutId, moduleId],
+      patch: { summary: 'Move, turn, resize, retype or rename a module', requestBody: { required: true, content: { 'application/json': { schema: ref('ModuleInput') } } }, responses: { 200: ok({ type: 'object', properties: { module: ref('LayoutModule') } }), 400: err, 404: err, 409: err } },
+      delete: { summary: 'Remove a module and its links', responses: { 200: ok({ type: 'object' }), 404: err } },
+    },
+    '/layouts/{id}/modules/{moduleId}/items': {
+      parameters: [layoutId, moduleId],
+      put: {
+        summary: 'Replace the set copies and builds on a module. Each stands on one module at a time: one already on another is refused (409) with where it is.',
+        requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', properties: { setCopyIds: { type: 'array', items: { type: 'integer' } }, buildIds: { type: 'array', items: { type: 'integer' } } } } } } },
+        responses: { 200: ok({ type: 'object', properties: { module: ref('LayoutModule') } }), 400: err, 404: err, 409: err },
+      },
+    },
+    '/layouts/{id}/needs': {
+      parameters: [layoutId],
+      get: {
+        summary: "Every part the layout still needs, one line per part and colour: each build's parts list (parts in your sets are not taken off) plus parts marked missing from linked set copies",
+        responses: { 200: ok(ref('LayoutNeeds')), 404: err },
+      },
+    },
+    '/layouts/{id}/wanted.xml': { get: { summary: 'The parts to buy for a layout as a BrickLink Wanted List', parameters: [layoutId], responses: { 200: { description: 'XML', content: { 'application/xml': {} } }, 404: err } } },
     '/export.csv': { get: { summary: 'Export all sets as CSV', responses: { 200: { description: 'CSV', content: { 'text/csv': {} } } } } },
     '/import': { post: { summary: 'Import a Sets, History or Parts CSV', requestBody: { content: { 'text/csv': {} } }, responses: { 200: ok({ type: 'object', properties: { kind: { type: 'string' }, count: { type: 'integer' } } }), 400: err } } },
   },

@@ -7,6 +7,7 @@ import type { DB } from '../db/types';
 import { copyGuide, displayNo, estValue, setGuide, type CopyInput, type CopyRow, type SetRow } from '../sets';
 import { copiesBySet, getCurrency, getSet, lookupInto, today, type Result } from './sets';
 import { hasMissing } from './missing';
+import { partOutCopy, unPartCopy } from './lots';
 import { latestGuide, primarySource, recentAmount } from './prices';
 
 /** A BrickLink price in the other guide is used for a copy's value when it's at most this old. */
@@ -112,7 +113,7 @@ export async function addCopy(db: DB, no: string, input: CopyInput, lookup: Look
  * Changes a copy. Sealed means New (a Partial copy can't be sealed). While parts are marked missing on it, its
  * Missing % comes from them and isn't typed.
  */
-export async function editCopy(db: DB, copyId: number, input: CopyInput, lookup: Lookup | null = null): Promise<Result<{ set: SetRow }>> {
+export async function editCopy(db: DB, copyId: number, input: CopyInput, lookup: Lookup | null = null): Promise<Result<{ set: SetRow; lots?: number }>> {
   const c = await getCopy(db, copyId);
   if (!c) return { ok: false, status: 404, error: `Copy ${copyId} doesn't exist.` };
   const fields: CopyInput = { ...input };
@@ -123,11 +124,18 @@ export async function editCopy(db: DB, copyId: number, input: CopyInput, lookup:
     fields.condition = 'New';
   }
   if (fields.gwp) fields.pricePaid = 0;
+  // A copy parted out becomes loose-part lots; put back together, its lots go (refused if they were changed or reserved).
+  const partingOut = after.status === 'parted_out' && c.status !== 'parted_out';
+  if (c.status === 'parted_out' && after.status !== 'parted_out') {
+    const r = await unPartCopy(db, copyId);
+    if (!r.ok) return r;
+  }
   if (Object.keys(fields).length) await db.update(setCopies).set({ ...fields, updatedAt: nowIso() }).where(eq(setCopies.id, copyId));
+  const lots = partingOut ? await partOutCopy(db, copyId) : undefined;
   await touch(db, c.setId);
   const s = (await getSet(db, c.setNo))!;
   await reprice(db, s, lookup);
-  return { ok: true, set: (await getSet(db, c.setNo))! };
+  return { ok: true, set: (await getSet(db, c.setNo))!, ...(lots !== undefined ? { lots } : {}) };
 }
 
 /** Removes a copy. The set goes with its last copy. `remaining` counts copies that aren't parted out. */

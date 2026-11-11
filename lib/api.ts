@@ -54,3 +54,24 @@ export const csvBody = async (req: Request): Promise<string> => {
   if (mediaType(req) !== 'text/csv') throw new HttpError(415, 'Send the file with Content-Type: text/csv.');
   return req.text();
 };
+
+/** BrickLink XML request body. Rejects other Content-Types with 415. */
+export const xmlBody = async (req: Request): Promise<string> => {
+  const t = mediaType(req);
+  if (t !== 'application/xml' && t !== 'text/xml') throw new HttpError(415, 'Send the file with Content-Type: application/xml.');
+  return req.text();
+};
+
+/**
+ * A parts file: BrickLink XML (application/xml, text/xml) or a Rebrickable CSV (text/csv), told apart by Content-Type.
+ * Other types get 415, and bodies over 5 MB get 413.
+ */
+export async function partsFileBody(req: Request): Promise<{ kind: 'bricklink_xml' | 'rebrickable_csv'; text: string }> {
+  const t = mediaType(req);
+  const kind = t === 'text/csv' ? 'rebrickable_csv' as const : t === 'application/xml' || t === 'text/xml' ? 'bricklink_xml' as const : null;
+  if (!kind) throw new HttpError(415, 'Send BrickLink XML as application/xml, or a Rebrickable CSV as text/csv.');
+  if (Number(req.headers.get('content-length') ?? 0) > 5_000_000) throw new HttpError(413, 'The file is over 5 MB.');
+  const text = kind === 'bricklink_xml' ? await xmlBody(req) : await csvBody(req);
+  if (text.length > 5_000_000) throw new HttpError(413, 'The file is over 5 MB.');
+  return { kind, text };
+}

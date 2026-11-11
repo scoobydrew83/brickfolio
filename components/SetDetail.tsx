@@ -35,10 +35,10 @@ export default function SetDetail({ set: s, parts, prices, currency, locations, 
   const copyLabel = (c: CopyRow) => `Copy ${s.copies.indexOf(c) + 1}`;
   const [message, setMessage] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
   const [pending, start] = useTransition();
-  const act = (fn: () => Promise<Result>, ok: string, after?: () => void) =>
+  const act = (fn: () => Promise<Result & { message?: string }>, ok: string, after?: () => void) =>
     start(async () => {
       const r = await fn();
-      setMessage(r.ok ? { kind: 'ok', text: ok } : { kind: 'error', text: r.error });
+      setMessage(r.ok ? { kind: 'ok', text: r.message || ok } : { kind: 'error', text: r.error });
       if (r.ok) after?.();
     });
 

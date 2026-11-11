@@ -1,7 +1,8 @@
 // Database schema. Plain SQLite, so the same tables work in a local file (Docker) and in Cloudflare D1.
 // After changing it, run `npm run db:generate` to write a migration into ./drizzle.
 import { sql } from 'drizzle-orm';
-import { index, integer, real, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
+import { check, index, integer, real, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
+import { MODULE_KINDS } from '../layouts';
 
 const now = sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`;
 
@@ -301,19 +302,24 @@ export const setModels = sqliteTable('set_models', {
 /** Alternate builds (MOCs) of sets you own, from Rebrickable, for "What can I build?". */
 export const builds = sqliteTable('builds', {
   id: integer('id').primaryKey({ autoIncrement: true }),
-  mocNo: text('moc_no').notNull().unique(), // Rebrickable's number, e.g. MOC-12345
+  mocNo: text('moc_no').notNull().unique(), // Rebrickable's number, e.g. MOC-12345; custom-<random> for your own builds
   name: text('name').notNull(),
   numParts: integer('num_parts'),
   imageUrl: text('image_url'),
   url: text('url'),
   designer: text('designer'),
-  sourceSetNo: text('source_set_no').notNull(), // the owned set it's an alternate build of
+  // The owned set it's an alternate build of. '' for MOCs and your own builds: kept not null because making it
+  // nullable would rebuild the table, and on D1 that cascades and deletes every build_parts row (same idea as color_id -1).
+  sourceSetNo: text('source_set_no').notNull(),
   partsFetchedAt: text('parts_fetched_at'),
   // Why there's no parts list: Rebrickable refused it ('forbidden', e.g. a private or paid MOC) or doesn't have it.
   // Such builds are skipped until partsCheckedAt is 90 days old (lib/service/builds.ts).
   partsError: text('parts_error', { enum: ['forbidden', 'not_found'] }),
   partsCheckedAt: text('parts_checked_at'),
   fetchedAt: text('fetched_at').notNull().default(now),
+  // alternate: found by the sync for an owned set; moc: a Rebrickable MOC you added (the sync fetches its parts);
+  // custom: your own build, with a parts list you upload.
+  kind: text('kind', { enum: ['alternate', 'moc', 'custom'] }).notNull().default('alternate'),
 });
 
 /** A build's parts, in BrickLink numbers when Rebrickable maps them (`mapped`). */
@@ -506,4 +512,110 @@ export const idempotencyKeys = sqliteTable(
     createdAt: text('created_at').notNull().default(now),
   },
   (t) => [index('idempotency_keys_created').on(t.createdAt)],
+);
+
+/** MILS layouts: a grid of cols × rows baseplate modules (32 × 32 studs each). See lib/layouts.ts. */
+export const layouts = sqliteTable('layouts', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  name: text('name').notNull(),
+  cols: integer('cols').notNull(), // 1–24 modules
+  rows: integer('rows').notNull(),
+  notes: text('notes'),
+  createdAt: text('created_at').notNull().default(now),
+  updatedAt: text('updated_at').notNull().default(now),
+});
+
+/**
+ * A module placed on a layout: top-left cell (x, y), w × h modules before rotation. Overlap and bounds are checked in
+ * lib/service/layouts.ts; the unique index only backs up the top-left corners.
+ */
+export const layoutModules = sqliteTable(
+  'layout_modules',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    layoutId: integer('layout_id').notNull().references(() => layouts.id, { onDelete: 'cascade' }),
+    x: integer('x').notNull(),
+    y: integer('y').notNull(),
+    w: integer('w').notNull().default(1),
+    h: integer('h').notNull().default(1),
+    rotation: integer('rotation').notNull().default(0), // 0, 90, 180 or 270
+    kind: text('kind', { enum: MODULE_KINDS }).notNull().default('plain'),
+    name: text('name'),
+    notes: text('notes'),
+    createdAt: text('created_at').notNull().default(now),
+    updatedAt: text('updated_at').notNull().default(now),
+  },
+  (t) => [index('layout_modules_layout').on(t.layoutId), uniqueIndex('layout_modules_cell').on(t.layoutId, t.x, t.y)],
+);
+
+/** What stands on a module: a set copy or a build, exactly one. Each copy or build is on at most one module (service). */
+export const layoutModuleItems = sqliteTable(
+  'layout_module_items',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    moduleId: integer('module_id').notNull().references(() => layoutModules.id, { onDelete: 'cascade' }),
+    setCopyId: integer('set_copy_id').references(() => setCopies.id, { onDelete: 'cascade' }),
+    buildId: integer('build_id').references(() => builds.id, { onDelete: 'cascade' }),
+  },
+  (t) => [
+    uniqueIndex('layout_module_items_copy').on(t.moduleId, t.setCopyId),
+    uniqueIndex('layout_module_items_build').on(t.moduleId, t.buildId),
+    index('layout_module_items_set_copy').on(t.setCopyId),
+    index('layout_module_items_build_id').on(t.buildId),
+    check('layout_module_items_one', sql`(${t.setCopyId} is null) <> (${t.buildId} is null)`),
+  ],
+);
+
+/**
+ * Loose parts outside sets: a bin, a drawer, a bag, or a parted-out set copy. BrickLink part and colour numbers
+ * (color_id -1 = none), or Rebrickable's when there's no match (`mapped` false). Not unique: one part can be in two bins.
+ */
+export const partLots = sqliteTable(
+  'part_lots',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    type: text('type').notNull().default('PART'), // PART, MINIFIG, GEAR, …
+    partNo: text('part_no').notNull(),
+    colorId: integer('color_id').notNull().default(-1),
+    name: text('name'), // display only
+    qty: integer('qty').notNull(),
+    condition: text('condition', { enum: ['N', 'U'] }),
+    location: text('location'),
+    source: text('source', { enum: ['bin', 'set_copy'] }).notNull().default('bin'),
+    setCopyId: integer('set_copy_id').references(() => setCopies.id, { onDelete: 'set null' }),
+    approximate: integer('approximate', { mode: 'boolean' }).notNull().default(false),
+    mapped: integer('mapped', { mode: 'boolean' }).notNull().default(true),
+    importBatch: text('import_batch'), // the import that created or last changed it
+    importPrevQty: integer('import_prev_qty'), // its qty before that import; null when the import created it
+    notes: text('notes'),
+    createdAt: text('created_at').notNull().default(now),
+    updatedAt: text('updated_at').notNull().default(now),
+  },
+  (t) => [index('part_lots_part').on(t.partNo, t.colorId), index('part_lots_location').on(t.location), index('part_lots_set_copy').on(t.setCopyId), index('part_lots_batch').on(t.importBatch)],
+);
+
+/** Imports into part_lots, for the list of recent imports and undo. */
+export const partLotImports = sqliteTable('part_lot_imports', {
+  id: text('id').primaryKey(), // the batch id on part_lots.import_batch
+  kind: text('kind', { enum: ['bricklink_xml', 'rebrickable_csv'] }).notNull(),
+  fileName: text('file_name'),
+  location: text('location'),
+  mode: text('mode', { enum: ['add', 'replace'] }).notNull(),
+  lots: integer('lots').notNull(),
+  pieces: integer('pieces').notNull(),
+  undoneAt: text('undone_at'),
+  createdAt: text('created_at').notNull().default(now),
+});
+
+/** Loose parts set aside for a build: they count as available for that build only. */
+export const partAllocations = sqliteTable(
+  'part_allocations',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    buildId: integer('build_id').notNull().references(() => builds.id, { onDelete: 'cascade' }),
+    lotId: integer('lot_id').notNull().references(() => partLots.id, { onDelete: 'cascade' }),
+    qty: integer('qty').notNull(),
+    createdAt: text('created_at').notNull().default(now),
+  },
+  (t) => [uniqueIndex('part_allocations_key').on(t.buildId, t.lotId), index('part_allocations_lot').on(t.lotId)],
 );

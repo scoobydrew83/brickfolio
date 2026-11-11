@@ -14,7 +14,7 @@ const LINKS = [
 ] as const;
 
 const isActive = (path: string, href: string) =>
-  href === '/' ? path === '/' || path.startsWith('/sets/') || path.startsWith('/minifigs') || path.startsWith('/scan') : href === '/parts' ? path.startsWith('/parts') || path.startsWith('/build') : path.startsWith(href);
+  href === '/' ? path === '/' || path.startsWith('/sets/') || path.startsWith('/minifigs') || path.startsWith('/scan') : href === '/parts' ? path.startsWith('/parts') || path.startsWith('/build') || path.startsWith('/layouts') : path.startsWith(href);
 
 /** Top-level page links: a row in the header on wider screens, a bottom tab bar on phones. */
 /** `alerts` = wishlist sets under target, shown as a count on the Wishlist link; `update` = a newer release is out (a dot on Settings). */

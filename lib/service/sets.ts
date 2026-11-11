@@ -33,7 +33,7 @@ import { priceSeries, recordPrice } from './prices';
 /** `status` lets the REST API pick an HTTP code. `existing` = already in stock, so the UI asks before adding. */
 export type Result<T extends object = object> =
   | ({ ok: true } & T)
-  | { ok: false; error: string; status?: 400 | 404 | 409; existing?: { name: string; qty: number } };
+  | { ok: false; error: string; status?: 400 | 404 | 409 | 413; existing?: { name: string; qty: number } };
 
 export type SyncStatus = { running: boolean; startedAt: string; finishedAt: string | null; total: number; processed: number; errors: number; message: string | null } | null;
 

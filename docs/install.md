@@ -61,6 +61,8 @@ With the same key, each sync also maps Rebrickable's part and colour numbers to 
 
 With the same key, each sync also looks up alternate builds of your sets and their parts (at most 40 Rebrickable calls per sync), and **Parts → What can I build?** ranks them by how many of their parts you already own. Each build can export its missing parts as a BrickLink Wanted List (Wanted → Upload on BrickLink).
 
+**Loose parts** (Parts → Loose parts) imports BrickLink XML and Rebrickable parts CSVs. A Rebrickable CSV uses Rebrickable's part and colour numbers; they're matched to BrickLink's through the ID map above, and numbers it doesn't know yet are asked of Rebrickable with this key. Without the key, those lines are kept as they are and don't count in What can I build? until they're matched. **Add a build** with a Rebrickable MOC number also needs the key for its name and parts list (only if the designer shares it). BrickLink XML needs no key. Nothing else to configure.
+
 Rebrickable doesn't share every build's parts list through its API: designers can keep one private or sell it with the instructions, and Rebrickable answers "You do not have permission" for those. Brickfolio notes each such build, skips it, and asks again after 90 days. **Settings → Rebrickable** shows how many there are, and **What can I build?** lists them with a link to each on Rebrickable. If none of your builds' lists come through, the sync stops asking after five refusals, so it doesn't spend calls.
 
 ### Optional: Brickset key (retail prices and retirement)

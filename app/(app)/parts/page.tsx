@@ -2,7 +2,7 @@ import { Suspense } from 'react';
 import { PageSkeleton } from '@/components/ui';
 import { connection } from 'next/server';
 import Link from 'next/link';
-import { Hammer } from 'lucide-react';
+import { Boxes, Hammer, LayoutGrid } from 'lucide-react';
 import { PageHeader } from '@/components/shell/PageHeader';
 import { buttonClass } from '@/components/ui';
 import PartsView from '@/components/PartsView';
@@ -15,7 +15,11 @@ export const metadata = { title: 'Parts' };
 export default function Page() {
   return (
     <div className="mx-auto w-full max-w-5xl space-y-6">
-      <PageHeader title="Parts" actions={<Link href="/build" className={buttonClass('secondary')}><Hammer aria-hidden className="size-4" />What can I build?</Link>} />
+      <PageHeader title="Parts" actions={<>
+        <Link href="/parts/lots" className={buttonClass('secondary')}><Boxes aria-hidden className="size-4" />Loose parts</Link>
+        <Link href="/layouts" className={buttonClass('secondary')}><LayoutGrid aria-hidden className="size-4" />Layouts</Link>
+        <Link href="/build" className={buttonClass('secondary')}><Hammer aria-hidden className="size-4" />What can I build?</Link>
+      </>} />
       <Suspense fallback={<PageSkeleton />}>
         <Content />
       </Suspense>
