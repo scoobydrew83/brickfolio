@@ -4,12 +4,15 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-11-11
+
 ### Added
 - **Version and updates:** **Settings → About this server** shows the running version and whether a newer release is out, with links to what's new and how to update; a dot on the Settings tab means one is. Brickfolio asks GitHub's public releases list at most once a day (and after each sync); nothing about your collection is sent. **Check for updates** asks now. `UPDATE_CHECK=off` turns it off; demo mode never checks. `GET /api/v1/version`.
 
 ### Changed
 - **Wishlist:** each set says when its price was last checked, and the page says when the daily sync last ran. A set also counts as **Under target** when a retailer offer is (the chip says "offer"), matching the alerts and the nav badge.
 - The install guide's Updating section covers the Deploy to Cloudflare route: sync your fork on GitHub.
+- Dependencies updated, including Next.js 16.4.5, three.js 0.187 and Tailwind CSS 4.3.4.
 
 ## [0.12.0] - 2026-11-06
 
