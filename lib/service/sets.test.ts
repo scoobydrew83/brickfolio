@@ -105,6 +105,18 @@ describe('sync', () => {
     expect(await svc.listHistory(db)).toHaveLength(1); // the rest of the sync still ran
   });
 
+  it('stops BrickLink lookups while BrickLink is down for maintenance, and says so', async () => {
+    for (const no of ['10280-1', '10497-1']) await add(no);
+    const { maintenanceError } = await import('../bricklink/client');
+    const seen: string[] = [];
+    const down: Lookup = async (no) => { seen.push(no); throw maintenanceError('<p>We expect the site to remain unavailable until at least 09:00 PST.</p>'); };
+    const s = await svc.startSync(db);
+    if (!s.ok) throw new Error(s.error);
+    await svc.runSync(db, s.runId, down);
+    expect(seen).toHaveLength(1);
+    expect(await svc.syncStatus(db)).toMatchObject({ errors: 1, message: 'BrickLink is down for maintenance (We expect the site to remain unavailable until at least 09:00 PST.). Prices update at the next sync. 0 of 2 sets were looked up first.' });
+  });
+
   it('fetches the other guide after the primary lookups, one price call each, or not at all when turned off', async () => {
     await add('10280-1');
     calls.length = 0;
@@ -176,4 +188,21 @@ describe('quick add', () => {
     expect(await svc.getSet(db, '70000-1')).toMatchObject({ name: 'BL 70000-1' });
     expect(await svc.quickAdd(db, parseQuickList('1234'), { location: 'Attic', lookup, minifig: null })).toMatchObject({ ok: false, status: 400 });
   });
+});
+
+it('logs one line per sync and groups set lookup errors', () => {
+  const lines: string[] = [];
+  const failures = new Map([['price: request failed (HTTP 400)', ['1-1', '2-1', '3-1', '4-1', '5-1', '6-1', '7-1']], ['item: not found', ['404-1']]]);
+  svc.logSync(10, 10, 8, failures, '2 wishlist lookups failed', (l) => lines.push(l));
+  expect(lines).toEqual([
+    'Sync finished: 2 of 10 sets looked up, 8 failed. 2 wishlist lookups failed',
+    '  7 sets (1-1, 2-1, 3-1, 4-1, 5-1 and 2 more): price: request failed (HTTP 400)',
+    '  1 set (404-1): item: not found',
+  ]);
+  lines.length = 0;
+  svc.logSync(3, 3, 0, new Map(), '', (l) => lines.push(l));
+  expect(lines).toEqual(['Sync finished: 3 of 3 sets looked up']);
+  lines.length = 0;
+  svc.logSync(100, 1, 1, new Map([['BrickLink is down for maintenance.', ['10316-1']]]), '', (l) => lines.push(l));
+  expect(lines[0]).toBe('Sync finished: 0 of 100 sets looked up, 1 failed, 99 skipped');
 });

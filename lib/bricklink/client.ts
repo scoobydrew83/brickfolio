@@ -6,13 +6,17 @@ import { oauthHeader, type OAuthKeys } from './oauth';
 const BASE = 'https://api.bricklink.com/api/store/v1';
 const GAP_MS = 250; // spacing between calls, so a full sync doesn't burst
 
-export type BrickLinkErrorKind = 'quota' | 'auth' | 'ip' | 'not_found' | 'other';
+export type BrickLinkErrorKind = 'quota' | 'maintenance' | 'auth' | 'ip' | 'not_found' | 'other';
 export class BrickLinkError extends Error {
   constructor(message: string, public kind: BrickLinkErrorKind = 'other') { super(message); }
 }
 
 /** Shown when BrickLink's daily limit is used up. The sync stops its lookups for the day when it sees it. */
 export const QUOTA_MESSAGE = "BrickLink's daily limit of 5,000 calls is used up. Prices update at the next sync.";
+
+/** Starts the error shown while BrickLink is down for maintenance. The sync stops its lookups when it sees it. */
+export const MAINTENANCE_MESSAGE = 'BrickLink is down for maintenance';
+export const isMaintenance = (error: string | null) => !!error?.startsWith(MAINTENANCE_MESSAGE);
 
 /** A readable error for a BrickLink answer, keeping BrickLink's own words in brackets. */
 export function brickLinkError(status: number, meta: { code?: number; message?: string; description?: string } | undefined, path: string, statusText = ''): BrickLinkError {
@@ -24,7 +28,37 @@ export function brickLinkError(status: number, meta: { code?: number; message?: 
   if (code === 401 || code === 403) return new BrickLinkError(`BrickLink rejected the API keys. Check the four BRICKLINK_* values${raw}.`, 'auth');
   const item = decodeURIComponent(path.split('/items/')[1]?.split('/').slice(0, 2).join(' ') ?? '');
   if (code === 404) return new BrickLinkError(item ? `BrickLink has no ${item.replace(/^(\w+) /, (_, t: string) => `${t.toLowerCase()} `)}${raw}.` : `BrickLink couldn't find that${raw}.`, 'not_found');
-  return new BrickLinkError(`${path.split('/').pop()}: ${said || 'request failed'}`);
+  return new BrickLinkError(`${path.split('/').pop()}: ${said || 'request failed'} (HTTP ${code})`);
+}
+
+const plainText = (html: string) => html.replace(/<(script|style)[\s\S]*?<\/\1>/gi, ' ').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
+const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n)}…` : s);
+
+/** The first words of a reply that isn't BrickLink's JSON (an HTML error or block page), tags and spacing removed. */
+export function replySnippet(text: string): string {
+  const title = /<title[^>]*>([^<]*)<\/title>/i.exec(text)?.[1];
+  return clip(plainText(title ?? text), 120);
+}
+
+/** BrickLink's maintenance page, with its notice (e.g. "We expect the site to remain unavailable until …") when it has one. */
+export function maintenanceError(text: string): BrickLinkError {
+  const notice = [...text.matchAll(/<p[^>]*>([\s\S]*?)<\/p>/gi)].map((m) => plainText(m[1])).find((p) => /unavailable|until|expect|back/i.test(p));
+  return new BrickLinkError(`${MAINTENANCE_MESSAGE}${notice ? ` (${clip(notice, 160)})` : ''}. Prices update at the next sync.`, 'maintenance');
+}
+
+/** A reply BrickLink's API didn't format as JSON, often a firewall or maintenance page in front of the API. */
+export function unreadableReply(status: number, text: string, path: string, blocked: boolean): BrickLinkError {
+  const what = `${path.split('/').pop()}: BrickLink answered HTTP ${status} with ${text.trim() ? 'a page instead of API data' : 'an empty reply'}`;
+  const snippet = replySnippet(text);
+  const hint = blocked ? ". BrickLink's firewall may be blocking this server's address; try again later or from another network" : '';
+  return new BrickLinkError(`${what}${snippet ? ` ("${snippet}")` : ''}${hint}.`);
+}
+
+/** Why a request never got an answer: fetch's own "fetch failed" hides the reason in `cause`. */
+export function networkError(e: unknown, path: string): BrickLinkError {
+  const err = e as { name?: string; message?: string; cause?: { code?: string; message?: string } };
+  const reason = err?.name === 'TimeoutError' ? 'no answer within 20 seconds' : [err?.cause?.code, err?.cause?.message ?? err?.message].filter(Boolean).join(' ') || String(e);
+  return new BrickLinkError(`${path.split('/').pop()}: couldn't reach BrickLink (${reason}).`);
 }
 
 export type LookupResult = {
@@ -111,15 +145,26 @@ export function createBrickLink(keys: OAuthKeys, fetchImpl: typeof fetch = fetch
       if (wait > 0) await new Promise((r) => setTimeout(r, wait));
       last = Date.now();
       const qs = new URLSearchParams(params).toString();
-      const res = await fetchImpl(qs ? `${url}?${qs}` : url, {
-        headers: { Authorization: await oauthHeader('GET', url, params, keys) },
-        signal: AbortSignal.timeout(20_000),
-      });
+      let res: Response;
+      try {
+        res = await fetchImpl(qs ? `${url}?${qs}` : url, {
+          headers: { Authorization: await oauthHeader('GET', url, params, keys) },
+          signal: AbortSignal.timeout(20_000),
+        });
+      } catch (e) {
+        throw networkError(e, path);
+      }
       const retry = res.status === 429 || res.status >= 500;
       if (retry && attempt < 2) { await new Promise((r) => setTimeout(r, 1000 * 2 ** attempt)); continue; }
-      const body = (await res.json().catch(() => null)) as { meta?: { code: number; message: string; description?: string }; data?: T } | null;
-      const code = body?.meta?.code ?? res.status;
-      if (code !== 200 || !body) throw brickLinkError(res.status, body?.meta, path, res.statusText);
+      const text = await res.text().catch(() => '');
+      let body: { meta?: { code: number; message: string; description?: string }; data?: T } | null = null;
+      try { body = JSON.parse(text); } catch { /* not JSON: handled below */ }
+      // fetch follows BrickLink's redirect to its maintenance page; a client that doesn't sees the redirect itself.
+      if (/maintenance\.bricklink\.com/i.test(`${res.url} ${res.headers.get('location') ?? ''}`)) throw maintenanceError(text);
+      if ((!body || typeof body !== 'object') && res.status === 429) throw brickLinkError(429, undefined, path, res.statusText); // the daily limit, whatever the body
+      if (!body || typeof body !== 'object') throw unreadableReply(res.status, text, path, res.headers.has('cf-ray') && (res.status === 403 || res.status === 503));
+      const code = body.meta?.code ?? res.status;
+      if (code !== 200) throw brickLinkError(res.status, body.meta, path, res.statusText);
       return body.data as T;
     }
   }

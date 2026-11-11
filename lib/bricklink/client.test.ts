@@ -51,7 +51,29 @@ it('turns BrickLink errors into readable ones', async () => {
   expect(brickLinkError(200, { code: 401, message: 'BAD_OAUTH_REQUEST', description: 'TOKEN_IP_MISMATCHED' }, '/items/SET/1-1')).toMatchObject({ kind: 'ip' });
   expect(brickLinkError(200, { code: 401, message: 'BAD_OAUTH_REQUEST', description: 'SIGNATURE_INVALID' }, '/items/SET/1-1')).toMatchObject({ kind: 'auth', message: expect.stringContaining('BRICKLINK_*') });
   expect(brickLinkError(200, { code: 404, message: 'RESOURCE_NOT_FOUND' }, '/items/SET/99999-1')).toMatchObject({ kind: 'not_found', message: 'BrickLink has no set 99999-1 (RESOURCE_NOT_FOUND).' });
-  expect(brickLinkError(500, undefined, '/items/SET/1-1/price', 'Server Error')).toMatchObject({ kind: 'other', message: 'price: Server Error' });
+  expect(brickLinkError(500, undefined, '/items/SET/1-1/price', 'Server Error')).toMatchObject({ kind: 'other', message: 'price: Server Error (HTTP 500)' });
+  expect(brickLinkError(200, { code: 400 }, '/items/SET/1-1/price').message).toBe('price: request failed (HTTP 400)');
+});
+
+it('says what came back when the reply is not API data, and why a request got no answer', async () => {
+  const page = '<html><head><title>Attention Required! | Cloudflare</title></head><body><h1>Sorry, you have been blocked</h1></body></html>';
+  const blocked = createBrickLink(keys, async () => new Response(page, { status: 403, headers: { 'content-type': 'text/html', 'cf-ray': 'abc' } }));
+  await expect(blocked.price('SET', '1-1', 'N', 'USD')).rejects.toMatchObject({
+    kind: 'other',
+    message: `price: BrickLink answered HTTP 403 with a page instead of API data ("Attention Required! | Cloudflare"). BrickLink's firewall may be blocking this server's address; try again later or from another network.`,
+  });
+  const page2 = '<html><head><title>BrickLink</title></head><body><h2>BrickLink is temporarily unavailable</h2><p>We expect the site to remain unavailable until at least 18:00 CET / 09:00 PST on Wednesday, 11th November 2026.</p></body></html>';
+  const maintenance = 'BrickLink is down for maintenance (We expect the site to remain unavailable until at least 18:00 CET / 09:00 PST on Wednesday, 11th November 2026.). Prices update at the next sync.';
+  const followed = createBrickLink(keys, async () => Object.defineProperty(new Response(page2, { status: 200, headers: { 'content-type': 'text/html' } }), 'url', { value: 'https://maintenance.bricklink.com/recovery.html' }));
+  await expect(followed.price('SET', '1-1', 'N', 'USD')).rejects.toMatchObject({ kind: 'maintenance', message: maintenance });
+  const redirect = createBrickLink(keys, async () => new Response('<html>302 Found</html>', { status: 302, headers: { location: 'https://maintenance.bricklink.com:443/recovery.html' } }));
+  await expect(redirect.price('SET', '1-1', 'N', 'USD')).rejects.toThrow('BrickLink is down for maintenance. Prices update at the next sync.');
+  const limit = createBrickLink(keys, async () => new Response('<html>Too Many Requests</html>', { status: 429 }));
+  await expect(limit.price('SET', '1-1', 'N', 'USD')).rejects.toMatchObject({ kind: 'quota' });
+  const empty = createBrickLink(keys, async () => new Response('', { status: 200 }));
+  await expect(empty.price('SET', '1-1', 'N', 'USD')).rejects.toThrow('price: BrickLink answered HTTP 200 with an empty reply.');
+  const down = createBrickLink(keys, async () => { throw Object.assign(new TypeError('fetch failed'), { cause: { code: 'ENOTFOUND', message: 'getaddrinfo ENOTFOUND api.bricklink.com' } }); });
+  await expect(down.price('SET', '1-1', 'N', 'USD')).rejects.toThrow("price: couldn't reach BrickLink (ENOTFOUND getaddrinfo ENOTFOUND api.bricklink.com).");
 });
 
 it('price: one call for one guide, and no sales is null', async () => {

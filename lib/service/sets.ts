@@ -1,7 +1,7 @@
 // Collection logic shared by server actions, the REST API and the scheduler.
 // Every function takes the database (and BrickLink lookup) as arguments, so tests can pass an in-memory one.
 import { and, asc, desc, eq, inArray, lt, sql } from 'drizzle-orm';
-import { QUOTA_MESSAGE, type Lookup, type MinifigLookup, type PartPriceLookup, type PriceLookup, type Store } from '../bricklink/client';
+import { QUOTA_MESSAGE, isMaintenance, type Lookup, type MinifigLookup, type PartPriceLookup, type PriceLookup, type Store } from '../bricklink/client';
 import type { BuildSource, Catalog, IdCatalog } from '../rebrickable/client';
 import type { DB } from '../db/types';
 import { history, locations, minifigs, setCopies, sets, settings, syncRuns, wishlist } from '../db/schema';
@@ -341,16 +341,20 @@ export async function runSync(db: DB, runId: number, lookup: Lookup, store?: Sto
     const copies = await copiesBySet(db);
     const all = (await db.select({ id: sets.id, setNo: sets.setNo }).from(sets).all()).map((r) => ({ ...r, copies: copies.get(r.id) ?? [] }));
     let errors = 0;
-    // Once BrickLink's daily limit is used up, every later call fails the same way: skip the remaining BrickLink
-    // steps (they keep their last prices) and still do the rest.
-    let quotaAt: number | null = null;
+    let processed = 0;
+    const failures = new Map<string, string[]>(); // error message → set numbers, for the log
+    // Once BrickLink's daily limit is used up, or it's down for maintenance, every later call fails the same way:
+    // skip the remaining BrickLink steps (they keep their last prices) and still do the rest.
+    let stopAt: number | null = null;
+    let stopReason = '';
     for (const [i, s] of all.entries()) {
       const error = await lookupInto(db, s, lookup, currency);
-      if (error) errors++;
+      processed = i + 1;
+      if (error) { errors++; failures.set(error, [...(failures.get(error) ?? []), s.setNo]); }
       await db.update(syncRuns).set({ processed: i + 1, errors }).where(eq(syncRuns.id, runId));
-      if (error === QUOTA_MESSAGE) { quotaAt = i; break; }
+      if (error === QUOTA_MESSAGE || isMaintenance(error)) { stopAt = i; stopReason = error!; break; }
     }
-    const bl = quotaAt === null;
+    const bl = stopAt === null;
     const figErrors = extras.minifig && bl ? await syncMinifigs(db, extras.minifig, currency) : 0;
     // BrickLink calls, in priority order: sets, minifigs, wishlist and store first; then the other guide; then part prices.
     const budget = new Budget();
@@ -392,11 +396,24 @@ export async function runSync(db: DB, runId: number, lookup: Lookup, store?: Sto
       if (r.fetched) await reapplyMissing(db);
       if (r.errors) catalogErrors.push(`${r.errors} part price lookup${r.errors === 1 ? '' : 's'} failed`);
     }
-    const quotaNote = bl ? '' : `${QUOTA_MESSAGE} ${quotaAt} of ${all.length} sets were looked up first.`;
+    const quotaNote = bl ? '' : `${stopReason} ${stopAt} of ${all.length} sets were looked up first.`;
     const message = [quotaNote, ...storeErrors, alertError ?? '', wishErrors ? `${wishErrors} wishlist lookup${wishErrors === 1 ? '' : 's'} failed` : '', figErrors ? `${figErrors} minifig lookup${figErrors === 1 ? '' : 's'} failed` : '', ...catalogErrors.slice(0, 3), catalogErrors.length > 3 ? `and ${catalogErrors.length - 3} more errors` : ''].filter(Boolean).join('; ');
     await db.update(syncRuns).set({ status: 'done', finishedAt: nowIso(), message: message || null }).where(eq(syncRuns.id, runId));
+    logSync(all.length, processed, errors, failures, message);
   } catch (e) {
-    await db.update(syncRuns).set({ status: 'failed', finishedAt: nowIso(), message: e instanceof Error ? e.message : String(e) }).where(eq(syncRuns.id, runId));
+    const message = e instanceof Error ? e.message : String(e);
+    await db.update(syncRuns).set({ status: 'failed', finishedAt: nowIso(), message }).where(eq(syncRuns.id, runId));
+    console.error('Sync failed:', e);
+  }
+}
+
+/** One line per sync in the server log (sets skipped after the daily limit or maintenance stopped the lookups count apart), plus one line per distinct set lookup error (with a few of its sets). */
+export function logSync(total: number, processed: number, errors: number, failures: Map<string, string[]>, message: string, log: (line: string) => void = console.log): void {
+  const skipped = total - processed;
+  log(`Sync finished: ${processed - errors} of ${total} sets looked up${errors ? `, ${errors} failed` : ''}${skipped ? `, ${skipped} skipped` : ''}${message ? `. ${message}` : ''}`);
+  for (const [error, setNos] of failures) {
+    const some = setNos.slice(0, 5).join(', ') + (setNos.length > 5 ? ` and ${setNos.length - 5} more` : '');
+    log(`  ${setNos.length} set${setNos.length === 1 ? '' : 's'} (${some}): ${error}`);
   }
 }
 
