@@ -4,6 +4,8 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+## [0.13.1] - 2026-11-11
+
 ### Fixed
 - **BrickLink maintenance:** when BrickLink is down for maintenance, the sync says so, with BrickLink's own notice (e.g. when it expects to be back), and stops its BrickLink lookups after the first one, like when the daily limit is used up. Before, every set failed with "request failed".
 - BrickLink errors say what happened instead of just "request failed": the HTTP status, the first words of a reply that isn't API data (such as a firewall or maintenance page), or why BrickLink couldn't be reached (a DNS failure, a refused connection, a timeout).
