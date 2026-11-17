@@ -1,9 +1,9 @@
-import { afterEach, beforeEach, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { openNodeDb } from '../db/node';
 import type { DB } from '../db/types';
 import { wishlist } from '../db/schema';
-import { alertFormat, alertRequest, alertsFromEnv, notifyUnderTarget, underTargetCount, type Alert } from './alerts';
+import { alertFormat, alertRequest, alertsFromEnv, notifyPriceSwings, notifyUnderTarget, priceSwingPct, underTargetCount, type Alert } from './alerts';
 
 let db: DB;
 let sent: Alert[];
@@ -111,4 +111,62 @@ it('alerts once on a retailer offer under target, separately from the BrickLink 
   await offer(620, '2026-11-10T09:00:00Z');
   await notifyUnderTarget(db, send, day('10'));
   expect(sent).toHaveLength(3);
+});
+
+describe('price swings', () => {
+  const day = (d: number) => new Date(Date.UTC(2026, 10, d));
+  const swingSend = async (a: Alert) => { sent.push(a); };
+
+  it('measures from the first price, then alerts once per swing either way', async () => {
+    wish('10316-1', 'Rivendell', null, 500);
+    wish('10307-1', 'Eiffel Tower', 520, 600);
+    expect(await notifyPriceSwings(db, swingSend, 10, day(1))).toBeNull();
+    expect(sent).toHaveLength(0); // first prices only set the base
+
+    setPrice('10316-1', 460); // −8%: not yet
+    setPrice('10307-1', 660); // +10%
+    await notifyPriceSwings(db, swingSend, 10, day(2));
+    expect(sent).toHaveLength(1);
+    expect(sent[0].title).toBe('Eiffel Tower is up +10.0%');
+    expect(sent[0].message).toContain('up +10.0% since 2026-11-01');
+    expect(sent[0].message).toContain('your target');
+    expect(sent[0].items[0]).toMatchObject({ setNo: '10307', from: 600, avgSold: 660, changePct: 10 });
+
+    setPrice('10316-1', 440); // drift adds up: −12% from 500
+    await notifyPriceSwings(db, swingSend, 10, day(3));
+    expect(sent).toHaveLength(2);
+    expect(sent[1].title).toBe('Rivendell is down −12.0%');
+
+    await notifyPriceSwings(db, swingSend, 10, day(4)); // nothing moved since
+    expect(sent).toHaveLength(2);
+  });
+
+  it('groups several swings, skips errors, and keeps the base when sending fails', async () => {
+    wish('10316-1', 'Rivendell', null, 500);
+    wish('10307-1', 'Eiffel Tower', null, 600);
+    await notifyPriceSwings(db, swingSend, 10, day(1));
+    setPrice('10316-1', 400);
+    setPrice('10307-1', 500);
+    expect(await notifyPriceSwings(db, async () => { throw new Error('boom'); }, 10, day(2))).toBe('Price swing alert not sent: boom');
+    await notifyPriceSwings(db, swingSend, 10, day(3));
+    expect(sent).toHaveLength(1);
+    expect(sent[0].title).toBe('2 wishlist sets dropped 10% or more');
+    expect(sent[0].items.map((i) => i.setNo)).toEqual(['10316', '10307']); // biggest move first
+
+    db.update(wishlist).set({ avgSold: 100, blError: 'lookup failed' }).where(eq(wishlist.setNo, '10316-1')).run();
+    await notifyPriceSwings(db, swingSend, 10, day(4));
+    expect(sent).toHaveLength(1);
+  });
+
+  it('is off at 0 and reads PRICE_SWING_PCT', async () => {
+    wish('10316-1', 'Rivendell', null, 500);
+    expect(await notifyPriceSwings(db, swingSend, 0)).toBeNull();
+    expect((await db.select().from(wishlist).all())[0].swingBase).toBeNull();
+    expect(priceSwingPct()).toBe(10);
+    process.env.PRICE_SWING_PCT = '0';
+    expect(priceSwingPct()).toBe(0);
+    process.env.PRICE_SWING_PCT = '25';
+    expect(priceSwingPct()).toBe(25);
+    delete process.env.PRICE_SWING_PCT;
+  });
 });

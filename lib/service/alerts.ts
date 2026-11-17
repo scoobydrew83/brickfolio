@@ -11,7 +11,8 @@ import { isDemo } from '../demo';
 
 export type AlertFormat = 'ntfy' | 'discord' | 'json';
 /** One wish in an alert: under target on BrickLink's average sold price (`avgSold`) or on a retailer offer (`offer`). */
-export type AlertItem = { setNo: string; name: string; target: number; avgSold?: number; offer?: number; source?: string; url?: string | null };
+/** A price-swing item also has `from` (the price it's measured from) and `changePct` (signed, e.g. -12.5). */
+export type AlertItem = { setNo: string; name: string; target: number; avgSold?: number; offer?: number; source?: string; url?: string | null; from?: number; changePct?: number };
 export type Alert = { title: string; message: string; url: string | null; items: AlertItem[] };
 export type Send = (alert: Alert) => Promise<void>;
 
@@ -113,5 +114,65 @@ export async function notifyUnderTarget(db: DB, send: Send, now = new Date()): P
   const at = now.toISOString();
   for (const w of fresh) await db.update(wishlist).set({ alertedAt: at }).where(eq(wishlist.id, w.id));
   for (const w of freshOffers) await db.update(wishlist).set({ offerAlertedAt: at }).where(eq(wishlist.id, w.id));
+  return null;
+}
+
+/** PRICE_SWING_PCT (default 10; 0 turns it off): alert when a wish's average sold price moves this many percent. */
+export const priceSwingPct = () => {
+  const n = Number(process.env.PRICE_SWING_PCT ?? 10);
+  return Number.isFinite(n) && n > 0 ? Math.min(n, 1000) : 0;
+};
+
+/**
+ * Sends one alert for wishes whose BrickLink average sold price moved `pct` percent or more, up or down, since the
+ * price it's measured from, with or without a target. That price is the first one seen for the wish, then the price
+ * at its last swing alert, so a slow drift alerts once it adds up and each swing alerts once. A wish with no price
+ * (or a lookup error) is skipped and keeps its base; a new currency starts over. Returns an error message instead of
+ * throwing; when sending fails the bases are kept, so the next sync tries again.
+ */
+export async function notifyPriceSwings(db: DB, send: Send, pct = priceSwingPct(), now = new Date()): Promise<string | null> {
+  if (!pct) return null;
+  const currency = await getCurrency(db);
+  const at = now.toISOString();
+  const swung: { w: Wish; changePct: number }[] = [];
+  for (const w of await db.select().from(wishlist).where(and(isNotNull(wishlist.avgSold), isNull(wishlist.blError))).all()) {
+    if (!(w.avgSold! > 0)) continue;
+    if (w.swingBase == null || !(w.swingBase > 0) || w.swingCurrency !== currency) {
+      await db.update(wishlist).set({ swingBase: w.avgSold, swingCurrency: currency, swingBaseAt: at }).where(eq(wishlist.id, w.id));
+      continue;
+    }
+    const changePct = ((w.avgSold! - w.swingBase) / w.swingBase) * 100;
+    // A hair under pct from rounding still counts (a 10.00% drop computed as 9.9999…).
+    if (Math.abs(changePct) >= pct - 1e-9) swung.push({ w, changePct });
+  }
+  if (!swung.length) return null;
+  swung.sort((a, b) => Math.abs(b.changePct) - Math.abs(a.changePct));
+  const name = (w: Wish) => w.name ?? displayNo(w.setNo);
+  const signed = (n: number) => `${n > 0 ? '+' : n < 0 ? '−' : ''}${Math.abs(n).toFixed(1)}%`;
+  const since = (iso: string | null) => (iso ? ` since ${iso.slice(0, 10)}` : '');
+  const lines = swung.map(({ w, changePct }) => {
+    const t = w.target != null ? `, your target ${money(w.target, currency)}` : '';
+    return `${displayNo(w.setNo)} ${name(w)}: ${changePct < 0 ? 'down' : 'up'} ${signed(changePct)}${since(w.swingBaseAt)}, average sold ${money(w.swingBase!, currency)} → ${money(w.avgSold!, currency)}${t}`;
+  });
+  const base = process.env.APP_URL?.replace(/\/$/, '');
+  const one = swung.length === 1 ? swung[0] : null;
+  const allDown = swung.every((s) => s.changePct < 0);
+  const allUp = swung.every((s) => s.changePct > 0);
+  const alert: Alert = {
+    title: one
+      ? `${name(one.w)} is ${one.changePct < 0 ? 'down' : 'up'} ${signed(one.changePct)}`
+      : `${swung.length} wishlist sets ${allDown ? 'dropped' : allUp ? 'went up' : 'moved'} ${pct}% or more`,
+    message: lines.join('\n'),
+    url: base ? `${base}/wishlist` : null,
+    items: swung.map(({ w, changePct }) => ({
+      setNo: displayNo(w.setNo), name: name(w), avgSold: w.avgSold!, target: w.target ?? 0, from: w.swingBase!, changePct: Math.round(changePct * 10) / 10,
+    })),
+  };
+  try {
+    await send(alert);
+  } catch (e) {
+    return `Price swing alert not sent: ${e instanceof Error ? e.message : String(e)}`;
+  }
+  for (const { w } of swung) await db.update(wishlist).set({ swingBase: w.avgSold, swingCurrency: currency, swingBaseAt: at }).where(eq(wishlist.id, w.id));
   return null;
 }

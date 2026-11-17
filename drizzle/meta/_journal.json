@@ -204,6 +204,13 @@
       "when": 1794395512800,
       "tag": "0028_loose_parts",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "6",
+      "when": 1794698771665,
+      "tag": "0029_wishlist_price_swings",
+      "breakpoints": true
     }
   ]
 }

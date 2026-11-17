@@ -18,7 +18,7 @@ import { Budget, otherGuideDailyCalls } from './budget';
 import { refreshOtherGuide } from './other-guide';
 import type { RetailSource } from '../brickset/client';
 import { syncOmrModels } from './models';
-import { alertsFromEnv, notifyUnderTarget } from './alerts';
+import { alertsFromEnv, notifyPriceSwings, notifyUnderTarget } from './alerts';
 import { notifyRetiring } from './radar';
 import { notifyDesigner } from './designer';
 import { addMinifig, syncMinifigs } from './minifigs';
@@ -364,6 +364,7 @@ export async function runSync(db: DB, runId: number, lookup: Lookup, store?: Sto
     budget.spend(Number((await db.select({ n: sql<number>`count(*)` }).from(wishlist).all())[0].n) * 2 + (store ? 3 : 0));
     const send = alertsFromEnv();
     const alertError = send ? await notifyUnderTarget(db, send) : null;
+    const swingError = send && bl ? await notifyPriceSwings(db, send) : null;
     const storeErrors = store && bl ? await syncStore(db, store) : [];
     const catalogErrors = catalog ? await syncCatalog(db, catalog) : [];
     if (catalog?.colors && catalog.partsPage) catalogErrors.push(...(await syncIdentifiers(db, { colors: catalog.colors, partsPage: catalog.partsPage })));
@@ -397,7 +398,7 @@ export async function runSync(db: DB, runId: number, lookup: Lookup, store?: Sto
       if (r.errors) catalogErrors.push(`${r.errors} part price lookup${r.errors === 1 ? '' : 's'} failed`);
     }
     const quotaNote = bl ? '' : `${stopReason} ${stopAt} of ${all.length} sets were looked up first.`;
-    const message = [quotaNote, ...storeErrors, alertError ?? '', wishErrors ? `${wishErrors} wishlist lookup${wishErrors === 1 ? '' : 's'} failed` : '', figErrors ? `${figErrors} minifig lookup${figErrors === 1 ? '' : 's'} failed` : '', ...catalogErrors.slice(0, 3), catalogErrors.length > 3 ? `and ${catalogErrors.length - 3} more errors` : ''].filter(Boolean).join('; ');
+    const message = [quotaNote, ...storeErrors, alertError ?? '', swingError ?? '', wishErrors ? `${wishErrors} wishlist lookup${wishErrors === 1 ? '' : 's'} failed` : '', figErrors ? `${figErrors} minifig lookup${figErrors === 1 ? '' : 's'} failed` : '', ...catalogErrors.slice(0, 3), catalogErrors.length > 3 ? `and ${catalogErrors.length - 3} more errors` : ''].filter(Boolean).join('; ');
     await db.update(syncRuns).set({ status: 'done', finishedAt: nowIso(), message: message || null }).where(eq(syncRuns.id, runId));
     logSync(all.length, processed, errors, failures, message);
   } catch (e) {

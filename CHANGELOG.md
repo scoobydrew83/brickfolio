@@ -4,6 +4,17 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-11-16
+
+**Before upgrading, back up your database.** Migration 0029 adds three columns to `wishlist`; nothing is rebuilt.
+
+### Added
+- **Price-swing alerts:** the wishlist webhook (`ALERT_WEBHOOK_URL`) now also alerts when a wish's BrickLink average sold price moves `PRICE_SWING_PCT` percent or more (default 10; `0` turns it off), up or down, with or without a target. It measures from the first price seen, then from the price at each swing alert, so each swing alerts once and a slow drift alerts once it adds up. Several swings come as one message, biggest first, with old and new price and the change (`from` and `changePct` on each JSON item).
+
+### Changed
+- **Layouts** has its own place in the menu (top bar and phone tab bar) instead of only a button on the Parts page. Between phone and laptop widths the top bar shows icons only (names as tooltips), so it no longer runs off the screen.
+- The install guide says Layouts, Loose parts and What can I build? need no setup, and which parts use the Rebrickable key.
+
 ## [0.14.0] - 2026-11-11
 
 **Before upgrading, back up your database.** Migrations 0027 (layouts) and 0028 (loose parts) add tables and one column (`builds.kind`); they rebuild nothing, so your sets, copies and builds are kept.

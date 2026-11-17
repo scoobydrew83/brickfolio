@@ -114,6 +114,8 @@ A set's page shows what it would fetch sold as parts. Each part's price is one B
 
 After each sync Brickfolio can send one message listing wishlist sets whose average sold price dropped under your target. It alerts once per drop; a set that goes back above target alerts again the next time it drops.
 
+It also alerts on **price swings**: when a wish's BrickLink average sold price has moved `PRICE_SWING_PCT` percent or more (default 10; `0` turns it off), up or down, with or without a target. The first price Brickfolio sees for a wish is where it measures from; after each swing alert it measures from the new price, so a slow drift alerts once it adds up and each swing alerts once. The message gives the old and new price, the change and the date it's measured from. Changing your currency starts over.
+
 - **Phone push with [ntfy](https://ntfy.sh):** install the ntfy app, subscribe to a long random topic name, and set `ALERT_WEBHOOK_URL=https://ntfy.sh/<that-topic>` (or your own ntfy server).
 - **Discord:** create a webhook in a channel's settings and use its URL.
 - **Anything else:** any URL that accepts a JSON POST (`{title, message, url, items}`); Home Assistant, n8n and Zapier all do.
@@ -137,6 +139,14 @@ Watched BrickLink Designer Program projects (Radar → Designer Program) alert `
 `GET /api/v1/prices?id=75192&type=offer&days=14` lists what was stored, to check a flow.
 
 Set `APP_URL` to your Brickfolio address so alerts link back to the wishlist. Settings → About this server shows whether alerts are on.
+
+### Layouts, loose parts and builds: nothing to set up
+
+**Layouts** (the MILS planner, in the menu), **Loose parts** and **What can I build?** (both under **Parts**) need no keys or settings: they're there once the server runs 0.14.0 or later (Settings → About this server shows the version; back up your database before updating, see [Updating](#updating)).
+
+- **Layouts:** **New layout**, give its size in 32 × 32-stud modules, then tap an empty square to add a module. Tap a module to name it, set its type (plain, road, corner, T-junction, crossing), turn it, move it or link the set copies and builds that stand on it. **Parts** below the grid adds up what the layout still needs; **Wanted List** downloads it for BrickLink (Want → Upload).
+- **Loose parts** read BrickLink XML with no key. A Rebrickable parts CSV, and MOCs added by number on What can I build?, need the Rebrickable key [above](#optional-rebrickable-key-themes-and-minifigures).
+- **What can I build?** lists your own builds with no key; alternate builds of your sets come from Rebrickable with the key, after the next sync.
 
 ### Optional: ask Claude about your collection (MCP)
 
