@@ -265,7 +265,7 @@ export async function partOutCopy(db: DB, copyId: number): Promise<number> {
     const key = k(p.type, p.partNo, p.colorId);
     const row = by.get(key);
     if (row) row.qty += p.qty + p.extra;
-    else by.set(key, { type: p.type, partNo: p.partNo, colorId: p.colorId ?? NO_COLOR, name: p.name, qty: p.qty + p.extra, location: c.location, source: 'set_copy', setCopyId: copyId, condition: c.condition === 'New' ? 'N' : 'U' });
+    else by.set(key, { type: p.type, partNo: p.partNo, colorId: p.colorId ?? NO_COLOR, name: p.name, qty: p.qty + p.extra, location: c.location, source: 'set_copy', setCopyId: copyId, condition: c.condition === 'New' ? 'N' : 'U', mapped: p.mapped });
   }
   const t = nowIso();
   const rows = [...by.entries()].map(([key, r]) => ({ ...r, qty: r.qty - (gone.get(key) ?? 0), createdAt: t, updatedAt: t })).filter((r) => r.qty > 0);

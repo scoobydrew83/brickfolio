@@ -2,10 +2,11 @@
 // Every function takes the database (and BrickLink lookup) as arguments, so tests can pass an in-memory one.
 import { and, asc, desc, eq, inArray, lt, sql } from 'drizzle-orm';
 import { QUOTA_MESSAGE, isMaintenance, type Lookup, type MinifigLookup, type PartPriceLookup, type PriceLookup, type Store } from '../bricklink/client';
-import type { BuildSource, Catalog, IdCatalog } from '../rebrickable/client';
+import type { BuildSource, Catalog, IdCatalog, SetPartsSource } from '../rebrickable/client';
 import type { DB } from '../db/types';
 import { history, locations, minifigs, setCopies, sets, settings, syncRuns, wishlist } from '../db/schema';
-import { hasParts, replaceParts } from './parts';
+import { hasParts, needsBrickLinkFigs, partsFromRebrickable, rebrickableParts, replaceParts, withBrickLinkFigs, type PartsSource, type RebrickableParts, type SetPart } from './parts';
+import { orphanedMarks } from './missing';
 import { syncStore } from './store';
 import { syncCatalog, themeMap, themeNames } from './catalog';
 import { syncWishlist } from './wishlist';
@@ -49,7 +50,7 @@ const columns = {
   imageUrl: sets.imageUrl, pieces: sets.pieces, partLots: sets.partLots,
   registered: sets.registered, avgSold: sets.avgSold, minSold: sets.minSold,
   maxSold: sets.maxSold, qtySold: sets.qtySold, blError: sets.blError, lastUpdated: sets.lastUpdated, notes: sets.notes,
-  themeId: sets.themeId, minifigs: sets.minifigs,
+  themeId: sets.themeId, minifigs: sets.minifigs, partsSource: sets.partsSource,
   retailPrice: sets.retailPrice, retailCurrency: sets.retailCurrency, launchDate: sets.launchDate, exitDate: sets.exitDate, retired: sets.retired,
   // Table-qualified on purpose: inside a subquery an unqualified "id" would mean the subquery table's own id.
   hasModel: sql<number>`exists (select 1 from "set_models" m where m."set_id" = "sets"."id")`,
@@ -136,34 +137,74 @@ export async function getCollection(db: DB) {
 
 // ---- writes ----
 
+/** How one sync got its parts lists, so BrickLink's budget counts only the calls it made. */
+export type PartsCounts = { bricklink: number; rebrickable: number; rebrickableCalls: number; figsLearned: number };
+
+type LookupOpts = {
+  /** Rebrickable, for parts lists. Without it (or with REBRICKABLE_PARTS=off) lists come from BrickLink, as before. */
+  rb?: SetPartsSource | null;
+  counts?: PartsCounts;
+};
+
+/**
+ * A set's parts list from Rebrickable when it maps to BrickLink numbers, or null to use BrickLink's. Rebrickable
+ * errors (network, rate limit) also give null: BrickLink's list is the fallback, never a failed lookup.
+ */
+async function partsFromRb(db: DB, setNo: string, opts: LookupOpts): Promise<Extract<RebrickableParts, { ok: true }> | null> {
+  if (!opts.rb || !partsFromRebrickable()) return null;
+  try {
+    const r = await rebrickableParts(db, opts.rb, setNo);
+    if (opts.counts) opts.counts.rebrickableCalls += r.calls;
+    return r.ok ? r : null;
+  } catch (e) {
+    console.warn(`Rebrickable parts list for #${setNo} failed, using BrickLink's: ${e instanceof Error ? e.message : String(e)}`);
+    return null;
+  }
+}
+
 /**
  * Runs the BrickLink lookup for one set and stores the result (or the error) on it, then re-prices its copies.
- * Until both guides are fetched (roadmap #4), one guide per set: the one most of its copies need (setGuide).
- * The parts list is only fetched while the set has no piece count, since it rarely changes on BrickLink.
+ * One guide per set: the one most of its copies need (setGuide).
+ * The parts list is only fetched while the set has none, since it rarely changes: from Rebrickable when `rb` is
+ * given and the list maps to BrickLink numbers (no BrickLink call for it), else from BrickLink with the price lookup.
+ * A Rebrickable list with minifigures that have no BrickLink number takes BrickLink's minifigure lines (the same one
+ * call) and learns the pairs, so the next set with those figures needs none.
  */
-export async function lookupInto(db: DB, s: Pick<SetRow, 'id' | 'setNo'> & { copies?: Pick<CopyRow, 'status' | 'condition'>[] }, lookup: Lookup, currency: string): Promise<string | null> {
+export async function lookupInto(db: DB, s: Pick<SetRow, 'id' | 'setNo'> & { copies?: Pick<CopyRow, 'status' | 'condition'>[] }, lookup: Lookup, currency: string, opts: LookupOpts = {}): Promise<string | null> {
   const guide = setGuide(s.copies ?? (await copiesBySet(db, [s.id])).get(s.id) ?? []);
   try {
-    const { parts, pieces: _p, partLots: _l, ...r } = await lookup(s.setNo, guide, currency, { parts: !(await hasParts(db, s.id)) });
-    if (parts) await replaceParts(db, s.id, parts); // also sets pieces and part lots
-    await db.update(sets)
-      .set({
-        ...r, estValue: estValue(r.avgSold, null), blError: null, lastUpdated: nowIso(), updatedAt: nowIso(),
-        // A pasted set keeps its placeholder name until BrickLink answers.
-        name: sql`case when ${sets.name} = ${placeholderName(s.setNo)} then ${r.blName} else ${sets.name} end`,
-      })
-      .where(eq(sets.id, s.id));
-    await recordPrice(db, {
-      itemKind: 'set', itemId: s.setNo, source: 'bricklink', type: 'sold_avg', condition: guide, currency,
-      amount: r.avgSold, low: r.minSold, high: r.maxSold, sampleSize: r.qtySold, observedOn: today(),
-    });
-    await repriceCopies(db, s.id, guide);
+    const need = !(await hasParts(db, s.id));
+    const rb = need ? await partsFromRb(db, s.setNo, opts) : null;
+    const { parts, pieces: _p, partLots: _l, ...r } = await lookup(s.setNo, guide, currency, { parts: need && (!rb || needsBrickLinkFigs(rb)) });
+    if (parts && opts.counts) opts.counts.bricklink++;
+    if (rb) {
+      const list = parts ? await withBrickLinkFigs(db, s.setNo, rb, parts) : { parts: rb.parts, learned: 0 };
+      await replaceParts(db, s.id, list.parts, 'rebrickable'); // also sets pieces and part lots
+      if (opts.counts) { opts.counts.rebrickable++; opts.counts.figsLearned += list.learned; }
+    } else if (parts) await replaceParts(db, s.id, parts, 'bricklink');
+    await savePrices(db, s, r, guide, currency);
     return null;
   } catch (e) {
     const error = (e instanceof Error ? e.message : String(e)).slice(0, 300);
     await db.update(sets).set({ blError: error, lastUpdated: nowIso() }).where(eq(sets.id, s.id));
     return error;
   }
+}
+
+/** Stores one BrickLink price lookup on a set, records it in the price history, and re-prices its copies. */
+async function savePrices(db: DB, s: Pick<SetRow, 'id' | 'setNo'>, r: Omit<Awaited<ReturnType<Lookup>>, 'parts' | 'pieces' | 'partLots'>, guide: 'N' | 'U', currency: string) {
+  await db.update(sets)
+    .set({
+      ...r, estValue: estValue(r.avgSold, null), blError: null, lastUpdated: nowIso(), updatedAt: nowIso(),
+      // A pasted set keeps its placeholder name until BrickLink answers.
+      name: sql`case when ${sets.name} = ${placeholderName(s.setNo)} then ${r.blName} else ${sets.name} end`,
+    })
+    .where(eq(sets.id, s.id));
+  await recordPrice(db, {
+    itemKind: 'set', itemId: s.setNo, source: 'bricklink', type: 'sold_avg', condition: guide, currency,
+    amount: r.avgSold, low: r.minSold, high: r.maxSold, sampleSize: r.qtySold, observedOn: today(),
+  });
+  await repriceCopies(db, s.id, guide);
 }
 
 /** The copy fields a set-level input carries (condition, location, Missing %, plus `copy`). */
@@ -181,7 +222,7 @@ const copyFields = (input: SetInput): CopyInput => {
  * Adds a set and looks it up on BrickLink. If it's already in stock, returns `existing` unless `another`
  * is set, in which case it adds one copy.
  */
-export async function addSet(db: DB, input: SetInput, opts: { another?: boolean; lookup: Lookup | null }): Promise<Result<{ set: SetRow }>> {
+export async function addSet(db: DB, input: SetInput, opts: { another?: boolean; lookup: Lookup | null; rb?: SetPartsSource | null }): Promise<Result<{ set: SetRow }>> {
   const have = await getSet(db, input.setNo);
   if (have && !opts.another) {
     return { ok: false, status: 409, error: `You already have ${have.qty} of #${have.setNo} (${have.name}).`, existing: { name: have.name, qty: have.qty } };
@@ -200,7 +241,7 @@ export async function addSet(db: DB, input: SetInput, opts: { another?: boolean;
   if (!inserted.length) return { ok: false, status: 409, error: `#${input.setNo} was just added by someone else.` };
   await insertCopies(db, inserted[0].id, copyFields(input), input.qty ?? 1);
   const row = (await getSet(db, input.setNo))!;
-  if (opts.lookup) await lookupInto(db, row, opts.lookup, await getCurrency(db));
+  if (opts.lookup) await lookupInto(db, row, opts.lookup, await getCurrency(db), { rb: opts.rb });
   return { ok: true, set: (await getSet(db, input.setNo))! };
 }
 
@@ -216,7 +257,7 @@ export type QuickAddResult = { added: number; merged: number; waiting: number; f
  */
 export async function quickAdd(
   db: DB, list: QuickList,
-  opts: { location?: string | null; condition?: Condition; lookup: Lookup | null; minifig: MinifigLookup | null },
+  opts: { location?: string | null; condition?: Condition; lookup: Lookup | null; minifig: MinifigLookup | null; rb?: SetPartsSource | null },
 ): Promise<Result<QuickAddResult>> {
   if (opts.location && !(await listLocations(db)).includes(opts.location)) return { ok: false, status: 400, error: `Unknown location ${opts.location}.` };
   const out: QuickAddResult = { added: 0, merged: 0, waiting: 0, figsAdded: 0, figsMerged: 0, invalid: list.invalid };
@@ -236,7 +277,7 @@ export async function quickAdd(
     if (ins.length) await insertCopies(db, ins[0].id, copy, qty);
     out.added++;
     const row = await getSet(db, no);
-    if (row && now && opts.lookup) await lookupInto(db, row, opts.lookup, currency);
+    if (row && now && opts.lookup) await lookupInto(db, row, opts.lookup, currency, { rb: opts.rb });
     else out.waiting++;
   }
   for (const f of list.minifigs) {
@@ -298,22 +339,45 @@ export async function removeOne(db: DB, no: string): Promise<Result<{ remaining:
   return { ok: true, remaining: Number(active) };
 }
 
-/** Throws away a set's parts list and fetches it again (and its prices). */
-export async function refreshParts(db: DB, no: string, lookup: Lookup | null): Promise<Result<{ set: SetRow }>> {
+/**
+ * Fetches a set's parts list again (and its prices). The new list comes from Rebrickable when it maps (see lookupInto),
+ * but a set with parts marked missing keeps its list's source, so the marks keep pointing at the same numbers. If the
+ * new list would still lose marked parts, nothing is replaced and the answer names them: marks are never dropped silently.
+ */
+export async function refreshParts(db: DB, no: string, lookup: Lookup | null, rb: SetPartsSource | null = null): Promise<Result<{ set: SetRow; source: PartsSource }>> {
   if (!lookup) return { ok: false, status: 400, error: 'BrickLink API keys are not set.' };
   const s = await getSet(db, no);
   if (!s) return { ok: false, status: 404, error: `#${no} isn't in the collection.` };
-  await replaceParts(db, s.id, []);
-  const error = await lookupInto(db, s, lookup, await getCurrency(db));
-  return error ? { ok: false, error } : { ok: true, set: (await getSet(db, no))! };
+  const currency = await getCurrency(db);
+  const guide = setGuide(s.copies);
+  const keepSource = (s.missingMarked ?? 0) > 0 ? (s.partsSource ?? 'bricklink') : null;
+  try {
+    const fromRb = keepSource === 'bricklink' ? null : await partsFromRb(db, s.setNo, { rb });
+    const { parts, pieces: _p, partLots: _l, ...r } = await lookup(s.setNo, guide, currency, { parts: !fromRb || needsBrickLinkFigs(fromRb) });
+    const source: PartsSource = fromRb ? 'rebrickable' : 'bricklink';
+    const list: SetPart[] = fromRb ? (parts ? (await withBrickLinkFigs(db, s.setNo, fromRb, parts)).parts : fromRb.parts) : (parts ?? []);
+    const lost = await orphanedMarks(db, s.id, list);
+    if (lost.length) {
+      await savePrices(db, s, r, guide, currency);
+      const names = lost.slice(0, 5).map((m) => m.partNo + (m.colorId != null ? ` (colour ${m.colorId})` : '')).join(', ');
+      return { ok: false, status: 409, error: `Kept the current parts list: the new one (from ${source === 'rebrickable' ? 'Rebrickable' : 'BrickLink'}) doesn't have ${lost.length} part${lost.length === 1 ? '' : 's'} you marked missing (${names}${lost.length > 5 ? ', …' : ''}). Unmark them, then refresh again.` };
+    }
+    await replaceParts(db, s.id, list, source);
+    await savePrices(db, s, r, guide, currency);
+    return { ok: true, set: (await getSet(db, no))!, source };
+  } catch (e) {
+    const error = (e instanceof Error ? e.message : String(e)).slice(0, 300);
+    await db.update(sets).set({ blError: error, lastUpdated: nowIso() }).where(eq(sets.id, s.id));
+    return { ok: false, error };
+  }
 }
 
-/** Re-runs the BrickLink lookup for one set. */
-export async function relookup(db: DB, no: string, lookup: Lookup | null): Promise<Result<{ set: SetRow }>> {
+/** Re-runs the BrickLink lookup for one set (and fetches its parts list if it has none). */
+export async function relookup(db: DB, no: string, lookup: Lookup | null, rb: SetPartsSource | null = null): Promise<Result<{ set: SetRow }>> {
   if (!lookup) return { ok: false, status: 400, error: 'BrickLink API keys are not set.' };
   const s = await getSet(db, no);
   if (!s) return { ok: false, status: 404, error: `#${no} isn't in the collection.` };
-  const error = await lookupInto(db, s, lookup, await getCurrency(db));
+  const error = await lookupInto(db, s, lookup, await getCurrency(db), { rb });
   return error ? { ok: false, error: `Still failing: ${error}` } : { ok: true, set: (await getSet(db, no))! };
 }
 
@@ -336,7 +400,7 @@ export async function startSync(db: DB): Promise<Result<{ runId: number }>> {
 /** Optional BrickLink extras for the sync: minifigure prices and part prices for part-out value. */
 export type SyncExtras = { minifig?: MinifigLookup; partPrice?: PartPriceLookup; price?: PriceLookup; images?: ImageStore };
 
-export async function runSync(db: DB, runId: number, lookup: Lookup, store?: Store, catalog?: Catalog & Partial<BuildSource> & Partial<IdCatalog>, retail?: RetailSource, extras: SyncExtras = {}): Promise<void> {
+export async function runSync(db: DB, runId: number, lookup: Lookup, store?: Store, catalog?: Catalog & Partial<BuildSource> & Partial<IdCatalog> & Partial<SetPartsSource>, retail?: RetailSource, extras: SyncExtras = {}): Promise<void> {
   try {
     const currency = await getCurrency(db);
     const copies = await copiesBySet(db);
@@ -348,8 +412,10 @@ export async function runSync(db: DB, runId: number, lookup: Lookup, store?: Sto
     // skip the remaining BrickLink steps (they keep their last prices) and still do the rest.
     let stopAt: number | null = null;
     let stopReason = '';
+    const rb = catalog?.setParts && catalog.setMinifigs ? (catalog as SetPartsSource) : null;
+    const counts: PartsCounts = { bricklink: 0, rebrickable: 0, rebrickableCalls: 0, figsLearned: 0 };
     for (const [i, s] of all.entries()) {
-      const error = await lookupInto(db, s, lookup, currency);
+      const error = await lookupInto(db, s, lookup, currency, { rb, counts });
       processed = i + 1;
       if (error) { errors++; failures.set(error, [...(failures.get(error) ?? []), s.setNo]); }
       await db.update(syncRuns).set({ processed: i + 1, errors }).where(eq(syncRuns.id, runId));
@@ -359,7 +425,9 @@ export async function runSync(db: DB, runId: number, lookup: Lookup, store?: Sto
     const figErrors = extras.minifig && bl ? await syncMinifigs(db, extras.minifig, currency) : 0;
     // BrickLink calls, in priority order: sets, minifigs, wishlist and store first; then the other guide; then part prices.
     const budget = new Budget();
-    budget.spend(all.length * 2 + (extras.minifig ? Number((await db.select({ n: sql<number>`count(*)` }).from(minifigs).where(sql`fig_no is not null`).all())[0].n) * 2 : 0));
+    // Two calls a set for its price, plus one for each parts list BrickLink sent (none for a Rebrickable list whose
+    // minifigures all have BrickLink numbers).
+    budget.spend(all.length * 2 + counts.bricklink + (extras.minifig ? Number((await db.select({ n: sql<number>`count(*)` }).from(minifigs).where(sql`fig_no is not null`).all())[0].n) * 2 : 0));
     await saveHistory(db);
     const wishErrors = bl ? await syncWishlist(db, lookup, currency) : 0;
     budget.spend(Number((await db.select({ n: sql<number>`count(*)` }).from(wishlist).all())[0].n) * 2 + (store ? 3 : 0));
@@ -405,6 +473,7 @@ export async function runSync(db: DB, runId: number, lookup: Lookup, store?: Sto
     const message = [quotaNote, ...storeErrors, alertError ?? '', swingError ?? '', wishErrors ? `${wishErrors} wishlist lookup${wishErrors === 1 ? '' : 's'} failed` : '', figErrors ? `${figErrors} minifig lookup${figErrors === 1 ? '' : 's'} failed` : '', ...catalogErrors.slice(0, 3), catalogErrors.length > 3 ? `and ${catalogErrors.length - 3} more errors` : ''].filter(Boolean).join('; ');
     await db.update(syncRuns).set({ status: 'done', finishedAt: nowIso(), message: message || null }).where(eq(syncRuns.id, runId));
     logSync(all.length, processed, errors, failures, message);
+    if (counts.bricklink + counts.rebrickable) console.log(`  Parts lists: ${counts.rebrickable} from Rebrickable (${counts.rebrickableCalls} Rebrickable calls), ${counts.bricklink} BrickLink parts calls, ${counts.figsLearned} minifigure numbers learned`);
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
     await db.update(syncRuns).set({ status: 'failed', finishedAt: nowIso(), message }).where(eq(syncRuns.id, runId));

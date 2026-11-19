@@ -64,6 +64,8 @@ export type SetRow = {
   imageUrl: string | null;
   pieces: number | null;
   partLots: number | null;
+  /** Where the parts list came from (null before one is fetched; older lists are BrickLink's). */
+  partsSource?: 'bricklink' | 'rebrickable' | null;
   location: string | null;
   condition: Condition | null;
   registered: string | null;

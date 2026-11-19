@@ -1,7 +1,7 @@
 import { api, body, fromResult, json } from '@/lib/api';
 import { CONDITIONS, parseQuickList, type Condition } from '@/lib/sets';
 import { quickAdd } from '@/lib/service/sets';
-import { brickMinifig, bricklink } from '@/lib/session';
+import { brickMinifig, bricklink, rebrickable } from '@/lib/session';
 
 /**
  * POST /api/v1/sets/bulk – { text, location?, condition? } adds a pasted list of set numbers (10497, "10497 x2")
@@ -14,5 +14,5 @@ export const POST = api(async (req, { db }) => {
   if (!list.sets.length && !list.minifigs.length) return json({ error: 'No set or minifig numbers found.', invalid: list.invalid }, 400);
   const condition = (CONDITIONS as readonly string[]).includes(String(b.condition)) ? (b.condition as Condition) : undefined;
   const location = typeof b.location === 'string' && b.location ? b.location : null;
-  return fromResult(await quickAdd(db, list, { location, condition, lookup: bricklink(), minifig: brickMinifig() }), 201);
+  return fromResult(await quickAdd(db, list, { location, condition, lookup: bricklink(), minifig: brickMinifig(), rb: rebrickable() }), 201);
 });

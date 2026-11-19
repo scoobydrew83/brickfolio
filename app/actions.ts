@@ -60,7 +60,7 @@ const input = async (form: Record<string, unknown>, partial: boolean) => parseSe
 export async function addSet(form: Record<string, unknown>, another = false): Promise<Result> {
   return act(async () => {
     const p = await input(form, false);
-    return p.ok ? svc.addSet(await getDb(), p.value, { another, lookup: bricklink() }) : p;
+    return p.ok ? svc.addSet(await getDb(), p.value, { another, lookup: bricklink(), rb: rebrickable() }) : p;
   });
 }
 
@@ -109,7 +109,7 @@ export async function removeCopy(copyId: number): Promise<Result> {
 export async function relookupSet(setNo: string): Promise<Result> {
   return act(async () => {
     const p = await input({ setNo }, true);
-    return p.ok ? svc.relookup(await getDb(), p.value.setNo, bricklink()) : p;
+    return p.ok ? svc.relookup(await getDb(), p.value.setNo, bricklink(), rebrickable()) : p;
   });
 }
 
@@ -208,7 +208,7 @@ export async function partsFor(setNo: string): Promise<parts.PartRow[]> {
 export async function refreshPartsFor(setNo: string): Promise<Result> {
   return act(async () => {
     const p = await input({ setNo }, true);
-    return p.ok ? svc.refreshParts(await getDb(), p.value.setNo, bricklink()) : p;
+    return p.ok ? svc.refreshParts(await getDb(), p.value.setNo, bricklink(), rebrickable()) : p;
   });
 }
 
@@ -242,7 +242,7 @@ export async function removeWish(setNo: string): Promise<Result> {
 
 /** You got it: moves the set from the wishlist into the collection. */
 export async function acquireWish(setNo: string, pricePaid: number | null = null): Promise<Result> {
-  return act(async () => wish.acquireWish(await getDb(), setNo, bricklink(), { pricePaid }));
+  return act(async () => wish.acquireWish(await getDb(), setNo, bricklink(), { pricePaid, rb: rebrickable() }));
 }
 
 // ---- 3D models ----
@@ -437,7 +437,7 @@ export async function quickAddList(text: string, location: string, condition: st
     const list = parseQuickList(String(text ?? '').slice(0, 50_000));
     if (!list.sets.length && !list.minifigs.length) return { ok: false, error: list.invalid.length ? `Nothing recognised. Check: ${list.invalid.slice(0, 5).join(', ')}` : 'Paste at least one set number.' };
     const cond = condition === 'New' || condition === 'Used' || condition === 'Partial' ? condition : undefined;
-    const res = await svc.quickAdd(await getDb(), list, { location: location || null, condition: cond, lookup: bricklink(), minifig: brickMinifig() });
+    const res = await svc.quickAdd(await getDb(), list, { location: location || null, condition: cond, lookup: bricklink(), minifig: brickMinifig(), rb: rebrickable() });
     if (res.ok) message = quickSummary(res);
     return res;
   });
@@ -759,7 +759,7 @@ export async function addScannedSets(items: unknown, key: string, figList?: unkn
     const f = barcodes.parseScanFigs(figList);
     if (!f.ok) return f;
     if (!p.items.length && !f.figs.length) return { ok: false, error: 'Nothing to add.' };
-    const res = await barcodes.addScanned(db, p.items, { key, lookup: bricklink(), minifig: brickMinifig(), figs: f.figs });
+    const res = await barcodes.addScanned(db, p.items, { key, lookup: bricklink(), minifig: brickMinifig(), figs: f.figs, rb: rebrickable() });
     if (res.ok) { const { ok: _, ...rest } = res; result = rest; }
     return res;
   });

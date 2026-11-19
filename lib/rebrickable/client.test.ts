@@ -83,3 +83,29 @@ it('reads colour and part IDs, following parts pages only on rebrickable.com', a
   await expect(rb.partsPage('https://evil.example/steal')).rejects.toThrow(/refusing/);
   expect(urls).toEqual(['/lego/colors/?page_size=1000', '/lego/parts/?page_size=1000&inc_part_details=1', '/lego/parts/?page=2&page_size=1000&inc_part_details=1']);
 });
+
+it('reads a set inventory across pages, with spares, external IDs and minifigs', async () => {
+  const urls: string[] = [];
+  const rb = createRebrickable('k', async (input) => {
+    const url = String(input).replace(BASE, '');
+    urls.push(url);
+    if (url === '/lego/sets/10316-1/parts/?page_size=1000&inc_part_details=1&inc_color_details=1') {
+      return Response.json({ count: 2, next: `${BASE}/lego/sets/10316-1/parts/?page=2&page_size=1000&inc_part_details=1&inc_color_details=1`, results: [
+        { quantity: 4, is_spare: false, part: { part_num: '3001', name: 'Brick 2 x 4', external_ids: { BrickLink: ['3001'], LDraw: ['3001'] } }, color: { id: 4, name: 'Red', external_ids: { BrickLink: { ext_ids: [5] } } } },
+      ] });
+    }
+    if (url.includes('/lego/sets/10316-1/parts/?page=2')) {
+      return Response.json({ count: 2, next: null, results: [{ quantity: 1, is_spare: true, part: { part_num: '3001', name: 'Brick 2 x 4' }, color: { id: 4 } }] });
+    }
+    if (url.startsWith('/lego/sets/10316-1/minifigs/')) return Response.json({ count: 1, next: null, results: [{ set_num: 'fig-012345', set_name: 'Elrond', quantity: 2 }] });
+    return new Response('{"detail":"Not found."}', { status: 404 });
+  }, 0);
+  expect(await rb.setParts('10316-1')).toEqual([
+    { partNo: '3001', colorId: 4, qty: 4, name: 'Brick 2 x 4', isSpare: false, part: { bricklink: ['3001'], ldraw: ['3001'] }, color: { bricklink: ['5'], ldraw: [] } },
+    { partNo: '3001', colorId: 4, qty: 1, name: 'Brick 2 x 4', isSpare: true, part: { bricklink: [], ldraw: [] }, color: { bricklink: [], ldraw: [] } },
+  ]);
+  expect(await rb.setMinifigs('10316-1')).toEqual([{ figNo: 'fig-012345', name: 'Elrond', qty: 2 }]);
+  expect(await rb.setParts('99999-1')).toBeNull();
+  expect(await rb.setMinifigs('99999-1')).toEqual([]);
+  expect(urls.filter((u) => u.includes('/10316-1/parts/'))).toHaveLength(2);
+});

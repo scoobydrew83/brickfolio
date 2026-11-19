@@ -84,6 +84,8 @@ export type Lookup = (setNo: string, guide: 'N' | 'U', currency: string, opts?: 
 export type SetPart = {
   matchNo: number; partNo: string; name: string; type: string; colorId: number | null;
   qty: number; extra: number; alternate: boolean; counterpart: boolean;
+  /** False for a line still in another catalog's numbers (a Rebrickable list with no BrickLink match yet). Default true. */
+  mapped?: boolean;
 };
 export type Color = { id: number; name: string; rgb: string | null };
 

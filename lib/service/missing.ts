@@ -1,7 +1,7 @@
 // "Complete your Partial sets": the parts you've marked missing from a set's parts list. They set Missing % exactly
 // (missing pieces ÷ pieces in the set, the same model Est. Value already uses) and export as a BrickLink Wanted List.
 import { and, eq } from 'drizzle-orm';
-import type { Lookup } from '../bricklink/client';
+import type { Lookup, SetPart } from '../bricklink/client';
 import { partKey as keyOf, toWantedListXml } from '../bricklink/wanted';
 import { colors, setCopies, setMissingParts, setParts, sets } from '../db/schema';
 import type { DB } from '../db/types';
@@ -11,7 +11,8 @@ import { partout } from './partout';
 import { needsRelookup, repriceCopies } from './copies';
 
 export type MissingItem = { partNo: string; colorId: number | null; type: string; qty: number };
-export type MissingRow = MissingItem & { name: string; colorName: string | null; rgb: string | null; inSet: number };
+/** `mapped` false: the part is in Rebrickable's numbers (no BrickLink match), so Wanted Lists leave it out. */
+export type MissingRow = MissingItem & { name: string; colorName: string | null; rgb: string | null; inSet: number; mapped: boolean };
 export type MissingSummary = { items: MissingRow[]; lots: number; pieces: number; setPieces: number; pct: number | null };
 
 const NO_COLOR = -1; // stored for parts without a color, so the unique key works
@@ -19,7 +20,7 @@ const NO_COLOR = -1; // stored for parts without a color, so the unique key work
 /** The parts that can be marked missing: the regular parts list (no alternates or counterparts), merged by part and color. */
 async function markable(db: DB, setId: number) {
   const rows = await db
-    .select({ partNo: setParts.partNo, colorId: setParts.colorId, type: setParts.type, name: setParts.name, qty: setParts.qty, colorName: colors.name, rgb: colors.rgb })
+    .select({ partNo: setParts.partNo, colorId: setParts.colorId, type: setParts.type, name: setParts.name, qty: setParts.qty, mapped: setParts.mapped, colorName: colors.name, rgb: colors.rgb })
     .from(setParts).leftJoin(colors, eq(colors.id, setParts.colorId))
     .where(and(eq(setParts.setId, setId), eq(setParts.alternate, false), eq(setParts.counterpart, false))).all();
   const map = new Map<string, (typeof rows)[number]>();
@@ -41,7 +42,7 @@ export async function listMissing(db: DB, setId: number, copyId: number | null):
   for (const r of rows) {
     const colorId = r.colorId === NO_COLOR ? null : r.colorId;
     const p = parts.get(keyOf(r.type, r.partNo, colorId));
-    if (p) items.push({ partNo: p.partNo, colorId, type: r.type, qty: r.qty, name: p.name, colorName: p.colorName, rgb: p.rgb, inSet: p.qty });
+    if (p) items.push({ partNo: p.partNo, colorId, type: r.type, qty: r.qty, name: p.name, colorName: p.colorName, rgb: p.rgb, inSet: p.qty, mapped: p.mapped });
   }
   const setPieces = [...parts.values()].reduce((t, p) => t + p.qty, 0);
   const pieces = items.reduce((t, i) => t + i.qty, 0);
@@ -114,6 +115,15 @@ export async function saveMissing(db: DB, setNo: string, copyId: number | null, 
   return { ok: true, missing: await listMissing(db, s.id, copy.id), copyId: copy.id };
 }
 
+/** Parts marked missing (on any copy) that a new parts list doesn't have, so replacing the list would drop them. */
+export async function orphanedMarks(db: DB, setId: number, parts: Pick<SetPart, 'type' | 'partNo' | 'colorId' | 'alternate' | 'counterpart'>[]): Promise<MissingItem[]> {
+  const rows = await db.select().from(setMissingParts).where(eq(setMissingParts.setId, setId)).all();
+  if (!rows.length) return [];
+  const keys = new Set(parts.filter((p) => !p.alternate && !p.counterpart).map((p) => keyOf(p.type, p.partNo, p.colorId)));
+  return rows.filter((r) => !keys.has(keyOf(r.type, r.partNo, r.colorId === NO_COLOR ? null : r.colorId)))
+    .map((r) => ({ partNo: r.partNo, colorId: r.colorId === NO_COLOR ? null : r.colorId, type: r.type, qty: r.qty }));
+}
+
 /** After a parts list is replaced: drops marks for parts no longer on it, caps quantities, and updates Missing %. */
 export async function reconcileMissing(db: DB, setId: number): Promise<void> {
   const rows = await db.select().from(setMissingParts).where(eq(setMissingParts.setId, setId)).all();
@@ -128,14 +138,18 @@ export async function reconcileMissing(db: DB, setId: number): Promise<void> {
   for (const copyId of new Set(rows.map((r) => r.copyId).filter((v): v is number => v != null))) await applyMissing(db, setNo, copyId, null);
 }
 
-/** A copy's missing parts as a BrickLink Wanted List, or null when the set (or copy) isn't in the collection. */
-export async function missingWantedList(db: DB, setNo: string, copyId: number | null = null): Promise<{ xml: string; items: number; name: string } | null> {
+/**
+ * A copy's missing parts as a BrickLink Wanted List, or null when the set (or copy) isn't in the collection. Parts with
+ * no BrickLink number are left out and counted in `skipped`.
+ */
+export async function missingWantedList(db: DB, setNo: string, copyId: number | null = null): Promise<{ xml: string; items: number; skipped: number; name: string } | null> {
   const s = await getSet(db, setNo);
   if (!s) return null;
   const copy = pickCopy(s, copyId, false);
   if (!copy) return null;
   const { items } = await listMissing(db, s.id, copy.id);
-  return { xml: toWantedListXml(items, `Missing parts for ${s.name} (${displayNo(s.setNo)})`), items: items.length, name: s.name };
+  const ok = items.filter((i) => i.mapped);
+  return { xml: toWantedListXml(ok, `Missing parts for ${s.name} (${displayNo(s.setNo)})`), items: ok.length, skipped: items.length - ok.length, name: s.name };
 }
 
 /** Recomputes Missing % for every copy with marked parts, e.g. after part prices were refreshed. */

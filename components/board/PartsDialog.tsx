@@ -9,7 +9,7 @@ import { itemImage, itemPage } from '@/lib/bricklink/links';
 import type { PartRow } from '@/lib/service/parts';
 import { displayNo, type SetRow } from '@/lib/sets';
 
-/** A set's parts list from BrickLink: regular parts, then alternates. */
+/** A set's parts list (from Rebrickable or BrickLink): regular parts, then alternates. */
 export function PartsDialog({ set, priced, onClose }: { set: SetRow; priced: boolean; onClose: () => void }) {
   const [parts, setParts] = useState<PartRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -46,11 +46,12 @@ export function PartsDialog({ set, priced, onClose }: { set: SetRow; priced: boo
       ) : parts.length === 0 ? (
         <div className="p-4">
           <EmptyState title="No parts list yet">
-            {priced ? 'Fetch it from BrickLink below, or import the Parts tab in Settings.' : 'Import the Parts tab in Settings, or add BrickLink keys.'}
+            {priced ? 'Fetch it below, or import the Parts tab in Settings.' : 'Import the Parts tab in Settings, or add BrickLink keys.'}
           </EmptyState>
         </div>
       ) : (
         <>
+          <PartsSource parts={parts} className="border-b border-line px-4 py-2" />
           <PartList parts={regular} />
           {alternates.length > 0 && (
             <>
@@ -61,6 +62,23 @@ export function PartsDialog({ set, priced, onClose }: { set: SetRow; priced: boo
         </>
       )}
     </Dialog>
+  );
+}
+
+/**
+ * Where a parts list came from (Source Rule, docs/design.md), and how many of its lots have no BrickLink number yet:
+ * those are left out of part-out value, Wanted Lists and "What can I build?".
+ */
+export function PartsSource({ parts, className }: { parts: Pick<PartRow, 'source' | 'mapped' | 'alternate'>[]; className?: string }) {
+  if (!parts.length) return null;
+  const rb = parts.some((p) => p.source === 'rebrickable');
+  const unmapped = parts.filter((p) => p.mapped === false && !p.alternate).length;
+  return (
+    <p className={cx('text-xs text-fg-3', className)}>
+      Parts list from {rb ? <a href="https://rebrickable.com" target="_blank" rel="noreferrer" className="text-link hover:underline">Rebrickable</a> : 'BrickLink'}
+      {rb && ', in BrickLink numbers'}.
+      {unmapped > 0 && <> <b className="text-fg-2 tabular-nums">{unmapped}</b> lot{unmapped === 1 ? ' has' : 's have'} no BrickLink match yet and {unmapped === 1 ? 'is' : 'are'} left out of part-out value and Wanted Lists.</>}
+    </p>
   );
 }
 
@@ -84,9 +102,16 @@ export function PartList({ parts, showSet, missing, editing, onMissing }: { part
             <Count n={p.qty} />
             {p.extra > 0 && <span className="mt-1 block text-xs font-normal text-fg-3">+{p.extra} spare</span>}
           </p>
-          <a href={itemPage(p.type, p.partNo)} target="_blank" rel="noreferrer" className="flex size-12 shrink-0 items-center justify-center rounded-control bg-tile">
-            <Image src={itemImage(p.type, p.partNo, p.colorId)} alt="" width={48} height={48} className="max-h-12 w-auto object-contain" />
-          </a>
+          {p.mapped === false ? (
+            // Still in Rebrickable's numbers: link there; BrickLink has no page or photo under this number.
+            <a href={`https://rebrickable.com/${p.type === 'MINIFIG' ? 'minifigs' : 'parts'}/${encodeURIComponent(p.partNo)}/`} target="_blank" rel="noreferrer" className="flex size-12 shrink-0 items-center justify-center rounded-control bg-tile text-2xs text-fg-3">
+              <span className="sr-only">On Rebrickable</span><span aria-hidden>RB</span>
+            </a>
+          ) : (
+            <a href={itemPage(p.type, p.partNo)} target="_blank" rel="noreferrer" className="flex size-12 shrink-0 items-center justify-center rounded-control bg-tile">
+              <Image src={itemImage(p.type, p.partNo, p.colorId)} alt="" width={48} height={48} className="max-h-12 w-auto object-contain" />
+            </a>
+          )}
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm">
               {p.rgb && <span className="mr-1.5 inline-block size-2.5 rounded-full ring-1 ring-line-strong" style={{ background: `#${p.rgb}` }} />}
@@ -95,6 +120,7 @@ export function PartList({ parts, showSet, missing, editing, onMissing }: { part
             <p className="text-xs text-fg-3">
               <span className="font-mono">{p.partNo}</span> · {p.type.toLowerCase()}
               {p.counterpart && ' · counterpart'}
+              {p.mapped === false && ' · Rebrickable number, no BrickLink match'}
               {showSet && p.setNo && <> · in <Link href={`/sets/${encodeURIComponent(displayNo(p.setNo))}`} className="font-semibold text-link hover:underline">{displayNo(p.setNo)}</Link> {p.setName}</>}
             </p>
           </div>

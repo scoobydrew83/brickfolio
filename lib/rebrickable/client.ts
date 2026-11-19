@@ -66,6 +66,17 @@ export type BuildSource = {
   buildParts(mocNo: string): Promise<RbBuildPart[]>;
 };
 
+/** One line of a set's inventory: a build part plus its name and whether it's a spare. */
+export type RbSetPart = RbBuildPart & { name: string; isSpare: boolean };
+/** A minifigure in a set, in Rebrickable's numbers (fig-000123). */
+export type RbSetFig = { figNo: string; name: string; qty: number };
+/** A set's parts and minifigures, for its parts list (lib/service/setparts.ts). */
+export type SetPartsSource = {
+  /** Every part line (spares included), or null when Rebrickable doesn't know the set. */
+  setParts(setNo: string): Promise<RbSetPart[] | null>;
+  setMinifigs(setNo: string): Promise<RbSetFig[]>;
+};
+
 /** A minifigure in Rebrickable's catalog (fig-000123), for the Collectible Minifigures checklist. */
 export type RbFig = { figNo: string; name: string; numParts: number | null; imageUrl: string | null };
 /** Minifigures in a theme, e.g. one Collectible Minifigures series. */
@@ -89,7 +100,7 @@ export function toBuildPart(p: ApiInvPart): RbBuildPart {
 }
 type ApiTheme = { id: number; parent_id: number | null; name: string };
 type ApiSet = { set_num: string; name: string; year?: number; theme_id?: number; num_parts?: number; set_img_url?: string | null };
-type ApiMinifig = { quantity?: number };
+type ApiMinifig = { set_num?: string; set_name?: string; quantity?: number };
 type ApiFig = { set_num: string; name: string; num_parts?: number; set_img_url?: string | null };
 
 class NotFound extends Error {}
@@ -97,7 +108,9 @@ class NotFound extends Error {}
 /** Only links back to the API are followed, so the key is never sent anywhere else. */
 const ours = (url: string | null | undefined) => (url?.startsWith(BASE + '/') ? url : null);
 
-export function createRebrickable(key: string, fetchImpl: typeof fetch = fetch, gapMs = GAP_MS): Catalog & BuildSource & FigSource & IdCatalog & PartLookup & MocSource {
+export type Rebrickable = Catalog & BuildSource & FigSource & IdCatalog & PartLookup & MocSource & SetPartsSource;
+
+export function createRebrickable(key: string, fetchImpl: typeof fetch = fetch, gapMs = GAP_MS): Rebrickable {
   let last = 0;
   async function get<T>(urlOrPath: string): Promise<T> {
     const url = urlOrPath.startsWith('http') ? urlOrPath : BASE + urlOrPath;
@@ -207,6 +220,24 @@ export function createRebrickable(key: string, fetchImpl: typeof fetch = fetch, 
         figNo: f.set_num, name: f.name, numParts: f.num_parts ?? null, imageUrl: f.set_img_url ?? null,
       }));
     },
+    async setParts(setNo) {
+      try {
+        const lines = await all<ApiInvPart>(`/lego/sets/${encodeURIComponent(setNo)}/parts/?page_size=1000&inc_part_details=1&inc_color_details=1`);
+        return lines.map((l) => ({ ...toBuildPart(l), name: l.part.name ?? l.part.part_num, isSpare: !!l.is_spare }));
+      } catch (e) {
+        if (e instanceof NotFound) return null;
+        throw e;
+      }
+    },
+    async setMinifigs(setNo) {
+      try {
+        return (await all<ApiMinifig>(`/lego/sets/${encodeURIComponent(setNo)}/minifigs/?page_size=1000`))
+          .filter((m) => m.set_num).map((m) => ({ figNo: m.set_num!, name: m.set_name ?? m.set_num!, qty: m.quantity ?? 1 }));
+      } catch (e) {
+        if (e instanceof NotFound) return [];
+        throw e;
+      }
+    },
     async minifigCount(setNo) {
       try {
         return (await all<ApiMinifig>(`/lego/sets/${encodeURIComponent(setNo)}/minifigs/?page_size=1000`)).reduce((t, m) => t + (m.quantity ?? 1), 0);
@@ -219,7 +250,7 @@ export function createRebrickable(key: string, fetchImpl: typeof fetch = fetch, 
 }
 
 /** Client from REBRICKABLE_API_KEY, or null when it isn't set (the feature is optional). */
-export function rebrickableFromEnv(): (Catalog & BuildSource & FigSource & IdCatalog & PartLookup & MocSource) | null {
+export function rebrickableFromEnv(): Rebrickable | null {
   const key = process.env.REBRICKABLE_API_KEY;
   return key ? createRebrickable(key) : null;
 }

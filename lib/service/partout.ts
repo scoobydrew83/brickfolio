@@ -26,10 +26,13 @@ export function partoutBudget(usedCalls: number, cap = partoutDailyCalls()) {
 
 type Line = { type: string; partNo: string; colorId: number | null; qty: number };
 
-/** A set's regular parts (no alternates or counterparts), merged by part and color, like the missing-parts list. */
+/**
+ * A set's regular parts (no alternates or counterparts), merged by part and color, like the missing-parts list.
+ * Lines with no BrickLink number (from a Rebrickable list) can't be priced and are left out; see unmappedLots.
+ */
 async function lines(db: DB, setId: number): Promise<Line[]> {
   const rows = await db.select({ type: setParts.type, partNo: setParts.partNo, colorId: setParts.colorId, qty: setParts.qty }).from(setParts)
-    .where(and(eq(setParts.setId, setId), eq(setParts.alternate, false), eq(setParts.counterpart, false))).all();
+    .where(and(eq(setParts.setId, setId), eq(setParts.alternate, false), eq(setParts.counterpart, false), eq(setParts.mapped, true))).all();
   const map = new Map<string, Line>();
   for (const r of rows) {
     const k = partKey(r.type, r.partNo, r.colorId);
@@ -66,6 +69,7 @@ export type Partout = {
   ageDays: number | null; // how many days old that price is
   missingValue: number | null; // value of the parts marked missing, when they're all priced
   missingPctByValue: number | null; // missingValue ÷ value, when coverage is at least 90%
+  unmappedLots: number; // lots left out because they have no BrickLink number (Rebrickable lists)
 };
 
 /** Whole-set coverage needed before Missing % is weighted by part price instead of piece count. */
@@ -99,7 +103,9 @@ export async function partout(db: DB, setId: number, condition: Condition | null
     }
   }
   const missingPctByValue = missingValue != null && value > 0 && coverage >= WEIGHTED_COVERAGE ? Math.round((missingValue / value) * 1000) / 10 : null;
-  return { guide, value: Math.round(value * 100) / 100, lots: ls.length, pricedLots, soldLots, pieces, pricedPieces, coverage, oldest, ageDays: oldest ? Math.max(0, Math.round((Date.now() - Date.parse(oldest)) / 86_400_000)) : null, missingValue: missingValue == null ? null : Math.round(missingValue * 100) / 100, missingPctByValue };
+  const [{ n: unmappedLots }] = await db.select({ n: sql<number>`count(*)` }).from(setParts)
+    .where(and(eq(setParts.setId, setId), eq(setParts.alternate, false), eq(setParts.counterpart, false), eq(setParts.mapped, false))).all();
+  return { unmappedLots: Number(unmappedLots), guide, value: Math.round(value * 100) / 100, lots: ls.length, pricedLots, soldLots, pieces, pricedPieces, coverage, oldest, ageDays: oldest ? Math.max(0, Math.round((Date.now() - Date.parse(oldest)) / 86_400_000)) : null, missingValue: missingValue == null ? null : Math.round(missingValue * 100) / 100, missingPctByValue };
 }
 
 /**

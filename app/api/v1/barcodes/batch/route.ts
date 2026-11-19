@@ -1,7 +1,7 @@
 import { api, body, fromResult, json } from '@/lib/api';
 import { addScanned, parseScanFigs, parseScanItems } from '@/lib/service/barcodes';
 import { listLocations } from '@/lib/service/sets';
-import { brickMinifig, bricklink } from '@/lib/session';
+import { brickMinifig, bricklink, rebrickable } from '@/lib/session';
 
 /**
  * POST /api/v1/barcodes/batch – { items: [{ setNo, qty?, target?, condition?, location? }], figs?: [{ rbFigNo, name, qty }] }
@@ -18,5 +18,5 @@ export const POST = api(async (req, { db }) => {
   const f = parseScanFigs(b?.figs);
   if (!f.ok) return json({ error: f.error }, 400);
   if (!p.items.length && !f.figs.length) return json({ error: 'Nothing to add.' }, 400);
-  return fromResult(await addScanned(db, p.items, { key, lookup: bricklink(), minifig: brickMinifig(), figs: f.figs }), 201);
+  return fromResult(await addScanned(db, p.items, { key, lookup: bricklink(), minifig: brickMinifig(), figs: f.figs, rb: rebrickable() }), 201);
 });

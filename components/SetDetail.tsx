@@ -13,7 +13,7 @@ import type { PartRow } from '@/lib/service/parts';
 import type { ValueSources } from '@/lib/service/prices';
 import { copiesSummary, copyGuide, costBasis, displayNo, num, setGuide, STATUS_LABEL, type ConditionGap, type CopyRow, type SetRow } from '@/lib/sets';
 import { ModelViewer } from './ModelViewer';
-import { PartList } from './board/PartsDialog';
+import { PartList, PartsSource } from './board/PartsDialog';
 import { locationLabel, RemoveButton, RetireChip } from './board/SetCard';
 import { CopyForm } from './board/CopyForm';
 import { retailGain, retirement } from '@/lib/retail';
@@ -226,7 +226,7 @@ export default function SetDetail({ set: s, parts, prices, currency, locations, 
             {parts.length ? `${num(s.pieces).toLocaleString()} pieces in ${regular.length} lots` : ''}
             {priced && !marking && (
               <Button variant="link" className="ml-3" disabled={pending} onClick={() => act(() => refreshPartsFor(s.setNo), 'Parts list updated.')}>
-                <RefreshCw aria-hidden className="size-4" />{parts.length ? 'Refresh from BrickLink' : 'Fetch from BrickLink'}
+                <RefreshCw aria-hidden className="size-4" />{parts.length ? 'Refresh parts list' : 'Fetch parts list'}
               </Button>
             )}
             {regular.length > 0 && !marking && (
@@ -268,10 +268,11 @@ export default function SetDetail({ set: s, parts, prices, currency, locations, 
         )}
         {parts.length === 0 ? (
           <EmptyState title="No parts list yet">
-            {priced ? 'Fetch it from BrickLink, or import the Parts tab in Settings.' : 'Import the Parts tab in Settings, or add BrickLink keys to fetch it.'}
+            {priced ? 'Fetch it, or import the Parts tab in Settings.' : 'Import the Parts tab in Settings, or add BrickLink keys to fetch it.'}
           </EmptyState>
         ) : (
           <Callout className="overflow-hidden">
+            <PartsSource parts={parts} className="border-b border-line px-4 py-2" />
             <PartList parts={listed} missing={shownMissing} editing={marking} onMissing={(p, q) => setDraft((d) => ({ ...d, [partKey(p.type, p.partNo, p.colorId)]: q }))} />
             {alternates.length > 0 && (
               <>
@@ -451,6 +452,7 @@ function PartoutCallout({ p, complete, money, canPrice, pending, onPrice }: { p:
           ? <>BrickLink {guide} part prices for {p.coverage}% of the pieces ({p.pricedLots} of {p.lots} lots){days === 0 ? ', fetched today' : days !== null ? `, up to ${days} day${days === 1 ? '' : 's'} old` : ''}. Lots with no recent sales count as $0.</>
           : <>No part prices yet. The daily sync prices parts with BrickLink calls it has left over, most valuable sets first.</>}
         {p.missingPctByValue !== null && <> Missing % is weighted by these prices.</>}
+        {p.unmappedLots > 0 && <> {p.unmappedLots} lot{p.unmappedLots === 1 ? '' : 's'} with no BrickLink number {p.unmappedLots === 1 ? 'isn\u2019t' : 'aren\u2019t'} counted.</>}
       </p>
       {canPrice && p.unpriced > 0 && (
         <Button size="sm" className="mt-2" loading={pending} onClick={onPrice}>Price {p.unpriced} part{p.unpriced === 1 ? '' : 's'} now</Button>

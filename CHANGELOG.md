@@ -4,6 +4,18 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-11-19
+
+**Before upgrading, back up your database.** Migration 0031 adds `source` and `mapped` to `set_parts` and `parts_source` to `sets` (columns with defaults; nothing is rebuilt).
+
+### Changed
+- **Parts lists from Rebrickable:** with `REBRICKABLE_API_KEY`, a new set's parts list (and **Refresh parts list**) comes from Rebrickable, from the catalog downloads when they have the set or else the API, turned into BrickLink part and colour numbers through the ID map, with spares as extras. It costs no BrickLink call, so more of the daily 5,000 go to part prices. BrickLink's list is used when Rebrickable doesn't know the set or more than `REBRICKABLE_PARTS_MAX_UNMAPPED` percent of its lots (default 2) have no BrickLink number. Rebrickable gives no BrickLink minifigure numbers, so a set with a figure Brickfolio doesn't know yet takes its minifigure lines from BrickLink's parts list (one call) and remembers each Rebrickable → BrickLink pair it can match for certain (the only one left, a unique quantity, or clearly matching names); later sets with those figures need no BrickLink call. A figure BrickLink doesn't list stays in Rebrickable's number and is left out of part-out value and Wanted Lists. The set page says where the list came from and how many lots have no BrickLink match. Lists you already have aren't changed. Piece and lot counts from Rebrickable can differ slightly from BrickLink's. `REBRICKABLE_PARTS=off` keeps lists on BrickLink.
+- The daily sync's BrickLink budget now counts the parts-list calls BrickLink actually made (none for a list from Rebrickable), and the server log says how many lists came from each.
+- The missing parts Wanted List leaves out parts with no BrickLink number and reports how many (`X-Skipped-Lines`); part-out value reports them as `unmappedLots`.
+
+### Fixed
+- **Refresh parts list** no longer drops the parts you marked missing. A set with marks keeps its list's source, and a refresh whose new list would lose a marked part keeps the current list and names the part instead.
+
 ## [0.16.0] - 2026-11-19
 
 **Before upgrading, back up your database.** Migration 0030 adds the Rebrickable catalog tables (`rb_sets`, `rb_parts`, `rb_colors`, `rb_inventories`, `rb_inventory_parts`, `catalog_files`); it changes no existing table.

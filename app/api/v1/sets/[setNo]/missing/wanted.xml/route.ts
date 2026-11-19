@@ -11,5 +11,6 @@ export const GET = api<P>(async (req, { db, params }) => {
   if (c && !/^\d+$/.test(c)) return json({ error: 'copy must be a copy id.' }, 400);
   const w = await missingWantedList(db, no, c ? Number(c) : null);
   if (!w) return json({ error: 'Set not found.' }, 404);
-  return new Response(w.xml, { headers: { 'Content-Type': 'application/xml; charset=utf-8', 'Content-Disposition': `attachment; filename="missing-${displayNo(no)}.xml"`, 'Cache-Control': 'no-store' } });
+  // X-Skipped-Lines: marked parts with no BrickLink number (from a Rebrickable parts list), left out of the file.
+  return new Response(w.xml, { headers: { 'Content-Type': 'application/xml; charset=utf-8', 'Content-Disposition': `attachment; filename="missing-${displayNo(no)}.xml"`, 'Cache-Control': 'no-store', 'X-Skipped-Lines': String(w.skipped) } });
 });

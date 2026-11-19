@@ -6,6 +6,9 @@ import { MODULE_KINDS } from '../layouts';
 
 const now = sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`;
 
+/** Where a set's parts list came from. */
+export const PARTS_SOURCES = ['bricklink', 'rebrickable'] as const;
+
 export const sets = sqliteTable(
   'sets',
   {
@@ -21,6 +24,7 @@ export const sets = sqliteTable(
     imageUrl: text('image_url'),
     pieces: integer('pieces'),
     partLots: integer('part_lots'),
+    partsSource: text('parts_source', { enum: PARTS_SOURCES }), // where the parts list came from; null = no list yet
     avgSold: real('avg_sold'),
     minSold: real('min_sold'),
     maxSold: real('max_sold'),
@@ -225,6 +229,10 @@ export const setParts = sqliteTable(
     extra: integer('extra').notNull().default(0),
     alternate: integer('alternate', { mode: 'boolean' }).notNull().default(false),
     counterpart: integer('counterpart', { mode: 'boolean' }).notNull().default(false),
+    // Where the line came from, and whether its part and colour are BrickLink numbers. An unmapped line (from
+    // Rebrickable, with no BrickLink match yet) keeps Rebrickable's numbers and is left out of pricing and Wanted Lists.
+    source: text('source', { enum: PARTS_SOURCES }).notNull().default('bricklink'),
+    mapped: integer('mapped', { mode: 'boolean' }).notNull().default(true),
   },
   (t) => [index('set_parts_set').on(t.setId), index('set_parts_part').on(t.partNo)],
 );

@@ -29,7 +29,7 @@ const spec = {
           id: { type: 'integer' }, setNo: { type: 'string' }, name: { type: 'string' }, qty: { type: 'integer', description: 'Copies that are not parted out' },
           location: { ...nullable('string'), description: 'Shared by every copy, else null (see mixed)' }, condition: { enum: ['New', 'Used', 'Partial', null], description: 'Shared by every copy, else null' }, registered: nullable('string'),
           missingPct: { ...nullable('number'), description: 'Shared by every copy, else null' }, notes: nullable('string'), blName: nullable('string'), year: nullable('integer'),
-          categoryId: nullable('integer'), imageUrl: nullable('string'), pieces: nullable('integer'), partLots: nullable('integer'),
+          categoryId: nullable('integer'), imageUrl: nullable('string'), pieces: nullable('integer'), partLots: nullable('integer'), partsSource: { enum: ['bricklink', 'rebrickable', null], description: 'where the parts list came from (null: none yet, or a list from before 0.17)' },
           avgSold: nullable('number'), minSold: nullable('number'), maxSold: nullable('number'), qtySold: nullable('integer'),
           estValue: { ...nullable('number'), description: 'Per copy: valueTotal ÷ qty' },
           copies: { type: 'array', items: ref('Copy') }, mixed: { type: 'object', properties: { condition: { type: 'boolean' }, location: { type: 'boolean' } } },
@@ -116,7 +116,7 @@ const spec = {
       Sync: { type: ['object', 'null'], properties: { running: { type: 'boolean' }, startedAt: { type: 'string' }, finishedAt: nullable('string'), total: { type: 'integer' }, processed: { type: 'integer' }, errors: { type: 'integer' }, message: nullable('string') } },
       InventoryItem: { type: 'object', properties: { inventoryId: { type: 'integer' }, itemNo: { type: 'string' }, name: { type: 'string' }, type: { type: 'string' }, colorId: nullable('integer'), colorName: nullable('string'), qty: { type: 'integer' }, condition: { enum: ['N', 'U'] }, unitPrice: nullable('number'), description: nullable('string'), remarks: nullable('string') } },
       Order: { type: 'object', properties: { orderId: { type: 'integer' }, direction: { enum: ['in', 'out'], description: 'in = you sold, out = you bought' }, dateOrdered: nullable('string'), status: { type: 'string' }, counterparty: nullable('string'), items: nullable('integer'), lots: nullable('integer'), currency: nullable('string'), subtotal: nullable('number'), grandTotal: nullable('number') } },
-      Part: { type: 'object', properties: { matchNo: { type: 'integer' }, partNo: { type: 'string' }, name: { type: 'string' }, type: { type: 'string' }, colorId: nullable('integer'), colorName: nullable('string'), rgb: nullable('string'), qty: { type: 'integer' }, extra: { type: 'integer' }, alternate: { type: 'boolean' }, counterpart: { type: 'boolean' } } },
+      Part: { type: 'object', properties: { matchNo: { type: 'integer' }, partNo: { type: 'string' }, name: { type: 'string' }, type: { type: 'string' }, colorId: nullable('integer'), colorName: nullable('string'), rgb: nullable('string'), qty: { type: 'integer' }, extra: { type: 'integer' }, alternate: { type: 'boolean' }, counterpart: { type: 'boolean' }, source: { enum: ['bricklink', 'rebrickable'], description: 'where the parts list came from' }, mapped: { type: 'boolean', description: 'false: still in Rebrickable numbers (no BrickLink match); left out of part-out value and Wanted Lists' } } },
       ConditionGap: {
         type: 'object', nullable: true,
         description: 'BrickLink new vs. used sold averages. Null unless both have sales, in one currency, priced within 30 days of each other.',
@@ -265,7 +265,7 @@ const spec = {
     },
     '/sets/{setNo}/partout': {
       parameters: [setNo],
-      get: { summary: 'Part-out value: the set sold as parts, from cached BrickLink part prices, next to its complete sold price. `coverage` = % of pieces with a price.', responses: { 200: ok({ type: 'object', properties: { partout: { type: 'object', properties: { value: { type: 'number' }, complete: nullable('number'), coverage: { type: 'number' }, lots: { type: 'integer' }, pricedLots: { type: 'integer' }, unpriced: { type: 'integer' }, currency: { type: 'string' } } } } }), 404: err } },
+      get: { summary: 'Part-out value: the set sold as parts, from cached BrickLink part prices, next to its complete sold price. `coverage` = % of pieces with a price.', responses: { 200: ok({ type: 'object', properties: { partout: { type: 'object', properties: { value: { type: 'number' }, complete: nullable('number'), coverage: { type: 'number' }, lots: { type: 'integer' }, pricedLots: { type: 'integer' }, unpriced: { type: 'integer' }, unmappedLots: { type: 'integer', description: 'lots with no BrickLink number, left out' }, currency: { type: 'string' } } } } }), 404: err } },
     },
     '/sets/bulk': {
       post: {

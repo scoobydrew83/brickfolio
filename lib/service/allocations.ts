@@ -18,7 +18,7 @@ export async function ownedParts(db: DB): Promise<Map<string, number>> {
   const rows = await db
     .select({ partNo: setParts.partNo, colorId: setParts.colorId, n: sql<number>`sum(${setParts.qty} * (select count(*) from "set_copies" c where c."set_id" = ${sets.id} and c."status" <> 'parted_out'))` })
     .from(setParts).innerJoin(sets, eq(sets.id, setParts.setId))
-    .where(and(eq(setParts.alternate, false), eq(setParts.counterpart, false)))
+    .where(and(eq(setParts.alternate, false), eq(setParts.counterpart, false), eq(setParts.mapped, true))) // Rebrickable numbers with no BrickLink match can't match a build
     .groupBy(setParts.partNo, setParts.colorId).all();
   const out = new Map<string, number>();
   for (const r of rows) add(out, partKeyOf(r.partNo, r.colorId), Number(r.n));

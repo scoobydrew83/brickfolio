@@ -2,6 +2,7 @@
 // existing collection and wishlist services (quickAdd, addWish), so their rules apply unchanged.
 import { and, eq, sql } from 'drizzle-orm';
 import type { Lookup, MinifigLookup } from '../bricklink/client';
+import type { SetPartsSource } from '../rebrickable/client';
 import type { DB } from '../db/types';
 import { barcodeMisses, sets } from '../db/schema';
 import { withIdempotency } from './idempotency';
@@ -110,7 +111,7 @@ export function parseScanFigs(raw: unknown): { ok: true; figs: ScanFig[] } | { o
  */
 export async function addScanned(
   db: DB, items: ScanItem[],
-  opts: { key?: string | null; lookup: Lookup | null; minifig: MinifigLookup | null; figs?: ScanFig[] },
+  opts: { key?: string | null; lookup: Lookup | null; minifig: MinifigLookup | null; figs?: ScanFig[]; rb?: SetPartsSource | null },
 ): Promise<Result<ScanAddResult>> {
   return withIdempotency<ScanAddResult>(db, '', opts.key, async () => {
   try {
@@ -131,7 +132,7 @@ export async function addScanned(
     const total = [...groups.values()].reduce((t, g) => t + g.sets.size, 0);
     for (const g of groups.values()) {
       const list = { sets: [...g.sets].map(([setNo, qty]) => ({ setNo, qty })), minifigs: [], invalid: [] };
-      const r = await quickAdd(db, list, { condition: g.condition, location: g.location, lookup: total <= 10 ? opts.lookup : null, minifig: opts.minifig });
+      const r = await quickAdd(db, list, { condition: g.condition, location: g.location, lookup: total <= 10 ? opts.lookup : null, minifig: opts.minifig, rb: opts.rb });
       if (!r.ok) throw new Error(r.error);
       out.added += r.added; out.merged += r.merged; out.waiting += r.waiting;
     }
