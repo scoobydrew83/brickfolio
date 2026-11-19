@@ -10,6 +10,7 @@ import { dbPath, nodeDb } from './db/node';
 import { runSync, startSync, syncStatus, today } from './service/sets';
 import { imageStore } from './images/cache';
 import { startRebrickableSync } from './rebrickable/run';
+import { catalogMode, syncRbCatalog } from './service/rbcatalog';
 
 const CHECK_MS = 10 * 60_000;
 const hourNow = () => Number(new Date().toLocaleString('en-US', { hour: 'numeric', hour12: false, timeZone: process.env.TZ || undefined })) % 24;
@@ -36,6 +37,10 @@ async function maybeSync() {
   if (last && new Date(last.startedAt).toLocaleDateString('en-CA', { timeZone: process.env.TZ || undefined }) === today()) return;
   const s = await startSync(db);
   if (s.ok) await runSync(db, s.runId, bl.lookup, bl.store, rebrickableFromEnv() ?? undefined, bricksetFromEnv() ?? undefined, { minifig: bl.minifig, partPrice: bl.partPrice, price: bl.price, images: (await imageStore()) ?? undefined });
+  // The full Rebrickable catalog import (over a million rows) runs after the sync, in the background, outside its lock.
+  if (rebrickableFromEnv() && catalogMode().mode === 'full') {
+    void syncRbCatalog(db).then((errors) => { for (const e of errors) console.error(e); });
+  }
 }
 
 /** Copies the database to BACKUP_DIR (default: backups/ next to the database) once a day and keeps BACKUP_KEEP (default 7). */

@@ -20,6 +20,7 @@ import type { RetailSource } from '../brickset/client';
 import { syncOmrModels } from './models';
 import { alertsFromEnv, notifyPriceSwings, notifyUnderTarget } from './alerts';
 import { notifyRetiring } from './radar';
+import { catalogMode, syncRbCatalog } from './rbcatalog';
 import { notifyDesigner } from './designer';
 import { addMinifig, syncMinifigs } from './minifigs';
 import { syncCommunity } from '../barcode/community';
@@ -366,7 +367,10 @@ export async function runSync(db: DB, runId: number, lookup: Lookup, store?: Sto
     const alertError = send ? await notifyUnderTarget(db, send) : null;
     const swingError = send && bl ? await notifyPriceSwings(db, send) : null;
     const storeErrors = store && bl ? await syncStore(db, store) : [];
-    const catalogErrors = catalog ? await syncCatalog(db, catalog) : [];
+    // Rebrickable's catalog downloads: the small `owned` import runs here (Cloudflare's cron). The `full` import on
+    // Docker is over a million rows, so the scheduler runs it after this sync instead of holding the sync lock.
+    const catalogErrors = catalog && catalogMode().mode === 'owned' ? await syncRbCatalog(db) : [];
+    if (catalog) catalogErrors.push(...(await syncCatalog(db, catalog)));
     if (catalog?.colors && catalog.partsPage) catalogErrors.push(...(await syncIdentifiers(db, { colors: catalog.colors, partsPage: catalog.partsPage })));
     if (catalog?.alternates && catalog.buildParts) catalogErrors.push(...(await syncBuilds(db, { alternates: catalog.alternates, buildParts: catalog.buildParts })));
     if (retail) catalogErrors.push(...(await syncRetail(db, retail)));

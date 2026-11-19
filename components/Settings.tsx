@@ -197,6 +197,7 @@ function RebrickableSection({ initial }: { initial: RebrickableStatus }) {
           : <><b className="text-fg tabular-nums">{s.matched}</b> of {s.sets} sets have a theme{s.notFound ? <>, <span className="tabular-nums">{s.notFound}</span> aren&apos;t on Rebrickable</> : null}{s.waiting ? <>, <span className="tabular-nums">{s.waiting}</span> not checked yet</> : null}. <span className="tabular-nums">{s.builds}</span> alternate builds found{s.builds ? <> (<span className="tabular-nums">{s.buildsWithParts}</span> with parts lists{s.buildsUnavailable ? <>, <span className="tabular-nums">{s.buildsUnavailable}</span> whose parts lists Rebrickable doesn&apos;t share: their designers keep them private or sell them</> : null})</> : null}.</>}
         {' '}Each BrickLink sync adds more; this button runs just the Rebrickable part.
       </p>
+      <CatalogFiles catalog={s.catalog} />
       {running && <p className="text-sm font-semibold">{run.step ?? 'Working…'}</p>}
       {!running && run.finishedAt && (run.errors.length
         ? <Banner kind="error">Last Rebrickable sync: {run.errors.slice(0, 3).join('; ')}{run.errors.length > 3 ? `; and ${run.errors.length - 3} more` : ''}</Banner>
@@ -219,6 +220,38 @@ function RebrickableSection({ initial }: { initial: RebrickableStatus }) {
         </Button>
       </div>
     </section>
+  );
+}
+
+/** Rebrickable's daily catalog downloads: the mode, and each file's last import or error. */
+function CatalogFiles({ catalog }: { catalog: RebrickableStatus['stats']['catalog'] }) {
+  const day = (iso: string | null) => (iso ? iso.slice(0, 10) : null);
+  const num = (n: number | null) => (n ?? 0).toLocaleString();
+  if (catalog.mode === 'off') {
+    return <p className="text-sm text-fg-3">Catalog downloads are off (<code className="rounded-chip bg-muted px-1">REBRICKABLE_CATALOG=off</code>): themes and sets are asked of the API one by one.</p>;
+  }
+  return (
+    <div className="space-y-1 text-sm">
+      <p className="text-fg-3">
+        <b className="text-fg">Catalog downloads</b> ({catalog.mode === 'full' ? 'the whole catalog' : 'themes, colours and your own sets'}),
+        fetched with each sync when Rebrickable has published a new copy.
+        {catalog.clamped && <> The whole catalog is too big for Cloudflare D1, so only your own sets are kept.</>}
+      </p>
+      <ul className="divide-y divide-line rounded-control border border-line">
+        {catalog.files.map((f) => (
+          <li key={f.name} className="flex flex-wrap items-baseline justify-between gap-x-3 px-3 py-1.5">
+            <span className="font-medium">{f.name}.csv</span>
+            <span className={f.error ? 'text-danger' : 'text-fg-3'}>
+              {f.error
+                ? <>Failed: {f.error}{f.importedAt ? ` (kept the copy from ${day(f.importedAt)})` : ''}</>
+                : f.importedAt
+                  ? <><span className="tabular-nums">{num(f.rows)}</span> rows · {day(f.importedAt)}{f.skipped ? <>, <span className="tabular-nums">{num(f.skipped)}</span> not mapped to BrickLink yet</> : null}</>
+                  : 'Not downloaded yet'}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 
@@ -440,7 +473,7 @@ function ImageCacheSection() {
 const REPO = 'https://github.com/scoobydrew83/brickfolio/blob/main';
 const DATA: [string, string, string][] = [
   ['BrickLink', 'https://www.bricklink.com', 'set details, images, parts lists and sold prices'],
-  ['Rebrickable', 'https://rebrickable.com', 'themes, minifigure counts and alternate builds'],
+  ['Rebrickable', 'https://rebrickable.com', 'themes, minifigure counts, alternate builds, and catalog data (sets, parts, colours, element IDs and inventories) from its daily downloads'],
   ['Brickset', 'https://brickset.com', 'original retail prices and retirement dates'],
   ['LDraw', 'https://www.ldraw.org', 'the parts library and set models (CC BY 2.0, by the LDraw.org contributors)'],
 ];

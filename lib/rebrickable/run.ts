@@ -1,9 +1,10 @@
 // Settings → "Sync Rebrickable now", and the daily Rebrickable run for installs without BrickLink keys.
-// Runs themes, minifigs, part and colour IDs and alternate builds in the background and keeps progress in memory for the page.
+// Runs the catalog downloads, themes, minifigs, part and colour IDs and alternate builds in the background and keeps progress in memory for the page.
 import type { DB } from '../db/types';
 import { syncBuilds } from '../service/builds';
 import { syncCatalog } from '../service/catalog';
 import { syncIdentifiers } from '../service/identifiers';
+import { syncRbCatalog } from '../service/rbcatalog';
 import type { BuildSource, Catalog, IdCatalog } from './client';
 
 export type RebrickableRun = { running: boolean; step: string | null; errors: string[]; finishedAt: string | null };
@@ -19,8 +20,10 @@ export function startRebrickableSync(db: DB, rb: Catalog & BuildSource & Partial
   const run = (async () => {
     try {
       await rb.check?.();
+      // The daily downloads first, so themes and sets come from them instead of one API call each.
+      const errors = await syncRbCatalog(db, { onProgress: (step) => { state.step = step; } });
       state.step = 'Loading themes…';
-      const errors = await syncCatalog(db, rb, { recheck: opts.recheck, onProgress: (done, total) => { state.step = `Matching sets… ${done + 1} of ${total}`; } });
+      errors.push(...await syncCatalog(db, rb, { recheck: opts.recheck, onProgress: (done, total) => { state.step = `Matching sets… ${done + 1} of ${total}`; } }));
       if (rb.colors && rb.partsPage) {
         state.step = 'Mapping part and colour IDs…';
         errors.push(...(await syncIdentifiers(db, { colors: rb.colors, partsPage: rb.partsPage })));

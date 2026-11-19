@@ -57,6 +57,14 @@ The Rebrickable part runs at the end of each BrickLink sync. It matches every se
 
 If nothing fills in, use **Test key** first. "Invalid token" means the key is wrong. "Couldn't reach rebrickable.com" means the container has no internet access or DNS. "Key not set" means the variable isn't reaching the container: in Coolify, add `REBRICKABLE_API_KEY` in the Environment Variables tab and redeploy.
 
+**Catalog downloads.** With the key, Brickfolio also downloads Rebrickable's free daily catalog files (`cdn.rebrickable.com`, no API calls) once a day, and only when Rebrickable has published a new copy. Sets found there get their theme without an API call, so matching a new set costs one call instead of two.
+
+- **`REBRICKABLE_CATALOG=full`** (the default on Docker): themes, sets, parts, colours, LEGO element IDs (the number on Pick a Brick and in instructions) and every set's inventory. About 17 MB to download and 70 MB in the database. The first import takes a minute or two; later days take a few seconds and only write what changed. It runs after the BrickLink sync, in the background.
+- **`owned`**: themes, colours, and only the sets you own, want or have alternate builds of. The default (and the most) on Cloudflare D1, whose free plan allows 100,000 written rows a day.
+- **`off`**: no downloads; themes and sets are asked of the API one by one, as before.
+
+LEGO element IDs are matched to BrickLink part and colour numbers through the ID map below, so they fill in over the first few syncs as the map does. **Settings → Rebrickable** lists each file with its rows, date and any error. A file that fails (Rebrickable unreachable, or its columns changed) keeps the copy you had and is tried again at the next sync.
+
 With the same key, each sync also maps Rebrickable's part and colour numbers to BrickLink and LDraw ones: every colour in one call (monthly), and 20 pages of the parts catalog (1,000 parts a page, about a second each) per sync. A full pass is about 60 pages, so it takes three syncs, and is redone every 30 days. `REBRICKABLE_ID_PAGES_PER_SYNC` changes the number of pages; `0` turns it off.
 
 With the same key, each sync also looks up alternate builds of your sets and their parts (at most 40 Rebrickable calls per sync), and **Parts → What can I build?** ranks them by how many of their parts you already own. Each build can export its missing parts as a BrickLink Wanted List (Wanted → Upload on BrickLink).

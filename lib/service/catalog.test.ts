@@ -63,7 +63,7 @@ it('asks again about unknown sets after 30 days, or right away on recheck, and c
   await syncCatalog(db, catalog, { recheck: true, onProgress: (d, t) => progress.push(`${d}/${t}`) });
   expect(calls).toEqual(['themes', 'set:1234-1']);
   expect(progress).toEqual(['0/1']);
-  expect(await rebrickableStats(db)).toEqual({ sets: 2, matched: 1, notFound: 1, waiting: 0, builds: 0, buildsWithParts: 0, buildsUnavailable: 0 });
+  expect(await rebrickableStats(db)).toMatchObject({ sets: 2, matched: 1, notFound: 1, waiting: 0, builds: 0, buildsWithParts: 0, buildsUnavailable: 0 });
 });
 
 it('runs Rebrickable on its own, without BrickLink, and reports a bad key', async () => {
@@ -77,4 +77,19 @@ it('runs Rebrickable on its own, without BrickLink, and reports a bad key', asyn
 
   await startRebrickableSync(db, { ...catalog, ...builds, check: async () => { throw new Error('Rebrickable: Invalid token.'); } });
   expect(rebrickableRun()).toMatchObject({ running: false, errors: ['Rebrickable: Invalid token.'] });
+});
+
+it('takes themes and set themes from the local catalog instead of the API', async () => {
+  const { catalogFiles, rbSets, themes } = await import('../db/schema');
+  await db.insert(themes).values([{ id: 158, parentId: null, name: 'Star Wars' }, { id: 721, parentId: null, name: 'Icons' }]).run();
+  await db.insert(catalogFiles).values({ name: 'themes', importedAt: '2026-11-19T04:00:00.000Z' }).run();
+  await db.insert(rbSets).values({ setNum: '75192-1', name: 'Millennium Falcon', themeId: 158 }).run();
+  for (const setNo of ['75192-1', '10280-1']) await svc.addSet(db, { setNo, name: 'Test', condition: 'Used' }, { lookup });
+
+  expect(await syncCatalog(db, catalog)).toEqual([]);
+  // No theme list and no /lego/sets/75192-1/ call; 10280-1 isn't in the local catalog, so it's asked as before.
+  expect(calls).toEqual(['figs:75192-1', 'set:10280-1', 'figs:10280-1']);
+  const byNo = Object.fromEntries((await svc.listSets(db)).map((s) => [s.setNo, s]));
+  expect(byNo['75192-1']).toMatchObject({ theme: 'Star Wars', minifigs: 8 });
+  expect((await rebrickableStats(db)).catalog.mode).toBe('off');
 });

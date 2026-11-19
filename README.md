@@ -20,7 +20,7 @@ A self-hosted tracker for your brick-set collection: what you own, where it is, 
 - **Wishlist:** sets you want and the price you'd pay; Brickfolio tells you when one sells for less (in the app, or by ntfy, Discord or any webhook), or when a retailer offer your own flow posts is under your target. It can also alert when a wish's price swings 10% or more either way. "Got it" moves it into your collection.
 - **Parts:** every set's parts from BrickLink, searchable across the whole collection.
 - **Value vs. retail and a retirement watch** from Brickset (optional, free API key): each set's original price and your gain since, plus which sets you own or want are retiring soon.
-- **Themes, minifigs and "What can I build?"** from Rebrickable (optional, with a free API key): alternate builds of your sets, Rebrickable MOCs and your own builds, ranked by how many of their parts you own in sets and loose parts, with a BrickLink Wanted List for the rest. Set loose parts aside for one build so they stop counting for the others.
+- **Themes, minifigs and "What can I build?"** from Rebrickable (optional, with a free API key, plus Rebrickable's daily catalog downloads: sets, parts, colours, LEGO element IDs and set inventories): alternate builds of your sets, Rebrickable MOCs and your own builds, ranked by how many of their parts you own in sets and loose parts, with a BrickLink Wanted List for the rest. Set loose parts aside for one build so they stop counting for the others.
 - **Loose parts:** bins, drawers and bags of parts outside your sets, imported from BrickLink XML or a Rebrickable CSV (undoable), added by hand, or made by marking a set copy parted out.
 - **Layout planner:** plan a town or train layout on a grid of MILS modules (32 × 32 studs): roads, corners and junctions you can turn, double modules, and the set copies and builds that stand on each. One parts list adds up what the whole layout still needs and downloads it as a BrickLink Wanted List.
 - **Your BrickLink store:** inventory lots with asking value, and orders sold and bought.
@@ -152,7 +152,7 @@ components/       pages' UI; shared components in components/ui (see docs/design
 lib/sets.ts       shared types, validation, filters and totals (no framework code)
 lib/service/      collection logic used by actions, API and scheduler
 lib/bricklink/    BrickLink API client with OAuth 1.0a signing
-lib/rebrickable/  Rebrickable API client (themes, minifigs, alternate builds)
+lib/rebrickable/  Rebrickable API client (themes, minifigs, alternate builds) and catalog CSV reader
 lib/ldraw/        LDraw parts library access for the 3D view (+ test fixtures)
 lib/db/           Drizzle schema and drivers (better-sqlite3 locally, D1 on Cloudflare)
 lib/auth.ts       auth modes: none, tailscale, cloudflare-access, plus API tokens
@@ -164,7 +164,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) and the [Code of Conduct](CODE_OF_CONDUCT
 
 Brickfolio stands on other people's work:
 
-- **Data:** [BrickLink](https://www.bricklink.com) for set details, parts lists and sold prices; [Rebrickable](https://rebrickable.com) for themes, minifigures and alternate builds; [Brickset](https://brickset.com) for retail prices and retirement dates; and [LDraw](https://www.ldraw.org) for the parts library and set models (CC BY 2.0, by the LDraw.org contributors). Each service is used with your own key and under its own terms. This app uses the BrickLink API but is not endorsed or certified by BrickLink.
+- **Data:** [BrickLink](https://www.bricklink.com) for set details, parts lists and sold prices; [Rebrickable](https://rebrickable.com) for themes, minifigures, alternate builds and catalog data from its daily downloads; [Brickset](https://brickset.com) for retail prices and retirement dates; and [LDraw](https://www.ldraw.org) for the parts library and set models (CC BY 2.0, by the LDraw.org contributors). Each service is used with your own key and under its own terms. This app uses the BrickLink API but is not endorsed or certified by BrickLink.
 - **Software:** [Next.js](https://nextjs.org), [React](https://react.dev), [three.js](https://threejs.org), [Drizzle ORM](https://orm.drizzle.team), [SQLite](https://sqlite.org) via better-sqlite3, [Lucide](https://lucide.dev) icons and the [Archivo](https://github.com/Omnibus-Type/Archivo) typeface (SIL OFL 1.1).
 
 Every bundled package and its license is listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md); [NOTICE](NOTICE) has the trademark notes.

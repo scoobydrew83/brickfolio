@@ -98,7 +98,7 @@ npx wrangler secret put BRICKLINK_CONSUMER_KEY
 npx wrangler secret put BRICKLINK_CONSUMER_SECRET
 npx wrangler secret put BRICKLINK_TOKEN         # BrickLink's "Token Value"
 npx wrangler secret put BRICKLINK_TOKEN_SECRET
-npx wrangler secret put REBRICKABLE_API_KEY    # optional: themes and minifig counts
+npx wrangler secret put REBRICKABLE_API_KEY    # optional: themes, minifig counts and the Rebrickable catalog
 npx wrangler secret put ALERT_WEBHOOK_URL      # optional: wishlist alerts (ntfy, Discord or JSON webhook)
 npx wrangler secret put COMPARETHEBRICKS_API_KEY  # optional: barcode lookups for the scanner
 ```
@@ -140,5 +140,6 @@ The Worker name in the dashboard must match `name` in `wrangler.jsonc`. Secrets 
 - **Images:** set photos in the app are resized by the Cloudflare Images binding (`IMAGES`). The free plan includes a monthly allowance of transformations. Share pages and offline scanning serve photos from a cache instead: create a bucket with `npx wrangler r2 bucket create brickfolio-images` and uncomment the `r2_buckets` block in `wrangler.jsonc` (binding `IMAGE_CACHE`). Without it, photos are passed through from BrickLink and not kept. **Settings → Image cache** shows how many are stored.
 - **Backups:** D1 has Time Travel (point-in-time restore for 30 days). For a file copy: `npx wrangler d1 export brickfolio --remote --output backup.sql`.
 - **Local preview:** `cp .dev.vars.example .dev.vars`, add your BrickLink keys, then `npm run cf:preview`. It uses a local D1 and the real Workers runtime, with no login (the script passes `AUTH_MODE=none`).
+- **Rebrickable catalog:** with `REBRICKABLE_API_KEY`, the daily sync downloads Rebrickable's themes, colours and sets files and keeps the themes, the colours and only the sets you own, want or have alternate builds of (`REBRICKABLE_CATALOG=owned`, the only mode on D1). The parts, elements and inventory files (over a million rows) are skipped: the free plan allows 100,000 written rows a day and little CPU time per run. Only rows that changed are written, so a daily run writes a handful.
 - **Large collections:** a sync runs inside one Cron invocation (up to 15 minutes of wall time). At about 1 second per set, that covers several hundred sets.
 - **Logs:** `npx wrangler tail` streams live logs, or see **Workers & Pages → brickfolio → Logs**.

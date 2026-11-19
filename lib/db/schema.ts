@@ -624,3 +624,62 @@ export const partAllocations = sqliteTable(
   },
   (t) => [uniqueIndex('part_allocations_key').on(t.buildId, t.lotId), index('part_allocations_lot').on(t.lotId)],
 );
+
+// Rebrickable's daily catalog downloads (lib/service/rbcatalog.ts). Every ID here is Rebrickable's own; BrickLink IDs
+// always come through `identifiers`. On Cloudflare D1 only themes, colours and your own sets are kept (see #37).
+
+/** sets.csv: every set Rebrickable knows (on D1: only owned, wanted and alternate-build sets). */
+export const rbSets = sqliteTable('rb_sets', {
+  setNum: text('set_num').primaryKey(), // 10316-1
+  name: text('name').notNull(),
+  year: integer('year'),
+  themeId: integer('theme_id'),
+  numParts: integer('num_parts'),
+  imgUrl: text('img_url'),
+});
+
+/** parts.csv */
+export const rbParts = sqliteTable('rb_parts', {
+  partNum: text('part_num').primaryKey(),
+  name: text('name').notNull(),
+  partCatId: integer('part_cat_id'),
+  partMaterial: text('part_material'),
+});
+
+/** colors.csv. Separate from the BrickLink `colors` table: the numbers differ. */
+export const rbColors = sqliteTable('rb_colors', {
+  id: integer('id').primaryKey(),
+  name: text('name').notNull(),
+  rgb: text('rgb'),
+  isTrans: integer('is_trans', { mode: 'boolean' }).notNull().default(false),
+});
+
+/** inventories.csv: one set version's inventory. `parts_hash` tells whether its parts changed since the last import. */
+export const rbInventories = sqliteTable('rb_inventories', {
+  id: integer('id').primaryKey(),
+  version: integer('version').notNull(),
+  setNum: text('set_num').notNull(),
+  partsHash: text('parts_hash'),
+}, (t) => [index('rb_inventories_set_num').on(t.setNum)]);
+
+/** inventory_parts.csv (Docker only: over a million rows). No primary key, to keep it small. */
+export const rbInventoryParts = sqliteTable('rb_inventory_parts', {
+  inventoryId: integer('inventory_id').notNull(),
+  partNum: text('part_num').notNull(),
+  colorId: integer('color_id').notNull(),
+  quantity: integer('quantity').notNull(),
+  isSpare: integer('is_spare', { mode: 'boolean' }).notNull().default(false),
+}, (t) => [index('rb_inventory_parts_inventory').on(t.inventoryId)]);
+
+/** One row per downloaded file: what was last fetched, so unchanged files are skipped, and how the import went. */
+export const catalogFiles = sqliteTable('catalog_files', {
+  name: text('name').primaryKey(), // sets, parts, …
+  etag: text('etag'),
+  lastModified: text('last_modified'),
+  rows: integer('rows'), // data rows in the file
+  written: integer('written'), // rows added, changed or removed by the last import
+  skipped: integer('skipped'), // elements: rows whose part or colour has no BrickLink mapping yet
+  importedAt: text('imported_at'),
+  checkedAt: text('checked_at'), // last download attempt, so a file is fetched at most once a day
+  error: text('error'),
+});

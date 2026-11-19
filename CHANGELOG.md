@@ -4,6 +4,18 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-11-19
+
+**Before upgrading, back up your database.** Migration 0030 adds the Rebrickable catalog tables (`rb_sets`, `rb_parts`, `rb_colors`, `rb_inventories`, `rb_inventory_parts`, `catalog_files`); it changes no existing table.
+
+### Added
+- **Rebrickable catalog downloads:** with `REBRICKABLE_API_KEY`, Brickfolio downloads Rebrickable's free daily catalog files (no API calls), at most once a day and only when Rebrickable published a new copy (ETag). `REBRICKABLE_CATALOG=full` (the Docker default) keeps themes, sets, parts, colours, LEGO element IDs and every set inventory, streamed row by row so memory stays flat; the first import takes a minute or more (64 s on a test machine), later ones a few seconds, and only changed rows are written. It runs after the BrickLink sync, in the background, and from **Sync Rebrickable now**. `owned` (the default and the most on Cloudflare D1) keeps themes, colours and only the sets you own, want or have alternate builds of. `off` turns it off. A file whose columns changed, or that fails to download, keeps the previous copy and is tried again next sync. **Settings → Rebrickable** lists each file's rows, date and errors.
+- **LEGO element IDs:** each element in Rebrickable's catalog is mapped to its BrickLink part and colour through the ID map (`identifiers`, scheme `lego_element`). Elements whose part or colour isn't mapped yet are counted and retried as the map fills in.
+
+### Changed
+- Matching a set to Rebrickable takes its theme from the local catalog when it's there (one API call for the minifig count instead of two), and the theme list isn't asked of the API once `themes.csv` is in.
+- Dependencies updated, including Next.js 16.4.6, Tailwind CSS 4.3.5, better-sqlite3 13.1.1 and Wrangler 4.162.
+
 ## [0.15.0] - 2026-11-16
 
 **Before upgrading, back up your database.** Migration 0029 adds three columns to `wishlist`; nothing is rebuilt.
