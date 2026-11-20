@@ -112,9 +112,9 @@ Only the barcode goes to a lookup service, never anything about your collection.
 
 #### The community list
 
-`lib/barcode/data/community.json` in the [public Brickfolio repository](https://github.com/scoobydrew83/brickfolio) holds barcodes and minifigure codes that users confirmed and a maintainer reviewed, under CC0. Each installation downloads it in the daily sync, or from **Settings → Barcode scanning → Update now**. Only an unchanged-or-not check is sent, nothing about you. Codes in dispute are skipped. Your own confirmations always win over the list. `COMMUNITY_LIST=off` turns it off, and `COMMUNITY_LIST_URL` points at a copy of your own.
+`lib/barcode/data/community.json` in the [public Brickfolio repository](https://github.com/scoobydrew83/brickfolio) holds barcodes, minifigure box codes and Rebrickable → BrickLink minifigure numbers that users confirmed and a maintainer reviewed, under CC0. The minifigure numbers let parts lists from Rebrickable skip the BrickLink call for figures on the list. Each installation downloads it in the daily sync, or from **Settings → Barcode scanning → Update now**. Only an unchanged-or-not check is sent, nothing about you. Codes in dispute are skipped. Your own confirmations always win over the list. `COMMUNITY_LIST=off` turns it off, and `COMMUNITY_LIST_URL` points at a copy of your own.
 
-To contribute, use **Settings → Barcode scanning → Share my codes**. It exports only the codes you confirmed yourself (barcode and set number, box code and figure: nothing else from your collection) as a prefilled GitHub issue or a file for a pull request. See [CONTRIBUTING.md](../CONTRIBUTING.md#community-barcodes).
+To contribute, use **Settings → Barcode scanning → Share my codes**. It exports only the codes you confirmed yourself (barcode and set number, box code and figure: nothing else from your collection) as a prefilled GitHub issue or a file for a pull request. A checkbox (off by default) adds the minifigure numbers your server matched from your sets' parts lists; they're catalogue facts, but they hint at which sets you own. See [CONTRIBUTING.md](../CONTRIBUTING.md#community-barcodes).
 
 ### Part-out value and BrickLink's daily limit
 
@@ -269,6 +269,7 @@ COMPOSE_FILE=docker-compose.yml:compose.tailscale.yml    # uncomment this line
 # Optional:
 TS_HOSTNAME=brickfolio               # the address becomes https://<TS_HOSTNAME>.<tailnet>.ts.net
 ALLOWED_USERS=you@example.com        # only these Tailscale logins get in (empty = anyone on the tailnet)
+ADMIN_USERS=you@example.com          # the admins; everyone else gets only the collections you give them (see People below)
 TZ=Europe/London                     # time zone for history dates and the sync hour
 ```
 
@@ -322,6 +323,7 @@ CF_ACCESS_AUD=...                    # the AUD tag from step 2
 COMPOSE_FILE=docker-compose.yml:compose.cloudflared.yml  # uncomment this line
 # Optional:
 ALLOWED_USERS=you@example.com        # a second check on top of the Access policy
+ADMIN_USERS=you@example.com          # the admins; everyone else gets only the collections you give them (see People below)
 TZ=Europe/London
 ```
 
@@ -337,6 +339,15 @@ docker compose logs -f cloudflared   # look for "Registered tunnel connection", 
 Open `https://bricks.example.com` and sign in through Access.
 
 The app checks Access's signed JWT on every request, so knowing the hostname or the tunnel isn't enough to get in.
+
+## People and permissions
+
+Brickfolio has no logins of its own: Tailscale or Cloudflare Access says who someone is, and `ALLOWED_USERS` (optional) says who may come in at all. `ADMIN_USERS` then says who runs the place:
+
+- **Unset** (the default, and how every earlier version worked): everyone allowed in is an admin and can do everything.
+- **Set** to one or more logins: those are the admins. Everyone else starts with nothing until an admin gives them a role in a collection under **Settings → People**: **viewer** (sees it), **editor** (also adds, changes and removes its sets and minifigures) or **owner** (also chooses who else can, and makes share links for it). Admins can also make someone an admin there, on top of `ADMIN_USERS`. People appear in the list after their first visit, or add them beforehand by their Tailscale login or Access email.
+
+Things the whole install shares (the wishlist, Designer projects, layouts, loose parts, builds and saved barcodes) can be seen by anyone with a role and changed by admins and anyone who is an editor or owner somewhere. Settings, the sync, keys, locations, collections, Store and Orders are for admins. An API token acts with the permissions of the person who made it; tokens made before this version act as an admin, so revoke and remake them if they belong to someone who isn't one. With `AUTH_MODE=none` (no login) the one user is an admin.
 
 ## Share a read-only link
 

@@ -1,6 +1,7 @@
 {
  "license": "CC0-1.0",
- "about": "Barcodes and Collectible Minifigures box codes confirmed by Brickfolio users and reviewed by a maintainer. Each entry links a code to a set or figure, nothing else. To add some, see CONTRIBUTING.md → Community barcodes. Not from the LEGO Group.",
+ "about": "Barcodes and Collectible Minifigures box codes confirmed by Brickfolio users and reviewed by a maintainer, and Rebrickable → BrickLink minifigure numbers. Each entry links a code to a set or figure, or one figure number to another, nothing else. To add some, see CONTRIBUTING.md → Community barcodes. Not from the LEGO Group.",
  "sets": [],
- "minifigs": []
+ "minifigs": [],
+ "minifigNumbers": []
 }

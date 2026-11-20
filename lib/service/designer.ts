@@ -80,10 +80,10 @@ export function windowOf(p: { preorderStart: string | null; preorderEnd: string 
 }
 
 /** Projects, open and upcoming windows first, with whether you own or want the set. */
-export async function listProjects(db: DB, today = new Date().toISOString().slice(0, 10)): Promise<ProjectRow[]> {
+export async function listProjects(db: DB, today = new Date().toISOString().slice(0, 10), scope: import('./collections').ReadScope = 'all'): Promise<ProjectRow[]> {
   const rows = await db.select().from(designerProjects).orderBy(asc(designerProjects.createdAt), asc(designerProjects.id)).all();
   const nos = rows.flatMap((r) => (r.setNo ? [r.setNo] : []));
-  const owned = new Map(nos.length ? [...(await ownedSummary(db))].map(([no, o]) => [fullSetNo(no), o.qty]) : []);
+  const owned = new Map(nos.length ? [...(await ownedSummary(db, undefined, scope))].map(([no, o]) => [fullSetNo(no), o.qty]) : []);
   const wished = new Set(nos.length ? (await db.select({ setNo: wishlist.setNo }).from(wishlist).all()).map((w) => fullSetNo(w.setNo)) : []);
   const rank = { open: 0, upcoming: 1, none: 2, closed: 3 } as const;
   return rows

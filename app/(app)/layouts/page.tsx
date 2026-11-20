@@ -4,7 +4,7 @@ import LayoutsView from '@/components/LayoutsView';
 import { PageSkeleton } from '@/components/ui';
 import { getDb } from '@/lib/db';
 import { listLayouts } from '@/lib/service/layouts';
-import { currentUser } from '@/lib/session';
+import { pageBlock } from '@/lib/session';
 
 export const metadata = { title: 'Layouts' };
 
@@ -20,6 +20,7 @@ export default function Page() {
 
 async function Content() {
   await connection();
-  if (!(await currentUser())) return <p className="py-24 text-center text-fg-3">Not signed in.</p>;
+  const blocked = await pageBlock('member'); // #50
+  if (blocked) return <p className="py-24 text-center text-fg-3">{blocked}</p>;
   return <LayoutsView layouts={await listLayouts(await getDb())} />;
 }

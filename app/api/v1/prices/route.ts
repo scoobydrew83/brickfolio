@@ -23,7 +23,7 @@ const checkAlerts = (db: DB) => {
  * header: the same key again returns the first answer with `replayed: true`. Ids that don't resolve come back in
  * `unresolved`.
  */
-export const POST = api(async (req, { db }) => {
+export const POST = api('admin', async (req, { db }) => {
   const key = req.headers.get('idempotency-key')?.trim();
   if (!key || key.length > 100) return json({ error: 'Send an Idempotency-Key header (any unique string up to 100 characters).' }, 400);
   const p = parsePriceInput(await body(req));
@@ -34,7 +34,7 @@ export const POST = api(async (req, { db }) => {
 });
 
 /** GET /api/v1/prices?kind=set&id=75192-1&type=offer&source=retailer:lego&days=14 – stored rows for one item, newest first. */
-export const GET = api(async (req, { db }) => {
+export const GET = api('member', async (req, { db }) => {
   const q = new URL(req.url).searchParams;
   const kind = q.get('kind') === 'minifig' ? 'minifig' : 'set';
   const raw = q.get('id')?.trim();

@@ -2,7 +2,7 @@ import { api, json } from '@/lib/api';
 import { libraryPath, librarySource, readLibraryFile } from '@/lib/ldraw/library';
 
 /** GET /api/v1/ldraw/<path> – one file from the LDraw parts library, for the 3D view. 404 when it isn't there. */
-export const GET = api<{ path: string[] }>(async (_req, { params }) => {
+export const GET = api<{ path: string[] }>('member', async (_req, { params }) => {
   const source = librarySource();
   if (!source) return json({ error: 'No LDraw parts library. Set LDRAW_LIBRARY_DIR or LDRAW_LIBRARY_URL.' }, 404);
   const path = libraryPath(params.path);

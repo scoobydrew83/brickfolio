@@ -1,9 +1,9 @@
-import { api, json } from '@/lib/api';
+import { api, json, scopeOf } from '@/lib/api';
 import { wantedListXml } from '@/lib/service/builds';
 
 /** GET /api/v1/builds/:mocNo/wanted.xml – the parts you're missing, as a BrickLink Wanted List upload. */
-export const GET = api<{ mocNo: string }>(async (_req, { db, params }) => {
-  const w = await wantedListXml(db, params.mocNo);
+export const GET = api<{ mocNo: string }>('member', async (req, { db, access, params }) => {
+  const w = await wantedListXml(db, params.mocNo, await scopeOf(req, db, access));
   if (!w) return json({ error: 'Unknown build.' }, 404);
   return new Response(w.xml, {
     headers: {

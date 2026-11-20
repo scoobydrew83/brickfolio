@@ -9,6 +9,7 @@ import { ownedSummary } from './copies';
 import { imageUrlFor, type ImageKind } from './images';
 import { listMinifigs } from './minifigs';
 import { listSets, type Result } from './sets';
+import { stillShares } from './permissions';
 import { sha256Hex } from './tokens';
 
 export const SHARE_PREFIX = 'bfs_';
@@ -16,7 +17,8 @@ const MAX_YEARS = 5;
 
 export type ShareLink = typeof shareLinks.$inferSelect;
 export type ShareLinkRow = Omit<ShareLink, 'hash'> & { expired: boolean };
-export type ShareInput = { name: string; showValues: boolean; showLocations: boolean; showNotes: boolean; showMinifigs: boolean; expiresAt: string | null };
+/** `collectionId`: the one collection the link shows, or null for every collection (#49). */
+export type ShareInput = { name: string; showValues: boolean; showLocations: boolean; showNotes: boolean; showMinifigs: boolean; expiresAt: string | null; collectionId?: number | null; createdBy?: string | null };
 
 const truthy = (v: unknown) => v === true || ['on', 'true', '1', 'yes'].includes(String(v ?? '').trim().toLowerCase());
 
@@ -41,16 +43,23 @@ export function parseShareInput(form: Record<string, unknown>, now = new Date())
     if (t > now.getTime() + MAX_YEARS * 366 * 86_400_000) return { ok: false, error: `Expiry must be within ${MAX_YEARS} years` };
   }
   const minifigs = form.showMinifigs ?? form.minifigs;
+  const col = String(form.collectionId ?? form.collection ?? '').trim();
+  if (col && col !== 'all' && !/^[1-9]\d{0,8}$/.test(col)) return { ok: false, error: 'Collection must be a collection id or all' };
   return {
     ok: true,
     value: {
       name, expiresAt, showValues: truthy(form.showValues), showLocations: truthy(form.showLocations), showNotes: truthy(form.showNotes),
       showMinifigs: minifigs === undefined || minifigs === null || minifigs === '' ? true : truthy(minifigs),
+      collectionId: col && col !== 'all' ? Number(col) : null,
     },
   };
 }
 
 export async function createShareLink(db: DB, input: ShareInput): Promise<Result<{ token: string; id: number }>> {
+  if (input.collectionId != null) {
+    const { collectionExists } = await import('./collections');
+    if (!(await collectionExists(db, input.collectionId))) return { ok: false, status: 400, error: `Collection ${input.collectionId} doesn't exist.` };
+  }
   const bytes = crypto.getRandomValues(new Uint8Array(32));
   const token = SHARE_PREFIX + btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
   const [row] = await db.insert(shareLinks).values({ ...input, hash: await sha256Hex(token), prefix: token.slice(0, 8) }).returning({ id: shareLinks.id }).all();
@@ -63,19 +72,26 @@ export async function listShareLinks(db: DB, now = new Date()): Promise<ShareLin
   return rows.map(({ hash: _h, ...r }) => ({ ...r, expired: !!r.expiresAt && Date.parse(r.expiresAt) <= now.getTime() }));
 }
 
+/** A link's collection: a number, null (every collection), or undefined when there's no such link. */
+export async function shareLinkCollection(db: DB, id: number): Promise<number | null | undefined> {
+  const r = await db.select({ c: shareLinks.collectionId }).from(shareLinks).where(eq(shareLinks.id, id)).get();
+  return r ? r.c : undefined;
+}
+
 export async function revokeShareLink(db: DB, id: number): Promise<Result> {
   const r = await db.delete(shareLinks).where(eq(shareLinks.id, id)).returning({ id: shareLinks.id }).all();
   return r.length ? { ok: true } : { ok: false, status: 404, error: 'Share link not found.' };
 }
 
 /**
- * The link for a token when it exists and hasn't expired, counting the view (not for the page's photos). Null
+ * The link for a token when it exists, hasn't expired and its maker may still share it, counting the view (not for the page's photos). Null
  * otherwise (one answer for every failure).
  */
 export async function checkShareLink(db: DB, token: string, now = new Date(), { count = true } = {}): Promise<ShareLink | null> {
   if (!token.startsWith(SHARE_PREFIX) || token.length > 100) return null;
   const row = await db.select().from(shareLinks).where(eq(shareLinks.hash, await sha256Hex(token))).get();
   if (!row || (row.expiresAt && Date.parse(row.expiresAt) <= now.getTime())) return null;
+  if (!(await stillShares(db, row.createdBy, row.collectionId))) return null; // its maker lost the right to share (#50)
   if (count) await db.update(shareLinks).set({ lastViewedAt: now.toISOString(), views: sql`${shareLinks.views} + 1` }).where(eq(shareLinks.id, row.id));
   return row;
 }
@@ -84,8 +100,17 @@ export async function checkShareLink(db: DB, token: string, now = new Date(), { 
 export const sharedImage = (token: string, kind: ImageKind, no: string | null, url: string | null) =>
   no && url ? `/share/${encodeURIComponent(token)}/img/${kind}/${encodeURIComponent(no)}` : null;
 
-/** True when a link shows this item: a set someone still owns a copy of, or any minifigure when figures are shown. */
-export async function sharesItem(db: DB, link: Pick<ShareLink, 'showMinifigs'>, kind: ImageKind, no: string): Promise<boolean> {
+/**
+ * True when a link shows this item: a set someone still owns a copy of, or any minifigure when figures are shown. A
+ * link scoped to one collection only shows that collection's sets and figures.
+ */
+export async function sharesItem(db: DB, link: Pick<ShareLink, 'showMinifigs'> & { collectionId?: number | null }, kind: ImageKind, no: string): Promise<boolean> {
+  if (link.collectionId != null) {
+    if (kind === 'set') return (await listSets(db, { collectionId: link.collectionId })).some((s) => s.setNo === no && s.qty > 0);
+    if (!link.showMinifigs) return false;
+    const k = no.toLowerCase();
+    return (await listMinifigs(db, { collectionId: link.collectionId })).some((m) => m.figNo === k || m.rbFigNo === k) && !!(await imageUrlFor(db, 'minifig', no));
+  }
   if (kind === 'set') return (await ownedSummary(db, [no])).has(no);
   return link.showMinifigs && !!(await imageUrlFor(db, 'minifig', no));
 }
@@ -105,8 +130,9 @@ export type SharedCollection = {
 };
 
 /** The public view of the collection for a link. Built from an explicit field list: never spread a row here. */
-export async function sharedCollection(db: DB, link: Pick<ShareLink, 'name' | 'showValues' | 'showLocations' | 'showNotes' | 'showMinifigs'>, currency: string, token: string): Promise<SharedCollection> {
-  const rows = (await listSets(db)).filter((s) => s.qty > 0);
+export async function sharedCollection(db: DB, link: Pick<ShareLink, 'name' | 'showValues' | 'showLocations' | 'showNotes' | 'showMinifigs'> & { collectionId?: number | null }, currency: string, token: string): Promise<SharedCollection> {
+  const scope = { collectionId: link.collectionId ?? 'all' } as const;
+  const rows = (await listSets(db, scope)).filter((s) => s.qty > 0);
   const t = totals(rows);
   const sets = rows.map((s): SharedSet => {
     const o: SharedSet = {
@@ -118,7 +144,7 @@ export async function sharedCollection(db: DB, link: Pick<ShareLink, 'name' | 's
     if (link.showNotes) o.notes = s.notes;
     return o;
   });
-  const figs = link.showMinifigs ? (await listMinifigs(db)).map((m): SharedFig => {
+  const figs = link.showMinifigs ? (await listMinifigs(db, scope)).map((m): SharedFig => {
     const o: SharedFig = { figNo: m.figNo, name: m.name, year: m.year, qty: m.qty, condition: m.condition, image: sharedImage(token, 'minifig', m.figNo ?? m.rbFigNo, m.imageUrl) };
     if (link.showValues) o.estValue = m.estValue;
     if (link.showLocations) o.location = m.location;

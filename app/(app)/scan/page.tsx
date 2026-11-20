@@ -7,7 +7,7 @@ import { isDemo } from '@/lib/demo';
 import { listLocations } from '@/lib/service/sets';
 import { cmfSeries } from '@/lib/service/minifigs';
 import { ocrPaths } from '@/lib/barcode/ocr';
-import { barcodeCaps, currentUser } from '@/lib/session';
+import { barcodeCaps, pageBlock } from '@/lib/session';
 
 export const metadata = { title: 'Scan barcodes' };
 
@@ -21,7 +21,8 @@ export default function Page() {
 
 async function Content() {
   await connection();
-  if (!(await currentUser())) return <p className="py-24 text-center text-fg-3">Not signed in.</p>;
+  const blocked = await pageBlock('member'); // #50
+  if (blocked) return <p className="py-24 text-center text-fg-3">{blocked}</p>;
   const caps = barcodeCaps();
   if (!caps.scanning) return <p className="py-24 text-center text-fg-3">Barcode scanning is turned off on this server (BARCODE_SCANNING=off).</p>;
   const db = await getDb();

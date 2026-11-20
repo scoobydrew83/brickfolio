@@ -23,7 +23,7 @@ it('is off unless DEMO_MODE is on', () => {
 it('refuses API writes in demo mode and still serves reads', async () => {
   vi.stubEnv('DEMO_MODE', 'on');
   vi.stubEnv('AUTH_MODE', 'none');
-  const route = api(async () => Response.json({ ok: true }));
+  const route = api('member', async () => Response.json({ ok: true }));
   const params = { params: Promise.resolve({}) };
   const post = await route(new Request('http://x/api/v1/sets', { method: 'POST' }), params);
   expect(post.status).toBe(403);

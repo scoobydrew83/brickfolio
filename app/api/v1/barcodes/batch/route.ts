@@ -9,7 +9,7 @@ import { brickMinifig, bricklink, rebrickable } from '@/lib/session';
  * Minifigures to Minifigures. Needs an Idempotency-Key header: sending the same
  * key again returns the first answer (with `replayed: true`) instead of adding twice.
  */
-export const POST = api(async (req, { db }) => {
+export const POST = api('member', async (req, { db, need, target }) => {
   const key = req.headers.get('idempotency-key')?.trim();
   if (!key || key.length > 100) return json({ error: 'Send an Idempotency-Key header (any unique string up to 100 characters).' }, 400);
   const b = await body(req);
@@ -18,5 +18,9 @@ export const POST = api(async (req, { db }) => {
   const f = parseScanFigs(b?.figs);
   if (!f.ok) return json({ error: f.error }, 400);
   if (!p.items.length && !f.figs.length) return json({ error: 'Nothing to add.' }, 400);
-  return fromResult(await addScanned(db, p.items, { key, lookup: bricklink(), minifig: brickMinifig(), figs: f.figs, rb: rebrickable() }), 201);
+  // Sets and minifigures go to a collection you can add to; wishes need the right to change the shared wishlist.
+  const toCollection = p.items.some((i) => i.target === 'collection') || f.figs.length > 0;
+  if (p.items.some((i) => i.target === 'wishlist')) need('shared');
+  const collectionId = toCollection ? await target(req) : undefined;
+  return fromResult(await addScanned(db, p.items, { key, lookup: bricklink(), minifig: brickMinifig(), figs: f.figs, rb: rebrickable(), collectionId }), 201);
 });

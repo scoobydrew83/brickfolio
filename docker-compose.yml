@@ -33,6 +33,7 @@ services:
       - LDRAW_LIBRARY_URL
       - AUTH_MODE
       - ALLOWED_USERS
+      - ADMIN_USERS
       - CF_ACCESS_TEAM_DOMAIN
       - CF_ACCESS_AUD
       - TZ

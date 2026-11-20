@@ -12,11 +12,12 @@ const date = { ...nullable('string'), format: 'date' };
 const layoutId = { name: 'id', in: 'path', required: true, schema: { type: 'integer' }, description: 'Layout id' };
 const moduleId = { name: 'moduleId', in: 'path', required: true, schema: { type: 'integer' }, description: 'Module id (on this layout)' };
 const mocNo = { name: 'mocNo', in: 'path', required: true, schema: { type: 'string', example: 'MOC-12345' } };
+const collectionQ = { name: 'collection', in: 'query', required: false, schema: { type: 'string', example: '2' }, description: 'A collection id (GET /collections), or `all` (the default): answer for one collection only.' };
 const KINDS = ['plain', 'road_straight', 'road_corner', 'road_t', 'road_cross', 'custom'];
 
 const spec = {
   openapi: '3.1.0',
-  info: { title: `${APP_NAME} API`, version: '1.0.0', description: 'Create a token in Settings → API tokens and send it as `Authorization: Bearer <token>`. Send request bodies as `application/json` (import: `text/csv`); other types get 415.' },
+  info: { title: `${APP_NAME} API`, version: '1.0.0', description: 'Every request acts with the permissions of the token\'s owner (or the signed-in person): admins can do everything; anyone else only reads and changes the collections they have a role in, and gets 403 for the rest. Create a token in Settings → API tokens and send it as `Authorization: Bearer <token>`. Send request bodies as `application/json` (import: `text/csv`); other types get 415.' },
   servers: [{ url: '/api/v1' }],
   security: [{ bearer: [] }],
   components: {
@@ -109,6 +110,7 @@ const spec = {
         description: 'Sealed means New (and cannot be Partial). gwp sets pricePaid to 0.',
         properties: {
           status: { enum: ['sealed', 'built', 'in_progress', 'parted_out'] }, condition: { enum: ['New', 'Used', 'Partial'] }, location: nullable('string'),
+          collectionId: { type: 'integer', description: 'The collection the copy is in; a new copy without one goes to the default (first) collection' },
           missingPct: { ...nullable('number'), minimum: 0, maximum: 100 }, acquiredDate: date, buildDate: date, pricePaid: money, tax: money, shipping: money,
           gwp: { type: 'boolean' }, notes: nullable('string'),
         },
@@ -148,7 +150,7 @@ const spec = {
   },
   paths: {
     '/sets': {
-      get: { summary: 'List sets', responses: { 200: ok({ type: 'object', properties: { sets: { type: 'array', items: ref('Set') }, currency: { type: 'string' } } }), 401: err } },
+      get: { summary: 'List sets (with `collection`, only those with copies there, each with only those copies)', parameters: [collectionQ], responses: { 200: ok({ type: 'object', properties: { sets: { type: 'array', items: ref('Set') }, currency: { type: 'string' } } }), 401: err } },
       post: {
         summary: 'Add a set (looks it up on BrickLink)',
         requestBody: { required: true, content: { 'application/json': { schema: { allOf: [ref('SetInput'), { type: 'object', required: ['setNo', 'name', 'condition'], properties: { setNo: { type: 'string' }, another: { type: 'boolean', description: 'Add a copy if already in stock' } } }] } } } },
@@ -165,7 +167,7 @@ const spec = {
       get: { summary: 'List read-only share links (never the link or its hash)', responses: { 200: ok({ type: 'object', properties: { shareLinks: { type: 'array', items: { type: 'object' } } } }) } },
       post: {
         summary: 'Create a read-only share link; the URL is returned once',
-        requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['name'], properties: { name: { type: 'string', maxLength: 60 }, showValues: { type: 'boolean' }, showLocations: { type: 'boolean' }, showNotes: { type: 'boolean' }, showMinifigs: { type: 'boolean', default: true }, expires: { type: 'string', description: "'never', a number of days, or a date (YYYY-MM-DD), at most 5 years out" } } } } } },
+        requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['name'], properties: { name: { type: 'string', maxLength: 60 }, showValues: { type: 'boolean' }, showLocations: { type: 'boolean' }, showNotes: { type: 'boolean' }, showMinifigs: { type: 'boolean', default: true }, collectionId: { type: ['integer', 'string'], description: 'A collection id: the link shows only that collection. `all` or absent: every collection.' }, expires: { type: 'string', description: "'never', a number of days, or a date (YYYY-MM-DD), at most 5 years out" } } } } } },
         responses: { 201: ok({ type: 'object', properties: { id: { type: 'integer' }, url: { type: 'string' } } }, 'Created'), 400: err },
       },
     },
@@ -246,7 +248,16 @@ const spec = {
       get: { summary: 'Latest sync status', responses: { 200: ok({ type: 'object', properties: { sync: ref('Sync') } }) } },
       post: { summary: 'Start a full BrickLink sync (sets, then store inventory and orders)', responses: { 202: ok({ type: 'object', properties: { runId: { type: 'integer' } } }, 'Started'), 400: err, 409: err } },
     },
-    '/history': { get: { summary: 'Collection totals per day', responses: { 200: ok({ type: 'object', properties: { history: { type: 'array', items: ref('History') } } }) } } },
+    '/history': { get: { summary: 'Collection totals per day, for everything or one collection', parameters: [collectionQ], responses: { 200: ok({ type: 'object', properties: { history: { type: 'array', items: ref('History') } } }) } } },
+    '/collections': {
+      get: { summary: 'Collections in display order, with how many set copies and minifigures each holds', responses: { 200: ok({ type: 'object', properties: { collections: { type: 'array', items: { type: 'object', properties: { id: { type: 'integer' }, name: { type: 'string' }, sort: { type: 'integer' }, copies: { type: 'integer' }, minifigs: { type: 'integer' } } } } } }) } },
+      post: { summary: 'Add a collection', requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['name'], properties: { name: { type: 'string', minLength: 1, maxLength: 40 } } } } } }, responses: { 201: ok({ type: 'object' }, 'Created'), 400: err, 409: err } },
+    },
+    '/collections/{id}': {
+      parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }],
+      patch: { summary: 'Rename (`name`) or move (`position`, 0-based) a collection', requestBody: { content: { 'application/json': { schema: { type: 'object', properties: { name: { type: 'string', maxLength: 40 }, position: { type: 'integer', minimum: 0 } } } } } }, responses: { 200: ok({ type: 'object' }), 400: err, 404: err, 409: err } },
+      delete: { summary: 'Delete an empty collection (409 while it holds copies, minifigures or share links, or when it is the last one)', responses: { 200: ok({ type: 'object' }), 404: err, 409: err } },
+    },
     '/locations': {
       get: { summary: 'List locations', responses: { 200: ok({ type: 'object', properties: { locations: { type: 'array', items: { type: 'string' } } } }) } },
       post: { summary: 'Add a location', requestBody: { content: { 'application/json': { schema: { type: 'object', properties: { name: { type: 'string' } } } } } }, responses: { 201: ok({ type: 'object' }), 409: err } },
@@ -270,7 +281,7 @@ const spec = {
     '/sets/bulk': {
       post: {
         summary: 'Add a pasted list of set numbers ("10497", "10497 x2") and BrickLink minifig numbers. Sets you have get more copies. Up to 10 new items are looked up now; more wait for the next sync.',
-        requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['text'], properties: { text: { type: 'string', example: '10497\n21325 x2\nsw0001' }, location: { type: 'string' }, condition: { enum: ['New', 'Used', 'Partial'] } } } } } },
+        requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['text'], properties: { text: { type: 'string', example: '10497\n21325 x2\nsw0001' }, location: { type: 'string' }, collectionId: { type: 'integer', description: 'Collection for new copies and minifigures (default: the first)' }, condition: { enum: ['New', 'Used', 'Partial'] } } } } } },
         responses: { 201: ok({ type: 'object', properties: { added: { type: 'integer' }, merged: { type: 'integer' }, waiting: { type: 'integer' }, figsAdded: { type: 'integer' }, figsMerged: { type: 'integer' }, invalid: { type: 'array', items: { type: 'string' } } } }, 'Added'), 400: err },
       },
     },
@@ -342,7 +353,7 @@ const spec = {
       },
     },
     '/minifigs': {
-      get: { summary: 'Minifigures you own as items of their own, with BrickLink sold prices and totals', responses: { 200: ok({ type: 'object', properties: { minifigs: { type: 'array', items: { type: 'object' } }, totals: { type: 'object' } } }) } },
+      get: { summary: 'Minifigures you own as items of their own, with BrickLink sold prices and totals. A figure in several collections is one entry per collection.', parameters: [collectionQ], responses: { 200: ok({ type: 'object', properties: { minifigs: { type: 'array', items: { type: 'object' } }, totals: { type: 'object' } } }) } },
       post: {
         summary: 'Add a minifigure by BrickLink number (sw0001) and price it. `merge: true` adds copies to one you already have instead of answering 409.',
         requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['figNo'], properties: { figNo: { type: 'string', example: 'sw0001' }, name: { type: 'string' }, condition: { enum: ['New', 'Used'] }, qty: { type: 'integer' }, location: { type: 'string' }, notes: { type: 'string' }, merge: { type: 'boolean' } } } } } },
@@ -351,9 +362,9 @@ const spec = {
     },
     '/minifigs/{figNo}': {
       parameters: [{ name: 'figNo', in: 'path', required: true, schema: { type: 'string', example: 'sw0001' }, description: 'BrickLink (sw0001) or Rebrickable (fig-000123) number' }],
-      get: { summary: 'One minifigure', responses: { 200: ok({ type: 'object' }), 404: err } },
-      patch: { summary: 'Change the given fields (a condition change re-prices it)', responses: { 200: ok({ type: 'object' }), 400: err, 404: err } },
-      delete: { summary: 'Remove one copy (deletes the figure on the last one)', responses: { 200: ok({ type: 'object', properties: { remaining: { type: 'integer' } } }), 404: err } },
+      get: { summary: 'One minifigure: its entry in `collection`, or its first, with `collections` listing every collection it is in', parameters: [collectionQ], responses: { 200: ok({ type: 'object' }), 404: err } },
+      patch: { summary: 'Change the given fields (a condition change re-prices it; `collectionId` moves it, merging with that collection\'s entry). A figure in several collections needs `collection`.', parameters: [collectionQ], responses: { 200: ok({ type: 'object' }), 400: err, 404: err, 409: err } },
+      delete: { summary: 'Remove one copy (deletes the entry on the last one). A figure in several collections needs `collection`.', parameters: [collectionQ], responses: { 200: ok({ type: 'object', properties: { remaining: { type: 'integer' } } }), 404: err, 409: err } },
     },
     '/designer': {
       get: { summary: 'BrickLink Designer Program projects you follow, with the pre-order window (none, upcoming, open, closed) and whether you own or want the set', responses: { 200: ok({ type: 'object', properties: { projects: { type: 'array', items: { type: 'object' } } } }) } },
@@ -369,7 +380,7 @@ const spec = {
       delete: { summary: 'Stop following a project', responses: { 200: ok({ type: 'object' }), 404: err } },
     },
     '/radar': {
-      get: { summary: 'Retirement Radar: upcoming retirements by month (sets and wishes), retired sets you own with growth per year since retiring, and totals', responses: { 200: ok({ type: 'object', properties: { currency: { type: 'string' }, retiring: { type: 'array', items: { type: 'object' } }, retired: { type: 'array', items: { type: 'object' } }, totals: { type: 'object' } } }) } },
+      get: { summary: 'Retirement Radar: upcoming retirements by month (sets and wishes), retired sets you own with growth per year since retiring, and totals', parameters: [collectionQ], responses: { 200: ok({ type: 'object', properties: { currency: { type: 'string' }, retiring: { type: 'array', items: { type: 'object' } }, retired: { type: 'array', items: { type: 'object' } }, totals: { type: 'object' } } }) } },
     },
     '/wishlist/{setNo}': {
       parameters: [setNo],
@@ -378,7 +389,7 @@ const spec = {
       delete: { summary: 'Remove from the wishlist', responses: { 200: ok({ type: 'object' }), 404: err } },
     },
     '/builds': {
-      get: { summary: 'Builds (alternates of your sets, Rebrickable MOCs, your own) and how much of each you can make from set parts, free loose parts and loose parts reserved for it', parameters: [{ name: 'set', in: 'query', schema: { type: 'string' } }, { name: 'kind', in: 'query', schema: { enum: ['alternate', 'moc', 'custom'] } }], responses: { 200: ok({ type: 'object', properties: { builds: { type: 'array', items: { type: 'object' } } } }), 400: err } },
+      get: { summary: 'Builds (alternates of your sets, Rebrickable MOCs, your own) and how much of each you can make from set parts, free loose parts and loose parts reserved for it', parameters: [{ name: 'set', in: 'query', schema: { type: 'string' } }, collectionQ, { name: 'kind', in: 'query', schema: { enum: ['alternate', 'moc', 'custom'] } }], responses: { 200: ok({ type: 'object', properties: { builds: { type: 'array', items: { type: 'object' } } } }), 400: err } },
       post: { summary: "Add a Rebrickable MOC by number (its parts list comes with the next sync) or your own build", requestBody: { required: true, content: { 'application/json': { schema: { oneOf: [{ type: 'object', required: ['kind', 'mocNo'], properties: { kind: { const: 'moc' }, mocNo: { type: 'string', example: 'MOC-12345' }, name: { type: 'string' } } }, { type: 'object', required: ['kind', 'name'], properties: { kind: { const: 'custom' }, name: { type: 'string' } } }] } } } }, responses: { 201: ok({ type: 'object', properties: { mocNo: { type: 'string' } } }, 'Created'), 400: err, 404: err, 409: err } },
     },
     '/builds/{mocNo}': { delete: { summary: 'Remove a MOC or your own build, with its reservations. Alternates come from the sync and are refused (409).', parameters: [mocNo], responses: { 200: ok({ type: 'object' }), 404: err, 409: err } } },
@@ -409,7 +420,7 @@ const spec = {
     },
     '/parts/lots/import/{batch}': { delete: { summary: 'Undo an import', parameters: [{ name: 'batch', in: 'path', required: true, schema: { type: 'string' } }], responses: { 200: ok({ type: 'object', properties: { removed: { type: 'integer' }, restored: { type: 'integer' }, kept: { type: 'integer' } } }), 404: err, 409: err } } },
     '/layouts/{id}/reserve': { post: { summary: 'Reserve loose parts for every build on the layout', parameters: [layoutId], responses: { 200: ok({ type: 'object', properties: { builds: { type: 'integer' }, reserved: { type: 'integer' }, pieces: { type: 'integer' }, short: { type: 'integer' } } }), 404: err } } },
-    '/builds/{mocNo}/wanted.xml': { get: { summary: 'Missing parts for a build as a BrickLink Wanted List', parameters: [{ name: 'mocNo', in: 'path', required: true, schema: { type: 'string' } }], responses: { 200: { description: 'XML', content: { 'application/xml': {} } }, 404: err } } },
+    '/builds/{mocNo}/wanted.xml': { get: { summary: 'Missing parts for a build as a BrickLink Wanted List', parameters: [{ name: 'mocNo', in: 'path', required: true, schema: { type: 'string' } }, collectionQ], responses: { 200: { description: 'XML', content: { 'application/xml': {} } }, 404: err } } },
     '/layouts': {
       get: { summary: 'Your MILS layouts, with how many modules each has', responses: { 200: ok({ type: 'object', properties: { layouts: { type: 'array', items: ref('LayoutSummary') } } }) } },
       post: { summary: 'Create a layout: a grid of cols × rows modules of 32 × 32 studs', requestBody: { required: true, content: { 'application/json': { schema: ref('LayoutInput') } } }, responses: { 201: ok({ type: 'object', properties: { layout: ref('Layout') } }, 'Created'), 400: err } },
@@ -445,7 +456,7 @@ const spec = {
       },
     },
     '/layouts/{id}/wanted.xml': { get: { summary: 'The parts to buy for a layout as a BrickLink Wanted List', parameters: [layoutId], responses: { 200: { description: 'XML', content: { 'application/xml': {} } }, 404: err } } },
-    '/export.csv': { get: { summary: 'Export all sets as CSV', responses: { 200: { description: 'CSV', content: { 'text/csv': {} } } } } },
+    '/export.csv': { get: { summary: 'Export all sets (or one collection\'s) as CSV', parameters: [collectionQ], responses: { 200: { description: 'CSV', content: { 'text/csv': {} } } } } },
     '/import': { post: { summary: 'Import a Sets, History or Parts CSV', requestBody: { content: { 'text/csv': {} } }, responses: { 200: ok({ type: 'object', properties: { kind: { type: 'string' }, count: { type: 'integer' } } }), 400: err } } },
   },
 };

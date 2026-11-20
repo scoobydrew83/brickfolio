@@ -35,6 +35,7 @@ services:
       - HOSTNAME=127.0.0.1
       - AUTH_MODE=tailscale
       - ALLOWED_USERS
+      - ADMIN_USERS
       - BRICKLINK_CONSUMER_KEY
       - BRICKLINK_CONSUMER_SECRET
       - BRICKLINK_TOKEN

@@ -6,7 +6,7 @@ import { PageSkeleton } from '@/components/ui';
 import { getDb } from '@/lib/db';
 import { partLots, setParts } from '@/lib/db/schema';
 import { buildMatches } from '@/lib/service/builds';
-import { currentUser, rebrickable } from '@/lib/session';
+import { currentCollection, rebrickable, pageBlock } from '@/lib/session';
 
 export const metadata = { title: 'What can I build?' };
 
@@ -19,13 +19,15 @@ export default function Page() {
 }
 
 async function Content() {
+  const scope = await currentCollection();
   await connection();
-  if (!(await currentUser())) return <p className="py-24 text-center text-fg-3">Not signed in.</p>;
+  const blocked = await pageBlock('member'); // #50
+  if (blocked) return <p className="py-24 text-center text-fg-3">{blocked}</p>;
   const db = await getDb();
   const [matches, [{ n }], [{ lots }]] = await Promise.all([
-    buildMatches(db),
+    buildMatches(db, { collectionId: scope }),
     db.select({ n: sql<number>`count(*)` }).from(setParts).all(),
     db.select({ lots: sql<number>`count(*)` }).from(partLots).all(),
   ]);
-  return <BuildView builds={matches} hasKey={!!rebrickable()} hasParts={Number(n) > 0} hasLots={Number(lots) > 0} />;
+  return <BuildView builds={matches} hasKey={!!rebrickable()} hasParts={Number(n) > 0} hasLots={Number(lots) > 0} collection={typeof scope === 'number' ? scope : undefined} />;
 }

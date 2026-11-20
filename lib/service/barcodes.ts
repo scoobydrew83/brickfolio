@@ -111,7 +111,7 @@ export function parseScanFigs(raw: unknown): { ok: true; figs: ScanFig[] } | { o
  */
 export async function addScanned(
   db: DB, items: ScanItem[],
-  opts: { key?: string | null; lookup: Lookup | null; minifig: MinifigLookup | null; figs?: ScanFig[]; rb?: SetPartsSource | null },
+  opts: { key?: string | null; lookup: Lookup | null; minifig: MinifigLookup | null; figs?: ScanFig[]; rb?: SetPartsSource | null; collectionId?: number | 'all' },
 ): Promise<Result<ScanAddResult>> {
   return withIdempotency<ScanAddResult>(db, '', opts.key, async () => {
   try {
@@ -132,7 +132,7 @@ export async function addScanned(
     const total = [...groups.values()].reduce((t, g) => t + g.sets.size, 0);
     for (const g of groups.values()) {
       const list = { sets: [...g.sets].map(([setNo, qty]) => ({ setNo, qty })), minifigs: [], invalid: [] };
-      const r = await quickAdd(db, list, { condition: g.condition, location: g.location, lookup: total <= 10 ? opts.lookup : null, minifig: opts.minifig, rb: opts.rb });
+      const r = await quickAdd(db, list, { condition: g.condition, location: g.location, lookup: total <= 10 ? opts.lookup : null, minifig: opts.minifig, rb: opts.rb, collectionId: opts.collectionId });
       if (!r.ok) throw new Error(r.error);
       out.added += r.added; out.merged += r.merged; out.waiting += r.waiting;
     }
@@ -143,7 +143,7 @@ export async function addScanned(
     }
     // Minifigures go to the Minifigures list as unpriced checklist figures (more copies of ones you have).
     for (const f of opts.figs ?? []) {
-      const r = await addMinifig(db, { rbFigNo: f.rbFigNo, name: f.name, imageUrl: f.imageUrl, qty: f.qty, condition: 'New' }, { lookup: null, merge: true });
+      const r = await addMinifig(db, { rbFigNo: f.rbFigNo, name: f.name, imageUrl: f.imageUrl, qty: f.qty, condition: 'New' }, { lookup: null, merge: true, collectionId: opts.collectionId });
       if (!r.ok) throw new Error(r.error);
       if (r.merged) out.figsMerged++; else out.figsAdded++;
     }

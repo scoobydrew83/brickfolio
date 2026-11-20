@@ -1,5 +1,6 @@
 // Loose parts set aside for builds. A reserved piece counts as available only for the build it's reserved for; for every
 // other build it's gone. One helper, availability(), counts what you own for "What can I build?" and layouts alike.
+import { scopeIds, type ReadScope } from './collections';
 import { and, asc, eq, getTableColumns, inArray, sql } from 'drizzle-orm';
 import { partKey } from '../bricklink/wanted';
 import { buildParts, builds, colors, locations, partAllocations, partLots, setParts, sets } from '../db/schema';
@@ -13,10 +14,16 @@ export const partKeyOf = (partNo: string, colorId: number | null) => keyOf('PART
 
 const add = <K>(m: Map<K, number>, k: K, n: number) => m.set(k, (m.get(k) ?? 0) + n);
 
-/** Every part in your sets, counted across copies that aren't parted out (alternates and counterparts left out). */
-export async function ownedParts(db: DB): Promise<Map<string, number>> {
+/**
+ * Every part in your sets, counted across copies that aren't parted out (alternates and counterparts left out), in
+ * every collection or one (#49). Loose parts and reservations stay shared.
+ */
+export async function ownedParts(db: DB, scope: ReadScope = 'all'): Promise<Map<string, number>> {
+  const ids = scopeIds(scope);
+  if (ids && !ids.length) return new Map();
+  const inScope = ids ? sql` and coalesce(c."collection_id", 1) in (${sql.join(ids.map((i) => sql`${i}`), sql`, `)})` : sql``;
   const rows = await db
-    .select({ partNo: setParts.partNo, colorId: setParts.colorId, n: sql<number>`sum(${setParts.qty} * (select count(*) from "set_copies" c where c."set_id" = ${sets.id} and c."status" <> 'parted_out'))` })
+    .select({ partNo: setParts.partNo, colorId: setParts.colorId, n: sql<number>`sum(${setParts.qty} * (select count(*) from "set_copies" c where c."set_id" = ${sets.id} and c."status" <> 'parted_out'${inScope}))` })
     .from(setParts).innerJoin(sets, eq(sets.id, setParts.setId))
     .where(and(eq(setParts.alternate, false), eq(setParts.counterpart, false), eq(setParts.mapped, true))) // Rebrickable numbers with no BrickLink match can't match a build
     .groupBy(setParts.partNo, setParts.colorId).all();
@@ -35,7 +42,7 @@ export type Availability = {
 };
 
 /** What you have: parts in sets, free loose parts, and reservations per build. One grouped query each. */
-export async function availability(db: DB): Promise<Availability> {
+export async function availability(db: DB, scope: ReadScope = 'all'): Promise<Availability> {
   const lots = await db.select({ type: partLots.type, partNo: partLots.partNo, colorId: partLots.colorId, qty: sql<number>`sum(${partLots.qty})` })
     .from(partLots).where(eq(partLots.mapped, true)).groupBy(partLots.type, sql`lower(${partLots.partNo})`, partLots.colorId).all();
   const res = await db.select({ buildId: partAllocations.buildId, type: partLots.type, partNo: partLots.partNo, colorId: partLots.colorId, qty: sql<number>`sum(${partAllocations.qty})` })
@@ -50,7 +57,7 @@ export async function availability(db: DB): Promise<Availability> {
     add(m, k, Number(r.qty));
     reservedBy.set(r.buildId, m);
   }
-  return { owned: await ownedParts(db), freeLots, reservedBy };
+  return { owned: await ownedParts(db, scope), freeLots, reservedBy };
 }
 
 /* ---------- reading reservations ---------- */

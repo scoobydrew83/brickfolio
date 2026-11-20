@@ -242,3 +242,19 @@ describe('minifigure numbers from BrickLink', () => {
     expect(counts).toMatchObject({ bricklink: 1, rebrickable: 2, figsLearned: 1 });
   });
 });
+
+describe('minifigure numbers from the community list', () => {
+  it('maps a figure known only from the list with no BrickLink call, and prefers a pair learned from BrickLink', async () => {
+    const { applyCommunity } = await import('../barcode/community');
+    await applyCommunity(db, { license: 'CC0-1.0', sets: [], minifigs: [], minifigNumbers: [{ rbFigNo: 'fig-000001', figNo: 'sw0001' }, { rbFigNo: 'fig-000002', figNo: 'sw0099' }] });
+    await remember(db, [{ kind: 'minifig', scheme: 'rebrickable', value: 'fig-000002', canonical: 'sw0002', source: 'bricklink' }]);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const rb = fakeRb({ '75192-1': [line('3001', 4, 1)] }, { '75192-1': [{ figNo: 'fig-000001', name: 'Luke', qty: 1 }, { figNo: 'fig-000002', name: 'Han', qty: 1 }] });
+    await svc.addSet(db, { setNo: '75192-1', name: 'Falcon', condition: 'Used' }, { lookup, rb });
+    expect(calls).toEqual(['rb:75192-1', 'bl:75192-1:U']); // no BrickLink parts call
+    const s = (await svc.getSet(db, '75192-1'))!;
+    expect((await listSetParts(db, s.id)).filter((p) => p.type === 'MINIFIG').map((p) => p.partNo).sort()).toEqual(['sw0001', 'sw0002']);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('fig-000002: the community list says sw0099'));
+    warn.mockRestore();
+  });
+});

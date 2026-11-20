@@ -6,7 +6,7 @@ import StoreView from '@/components/StoreView';
 import { getDb } from '@/lib/db';
 import { getCurrency } from '@/lib/service/sets';
 import { listInventory } from '@/lib/service/store';
-import { currentUser } from '@/lib/session';
+import { pageBlock } from '@/lib/session';
 
 export const metadata = { title: 'Store' };
 
@@ -23,7 +23,8 @@ export default function Page() {
 
 async function Content() {
   await connection();
-  if (!(await currentUser())) return <p className="py-24 text-center text-fg-3">Not signed in.</p>;
+  const blocked = await pageBlock('admin'); // #50
+  if (blocked) return <p className="py-24 text-center text-fg-3">{blocked}</p>;
   const db = await getDb();
   const [items, currency] = await Promise.all([listInventory(db), getCurrency(db)]);
   return <StoreView items={items} currency={currency} syncedAt={items[0]?.syncedAt ?? null} />;

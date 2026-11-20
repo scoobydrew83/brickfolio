@@ -122,6 +122,25 @@ export const history = sqliteTable('history', {
   pieces: integer('pieces').notNull(),
 });
 
+/** Named groups of copies and minifigures (#49): a shelf, a store's stock, each child's sets. Id 1 is the first one. */
+export const collections = sqliteTable('collections', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  name: text('name').notNull().unique(),
+  sort: integer('sort').notNull().default(0),
+  createdAt: text('created_at').notNull().default(now),
+});
+
+/** Per-collection totals, one row per collection per day, written with `history` (which stays the "All" series). */
+export const collectionHistory = sqliteTable('collection_history', {
+  date: text('date').notNull(),
+  collectionId: integer('collection_id').notNull(),
+  sets: integer('sets').notNull(),
+  copies: integer('copies').notNull(),
+  estValue: real('est_value').notNull(),
+  avgSold: real('avg_sold').notNull(),
+  pieces: integer('pieces').notNull(),
+}, (t) => [uniqueIndex('collection_history_day').on(t.date, t.collectionId)]);
+
 export const locations = sqliteTable('locations', {
   name: text('name').primaryKey(),
   sort: integer('sort').notNull().default(0),
@@ -155,7 +174,26 @@ export const apiTokens = sqliteTable('api_tokens', {
   prefix: text('prefix').notNull(), // first characters, so the user can tell tokens apart
   createdAt: text('created_at').notNull().default(now),
   lastUsedAt: text('last_used_at'),
+  owner: text('owner'), // the login that created it (#50); the token acts with its permissions. Null (older tokens) = admin
 });
+
+/** People who have signed in, or that an admin added before their first visit (#50). */
+export const users = sqliteTable('users', {
+  login: text('login').primaryKey(), // lowercased Tailscale login or Access email; `local` with AUTH_MODE=none
+  name: text('name'),
+  admin: integer('admin', { mode: 'boolean' }).notNull().default(false), // on top of ADMIN_USERS
+  createdAt: text('created_at').notNull().default(now),
+  lastSeenAt: text('last_seen_at'),
+});
+
+export const ROLES = ['viewer', 'editor', 'owner'] as const;
+
+/** Who can see or change a collection (#50). No FKs, so adding them never rebuilds a table; checked in the service. */
+export const collectionMembers = sqliteTable('collection_members', {
+  collectionId: integer('collection_id').notNull(),
+  login: text('login').notNull(),
+  role: text('role', { enum: ROLES }).notNull(),
+}, (t) => [uniqueIndex('collection_members_login').on(t.collectionId, t.login), index('collection_members_by_login').on(t.login)]);
 
 /** Key/value settings, e.g. currency. */
 /** Read-only share links. Like API tokens, only the SHA-256 hash is stored; the link is shown once. Revoke = delete. */
@@ -168,9 +206,11 @@ export const shareLinks = sqliteTable('share_links', {
   showLocations: integer('show_locations', { mode: 'boolean' }).notNull().default(false),
   showNotes: integer('show_notes', { mode: 'boolean' }).notNull().default(false),
   showMinifigs: integer('show_minifigs', { mode: 'boolean' }).notNull().default(true),
+  collectionId: integer('collection_id'), // null = every collection (#49)
   expiresAt: text('expires_at'), // ISO time; null = never
   createdAt: text('created_at').notNull().default(now),
   lastViewedAt: text('last_viewed_at'),
+  createdBy: text('created_by'), // the login that made it (#50)
   views: integer('views').notNull().default(0),
 });
 
@@ -377,10 +417,14 @@ export const minifigs = sqliteTable(
     lastUpdated: text('last_updated'),
     createdAt: text('created_at').notNull().default(now),
     updatedAt: text('updated_at').notNull().default(now),
+    // The collection (#49). No FK on purpose, like set_copies.collection_id. A figure has one row per collection.
+    collectionId: integer('collection_id').notNull().default(1),
   },
   (t) => [
-    uniqueIndex('minifigs_fig_no').on(t.figNo).where(sql`fig_no is not null`),
-    uniqueIndex('minifigs_rb_fig_no').on(t.rbFigNo).where(sql`rb_fig_no is not null`),
+    uniqueIndex('minifigs_collection_fig_no').on(t.collectionId, t.figNo).where(sql`fig_no is not null`),
+    uniqueIndex('minifigs_collection_rb_fig_no').on(t.collectionId, t.rbFigNo).where(sql`rb_fig_no is not null`),
+    index('minifigs_fig_no_any').on(t.figNo),
+    index('minifigs_rb_fig_no_any').on(t.rbFigNo),
   ],
 );
 

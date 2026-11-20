@@ -47,6 +47,8 @@ export type CopyInput = {
   shipping?: number | null;
   gwp?: boolean;
   notes?: string | null;
+  /** The collection the copy is in (#49); new copies without one go to the default collection. */
+  collectionId?: number;
 };
 
 /**
@@ -273,6 +275,11 @@ export function parseCopyInput(
     if (notes.length > 2000) return { ok: false, error: 'Notes are too long' };
     value.notes = notes || null;
   }
+  const col = str('collectionId') ?? str('collection');
+  if (col !== undefined && col !== '') {
+    if (!/^[1-9]\d{0,8}$/.test(col)) return { ok: false, error: 'Collection must be a collection id' };
+    value.collectionId = Number(col);
+  }
   return { ok: true, value };
 }
 
@@ -381,13 +388,15 @@ export function totals(sets: SetRow[]) {
  * Totals per location, condition, theme or availability, biggest Est. Value first. Blank = '(none)', the same value
  * the filters use. Location and condition group copies: a set with copies in two places counts in both, split.
  */
-export function groupTotals(sets: SetRow[], key: 'location' | 'condition' | 'theme' | 'availability') {
+/** `collections` names the collection ids for grouping by collection (#49). */
+export function groupTotals(sets: SetRow[], key: 'location' | 'condition' | 'theme' | 'availability' | 'collection', collections: Map<number, string> = new Map()) {
   const groups = new Map<string, SetRow[]>();
   const add = (k: string, s: SetRow) => groups.set(k, [...(groups.get(k) ?? []), s]);
+  const copyKey = (c: CopyRow) => (key === 'collection' ? collections.get(c.collectionId ?? 1) ?? `Collection ${c.collectionId ?? 1}` : (key === 'location' || key === 'condition' ? c[key] : null) || '(none)');
   for (const s of sets) {
-    if (key === 'location' || key === 'condition') {
+    if (key === 'location' || key === 'condition' || key === 'collection') {
       const byKey = new Map<string, CopyRow[]>();
-      for (const c of s.copies.filter(isActive)) byKey.set(c[key] || '(none)', [...(byKey.get(c[key] || '(none)') ?? []), c]);
+      for (const c of s.copies.filter(isActive)) byKey.set(copyKey(c), [...(byKey.get(copyKey(c)) ?? []), c]);
       for (const [k, cs] of byKey) add(k, withCopies(s, cs));
     } else add((key === 'availability' ? availability(s) : s[key]) || '(none)', s);
   }

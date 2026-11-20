@@ -1,6 +1,7 @@
 // Turns a scanned barcode into a LEGO set: saved barcodes first (yours, then ones copied from Brickset or a provider),
 // then each configured provider in order until one answers. Never guesses: two different sets come back as
 // "ambiguous" for you to pick from. Used by the scanner (server action), the REST API and the MCP tool.
+import type { ReadScope } from '../service/collections';
 import { eq, inArray, lt } from 'drizzle-orm';
 import type { DB } from '../db/types';
 import { barcodeMisses, sets, wishlist } from '../db/schema';
@@ -41,12 +42,12 @@ async function local(db: DB, gtin: string): Promise<Found[]> {
 }
 
 /** Adds what the collection and wishlist know: you own it, its real name and photo. */
-async function withOwnership(db: DB, found: Found[]): Promise<ScanCandidate[]> {
+async function withOwnership(db: DB, found: Found[], scope: ReadScope = 'all'): Promise<ScanCandidate[]> {
   if (!found.length) return [];
   const nos = found.map((f) => f.setNo);
   const [own, counts, wish] = await Promise.all([
     db.select({ setNo: sets.setNo, name: sets.name, year: sets.year, pieces: sets.pieces, imageUrl: sets.imageUrl }).from(sets).where(inArray(sets.setNo, nos)).all(),
-    ownedSummary(db, nos),
+    ownedSummary(db, nos, scope),
     db.select({ setNo: wishlist.setNo, name: wishlist.name, year: wishlist.year, imageUrl: wishlist.imageUrl }).from(wishlist).where(inArray(wishlist.setNo, nos)).all(),
   ]);
   const o = new Map(own.map((r) => [r.setNo, r])), w = new Map(wish.map((r) => [r.setNo, r]));
@@ -55,7 +56,8 @@ async function withOwnership(db: DB, found: Found[]): Promise<ScanCandidate[]> {
     return {
       ...f,
       name: s?.name ?? x?.name ?? f.name, year: s?.year ?? x?.year ?? f.year, pieces: s?.pieces ?? f.pieces, imageUrl: s?.imageUrl ?? x?.imageUrl ?? f.imageUrl,
-      owned: s ? (({ qty, condition, location }) => ({ qty, condition, location }))(counts.get(s.setNo) ?? { qty: 0, condition: null, location: null }) : null,
+      // Ownership only from the collections in scope: a set you can't see there isn't "owned" (#50).
+      owned: s && (scope === 'all' || counts.has(s.setNo)) ? (({ qty, condition, location }) => ({ qty, condition, location }))(counts.get(s.setNo) ?? { qty: 0, condition: null, location: null }) : null,
       wished: !!x,
     };
   });
@@ -72,7 +74,7 @@ async function remember(db: DB, b: Barcode, source: ProviderId, c: Candidate) {
  */
 export async function resolveBarcode(
   db: DB, input: unknown,
-  opts: { providers: BarcodeLookupProvider[]; hint?: BarcodeFormat | null; readOnly?: boolean; refresh?: boolean },
+  opts: { providers: BarcodeLookupProvider[]; hint?: BarcodeFormat | null; readOnly?: boolean; refresh?: boolean; scope?: ReadScope },
 ): Promise<Resolution> {
   const p = parseBarcode(input, opts.hint);
   if (!p.ok) return { status: 'invalid', code: p.code, error: p.error };
@@ -80,7 +82,7 @@ export async function resolveBarcode(
   const noProviders = opts.providers.length === 0;
   const done = async (found: Found[], providers: ProviderOutcome[], extra: { cachedMiss?: boolean } = {}): Promise<Resolution> => ({
     status: found.length === 0 ? 'not_found' : found.length === 1 ? 'matched' : 'ambiguous',
-    barcode: b, candidates: await withOwnership(db, found), providers, noProviders, ...extra,
+    barcode: b, candidates: await withOwnership(db, found, opts.scope), providers, noProviders, ...extra,
   });
 
   const saved = await local(db, b.gtin);
@@ -140,20 +142,20 @@ export async function barcodesForSet(db: DB, no: string) {
  * What's known about a set typed in by hand (no barcode match): the collection, the wishlist or a saved barcode's
  * name and photo. Unknown sets come back with only their number; BrickLink fills in the rest once added.
  */
-export async function describeSet(db: DB, no: string): Promise<ScanCandidate> {
+export async function describeSet(db: DB, no: string, scope: ReadScope = 'all'): Promise<ScanCandidate> {
   const [saved] = await barcodeRows(db, { setNo: no, named: true }, 1);
-  const [c] = await withOwnership(db, [{ setNo: no, name: saved?.name ?? null, year: saved?.year ?? null, pieces: saved?.pieces ?? null, theme: null, imageUrl: saved?.imageUrl ?? null, source: 'user', verified: false }]);
+  const [c] = await withOwnership(db, [{ setNo: no, name: saved?.name ?? null, year: saved?.year ?? null, pieces: saved?.pieces ?? null, theme: null, imageUrl: saved?.imageUrl ?? null, source: 'user', verified: false }], scope);
   return c;
 }
 
 /** Everything the scanner needs offline: saved barcodes (trusted rows only), and what you own and want. */
-export async function offlineMap(db: DB): Promise<import('./offline').OfflineMap> {
+export async function offlineMap(db: DB, scope: ReadScope = 'all'): Promise<import('./offline').OfflineMap> {
   const { trusted } = await import('./offline');
   const rows = await barcodeRows(db, {}, 50_000);
   const by: Record<string, import('./offline').OfflineSet[]> = {};
   for (const r of rows) (by[r.gtin] ??= []).push({ setNo: r.setNo, name: r.name, year: r.year, pieces: r.pieces, imageUrl: r.imageUrl, source: r.source as Source, verified: r.verified });
   for (const g of Object.keys(by)) by[g] = trusted(by[g]);
-  const own = [...(await ownedSummary(db))].map(([setNo, o]) => ({ setNo, ...o }));
+  const own = [...(await ownedSummary(db, undefined, scope))].map(([setNo, o]) => ({ setNo, ...o }));
   const wish = await db.select({ setNo: wishlist.setNo, name: wishlist.name }).from(wishlist).all();
   return {
     at: nowIso(),

@@ -4,7 +4,8 @@ import { and, asc, desc, eq, inArray, lt, sql } from 'drizzle-orm';
 import { QUOTA_MESSAGE, isMaintenance, type Lookup, type MinifigLookup, type PartPriceLookup, type PriceLookup, type Store } from '../bricklink/client';
 import type { BuildSource, Catalog, IdCatalog, SetPartsSource } from '../rebrickable/client';
 import type { DB } from '../db/types';
-import { history, locations, minifigs, setCopies, sets, settings, syncRuns, wishlist } from '../db/schema';
+import { collectionHistory, history, locations, minifigs, setCopies, sets, settings, syncRuns, wishlist } from '../db/schema';
+import { inScope, scopeIds, targetCollection, type ReadScope, type Scope } from './collections';
 import { hasParts, needsBrickLinkFigs, partsFromRebrickable, rebrickableParts, replaceParts, withBrickLinkFigs, type PartsSource, type RebrickableParts, type SetPart } from './parts';
 import { orphanedMarks } from './missing';
 import { syncStore } from './store';
@@ -35,7 +36,7 @@ import { priceSeries, recordPrice } from './prices';
 /** `status` lets the REST API pick an HTTP code. `existing` = already in stock, so the UI asks before adding. */
 export type Result<T extends object = object> =
   | ({ ok: true } & T)
-  | { ok: false; error: string; status?: 400 | 404 | 409 | 413; existing?: { name: string; qty: number } };
+  | { ok: false; error: string; status?: 400 | 403 | 404 | 409 | 413; existing?: { name: string; qty: number } };
 
 export type SyncStatus = { running: boolean; startedAt: string; finishedAt: string | null; total: number; processed: number; errors: number; message: string | null } | null;
 
@@ -80,12 +81,17 @@ export async function copiesBySet(db: DB, setIds?: number[]): Promise<Map<number
   return map;
 }
 
-/** Swaps the Rebrickable theme id for readable theme and subtheme names, and attaches each set's copies. */
-async function withThemes(db: DB, rows: BaseRow[], all = false): Promise<SetRow[]> {
+/**
+ * Swaps the Rebrickable theme id for readable theme and subtheme names, and attaches each set's copies. With a
+ * collection, only that collection's copies are attached and sets with none there are left out, so totals are per
+ * collection (#49).
+ */
+async function withThemes(db: DB, rows: BaseRow[], all = false, scope: ReadScope = 'all'): Promise<SetRow[]> {
   const map = rows.some((r) => r.themeId !== null) ? await themeMap(db) : new Map();
   const copies = await copiesBySet(db, all ? undefined : rows.map((r) => r.id));
-  return rows.map(({ themeId, hasModel, missingMarked, ...r }) =>
-    withCopies({ ...(r as unknown as Omit<SetRow, 'theme' | 'subtheme'>), hasModel: Boolean(hasModel), missingMarked: Number(missingMarked ?? 0), ...themeNames(map, themeId) }, copies.get(r.id) ?? []));
+  const mine = (id: number) => (copies.get(id) ?? []).filter((c) => inScope(scope, c.collectionId));
+  return rows.filter((r) => scope === 'all' || mine(r.id).length).map(({ themeId, hasModel, missingMarked, ...r }) =>
+    withCopies({ ...(r as unknown as Omit<SetRow, 'theme' | 'subtheme'>), hasModel: Boolean(hasModel), missingMarked: Number(missingMarked ?? 0), ...themeNames(map, themeId) }, mine(r.id)));
 }
 
 // ---- reads ----
@@ -99,17 +105,27 @@ export async function listLocations(db: DB): Promise<string[]> {
   return (await db.select().from(locations).orderBy(asc(locations.sort), asc(locations.name)).all()).map((l) => l.name);
 }
 
-export async function listSets(db: DB): Promise<SetRow[]> {
-  return withThemes(db, (await db.select(columns).from(sets).orderBy(asc(sets.setNo)).all()) as BaseRow[], true);
+/** Every set, or (with `collectionId`) the sets with copies in that collection, each with only those copies. */
+export async function listSets(db: DB, opts: { collectionId?: ReadScope } = {}): Promise<SetRow[]> {
+  return withThemes(db, (await db.select(columns).from(sets).orderBy(asc(sets.setNo)).all()) as BaseRow[], true, opts.collectionId ?? 'all');
 }
 
-export async function getSet(db: DB, no: string): Promise<SetRow | undefined> {
+/** One set, with every copy, or (with `collectionId`) only the copies in that scope: undefined when it has none there. */
+export async function getSet(db: DB, no: string, opts: { collectionId?: ReadScope } = {}): Promise<SetRow | undefined> {
   const row = await db.select(columns).from(sets).where(eq(sets.setNo, no)).get();
-  return row && (await withThemes(db, [row as BaseRow]))[0];
+  return row && (await withThemes(db, [row as BaseRow], false, opts.collectionId ?? 'all'))[0];
 }
 
-export async function listHistory(db: DB): Promise<HistoryRow[]> {
-  return db.select().from(history).orderBy(asc(history.date)).all();
+/** Daily totals: every collection's (the `history` table), or one collection's (`collection_history`). */
+export async function listHistory(db: DB, opts: { collectionId?: ReadScope } = {}): Promise<HistoryRow[]> {
+  const ids = scopeIds(opts.collectionId ?? 'all');
+  if (!ids) return db.select().from(history).orderBy(asc(history.date)).all();
+  if (!ids.length) return [];
+  // Several collections: their days added up (sets can be counted once per collection they're in).
+  const h = collectionHistory;
+  const rows = await db.select({ date: h.date, sets: sql<number>`sum(${h.sets})`, copies: sql<number>`sum(${h.copies})`, estValue: sql<number>`sum(${h.estValue})`, avgSold: sql<number>`sum(${h.avgSold})`, pieces: sql<number>`sum(${h.pieces})` })
+    .from(h).where(inArray(h.collectionId, ids)).groupBy(h.date).orderBy(asc(h.date)).all();
+  return rows.map((r) => ({ date: r.date, sets: Number(r.sets), copies: Number(r.copies), estValue: Number(r.estValue), avgSold: Number(r.avgSold), pieces: Number(r.pieces) }));
 }
 
 export type PricePointRow = { date: string; guide: 'N' | 'U'; avgSold: number | null; minSold: number | null; maxSold: number | null; qtySold: number | null };
@@ -129,9 +145,9 @@ export async function syncStatus(db: DB): Promise<SyncStatus> {
   return { running: r.status === 'running', startedAt: r.startedAt, finishedAt: r.finishedAt, total: r.total, processed: r.processed, errors: r.errors, message: r.message };
 }
 
-/** Everything the dashboard page needs, in one call. */
-export async function getCollection(db: DB) {
-  const [rows, hist, sync, locs, currency] = await Promise.all([listSets(db), listHistory(db), syncStatus(db), listLocations(db), getCurrency(db)]);
+/** Everything the dashboard page needs, in one call, for every collection or one (#49). */
+export async function getCollection(db: DB, opts: { collectionId?: ReadScope } = {}) {
+  const [rows, hist, sync, locs, currency] = await Promise.all([listSets(db, opts), listHistory(db, opts), syncStatus(db), listLocations(db), getCurrency(db)]);
   return { sets: rows, history: hist, sync, locations: locs, currency, readAt: nowIso() };
 }
 
@@ -222,10 +238,16 @@ const copyFields = (input: SetInput): CopyInput => {
  * Adds a set and looks it up on BrickLink. If it's already in stock, returns `existing` unless `another`
  * is set, in which case it adds one copy.
  */
-export async function addSet(db: DB, input: SetInput, opts: { another?: boolean; lookup: Lookup | null; rb?: SetPartsSource | null }): Promise<Result<{ set: SetRow }>> {
+export async function addSet(db: DB, input: SetInput, opts: { another?: boolean; lookup: Lookup | null; rb?: SetPartsSource | null; collectionId?: Scope; seen?: ReadScope }): Promise<Result<{ set: SetRow }>> {
+  const col = await targetCollection(db, input.copy?.collectionId ?? opts.collectionId);
+  if (!col.ok) return col;
+  input = { ...input, copy: { ...input.copy, collectionId: col.id } };
   const have = await getSet(db, input.setNo);
-  if (have && !opts.another) {
-    return { ok: false, status: 409, error: `You already have ${have.qty} of #${have.setNo} (${have.name}).`, existing: { name: have.name, qty: have.qty } };
+  // "Already have" counts only the copies the caller can see (`seen`, #50). With copies only in collections they
+  // can't see, the new one is just added: saying so would tell them what's in those collections.
+  const seen = have && opts.seen && opts.seen !== 'all' ? await getSet(db, input.setNo, { collectionId: opts.seen }) : have;
+  if (seen && !opts.another) {
+    return { ok: false, status: 409, error: `You already have ${seen.qty} of #${seen.setNo} (${seen.name}).`, existing: { name: seen.name, qty: seen.qty } };
   }
   if (have) {
     await insertCopies(db, have.id, copyFields(input), 1);
@@ -257,15 +279,17 @@ export type QuickAddResult = { added: number; merged: number; waiting: number; f
  */
 export async function quickAdd(
   db: DB, list: QuickList,
-  opts: { location?: string | null; condition?: Condition; lookup: Lookup | null; minifig: MinifigLookup | null; rb?: SetPartsSource | null },
+  opts: { location?: string | null; condition?: Condition; lookup: Lookup | null; minifig: MinifigLookup | null; rb?: SetPartsSource | null; collectionId?: Scope },
 ): Promise<Result<QuickAddResult>> {
+  const col = await targetCollection(db, opts.collectionId);
+  if (!col.ok) return col;
   if (opts.location && !(await listLocations(db)).includes(opts.location)) return { ok: false, status: 400, error: `Unknown location ${opts.location}.` };
   const out: QuickAddResult = { added: 0, merged: 0, waiting: 0, figsAdded: 0, figsMerged: 0, invalid: list.invalid };
   const now = list.sets.length + list.minifigs.length <= QUICK_LOOKUPS;
   const currency = await getCurrency(db);
   for (const { setNo: no, qty } of list.sets) {
     const have = await getSet(db, no);
-    const copy = copyFields({ setNo: no, condition: opts.condition ?? 'Used', location: opts.location ?? null });
+    const copy = { ...copyFields({ setNo: no, condition: opts.condition ?? 'Used', location: opts.location ?? null }), collectionId: col.id };
     if (have) {
       await insertCopies(db, have.id, copy, qty);
       await db.update(sets).set({ updatedAt: nowIso() }).where(eq(sets.id, have.id));
@@ -281,7 +305,7 @@ export async function quickAdd(
     else out.waiting++;
   }
   for (const f of list.minifigs) {
-    const r = await addMinifig(db, { figNo: f.figNo, qty: f.qty, condition: opts.condition === 'New' ? 'New' : 'Used', location: opts.location ?? null }, { lookup: now ? opts.minifig : null, merge: true });
+    const r = await addMinifig(db, { figNo: f.figNo, qty: f.qty, condition: opts.condition === 'New' ? 'New' : 'Used', location: opts.location ?? null, collectionId: col.id }, { lookup: now ? opts.minifig : null, merge: true });
     if (!r.ok) { out.invalid.push(f.figNo); continue; }
     if (r.merged) out.figsMerged++; else { out.figsAdded++; if (!now || !opts.minifig) out.waiting++; }
   }
@@ -313,7 +337,7 @@ export async function editSet(db: DB, input: SetInput, lookup: Lookup | null): P
   if (qty !== undefined && qty !== active.length) {
     if (qty > active.length) {
       const src = active.at(-1) ?? before.copies.at(-1);
-      await insertCopies(db, before.id, src ? { status: src.status === 'parted_out' ? 'built' : src.status, condition: src.condition, location: src.location, missingPct: src.missingPct } : copyFields(input), qty - active.length);
+      await insertCopies(db, before.id, src ? { status: src.status === 'parted_out' ? 'built' : src.status, condition: src.condition, location: src.location, missingPct: src.missingPct, collectionId: src.collectionId ?? undefined } : copyFields(input), qty - active.length);
       await repriceCopies(db, before.id);
     } else {
       const drop = active.slice(qty).map((c) => c.id);
@@ -492,10 +516,18 @@ export function logSync(total: number, processed: number, errors: number, failur
 }
 
 /** Stores today's collection totals (replacing an earlier row for today). */
+/** Today's totals: one `history` row for everything, and one `collection_history` row per collection (#49). */
 export async function saveHistory(db: DB): Promise<void> {
-  const t = totals(await listSets(db));
-  const row = { sets: t.count, copies: t.copies, estValue: Math.round(t.estValue * 100) / 100, avgSold: Math.round(t.avgSold * 100) / 100, pieces: t.pieces };
+  const all = await listSets(db);
+  const rowOf = (t: ReturnType<typeof totals>) => ({ sets: t.count, copies: t.copies, estValue: Math.round(t.estValue * 100) / 100, avgSold: Math.round(t.avgSold * 100) / 100, pieces: t.pieces });
+  const row = rowOf(totals(all));
   await db.insert(history).values({ date: today(), ...row }).onConflictDoUpdate({ target: history.date, set: row });
+  const { listCollections } = await import('./collections');
+  for (const c of await listCollections(db)) {
+    const r = rowOf(totals(all.flatMap((s) => { const cs = s.copies.filter((x) => (x.collectionId ?? 1) === c.id); return cs.length ? [withCopies(s, cs)] : []; })));
+    await db.insert(collectionHistory).values({ date: today(), collectionId: c.id, ...r })
+      .onConflictDoUpdate({ target: [collectionHistory.date, collectionHistory.collectionId], set: r });
+  }
 }
 
 // ---- settings ----

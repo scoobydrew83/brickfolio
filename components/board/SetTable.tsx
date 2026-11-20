@@ -9,7 +9,7 @@ const th = 'px-3 py-2 font-medium';
 const num_ = 'px-3 py-2 text-right tabular-nums';
 
 /** The collection as one dense table: for scanning many sets at a desk. */
-export function SetTable({ sets, onEdit, onParts, onRemove, onRetry, pending, money }: { sets: SetRow[] } & RowActions) {
+export function SetTable({ sets, onEdit, onParts, onRemove, onRetry, pending, money, canEdit }: { sets: SetRow[] } & RowActions) {
   return (
     <div className="overflow-x-auto rounded-callout border-[1.5px] border-outline bg-surface">
       <table className="w-full text-left text-sm">
@@ -68,8 +68,8 @@ export function SetTable({ sets, onEdit, onParts, onRemove, onRetry, pending, mo
               <td className="whitespace-nowrap px-2 py-1.5">
                 <span className="flex items-center justify-end">
                   <IconButton icon={Puzzle} label="Parts list" onClick={() => onParts(s)} />
-                  <IconButton icon={Pencil} label="Edit" onClick={() => onEdit(s)} />
-                  <RemoveButton s={s} onRemove={() => onRemove(s)} busy={pending} />
+                  {canEdit?.(s) !== false && <IconButton icon={Pencil} label="Edit" onClick={() => onEdit(s)} />}
+                  {canEdit?.(s) !== false && <RemoveButton s={s} onRemove={() => onRemove(s)} busy={pending} />}
                 </span>
               </td>
             </tr>

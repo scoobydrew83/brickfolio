@@ -37,8 +37,9 @@ const round = (v: number) => Math.round(v * 100) / 100;
 const day = (iso: string | null | undefined) => (iso ? iso.slice(0, 10) : null);
 
 /** Everything the report shows. `owner` is printed on the cover line when given. */
-export async function valuation(db: DB, opts: { owner?: string | null } = {}): Promise<Valuation> {
-  const [sets, figs, currency, sync] = await Promise.all([listSets(db), listMinifigs(db), getCurrency(db), syncStatus(db)]);
+export async function valuation(db: DB, opts: { owner?: string | null; collectionId?: import('./collections').ReadScope } = {}): Promise<Valuation> {
+  const scope = { collectionId: opts.collectionId ?? 'all' };
+  const [sets, figs, currency, sync] = await Promise.all([listSets(db, scope), listMinifigs(db, scope), getCurrency(db), syncStatus(db)]);
   // One line per set and (location, condition, Missing %) group of its copies; parted out copies aren't listed.
   const groups = (s: SetRow): SetRow[] => {
     const by = new Map<string, CopyRow[]>();

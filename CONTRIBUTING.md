@@ -48,6 +48,8 @@ Reviewers merge an entry when one of these holds:
 - it matches the barcode on LEGO's or a retailer's product page;
 - it comes with a photo of the box showing both the code and the set number.
 
+**Minifigure numbers** (`minifigNumbers`: `{ "rbFigNo": "fig-012345", "figNo": "lor115" }`) tell every installation which BrickLink minifigure a Rebrickable one is, so parts lists from Rebrickable need no BrickLink call for it. Brickfolio learns these from BrickLink's own parts lists of the sets you own; **Share my codes** offers them with a checkbox (off by default, since they hint at which sets you own). Merge a pair when two people sent it independently, when Rebrickable's or BrickLink's website shows the other number for that figure (Rebrickable's minifigure pages list BrickLink IDs), or when it comes from a figure the contributor owns and checked. One Rebrickable figure given two BrickLink numbers, or two given one, is a conflict: settle it before merging (Rebrickable sometimes splits printed variants that BrickLink lists once).
+
 Never add codes copied from a paid barcode service: those belong to their provider. `scripts/import-lscan.mjs` refreshes the bundled L-Scan table (`lib/barcode/data/cmf-codes.json`, MIT) from a checkout of that project.
 
 ## License

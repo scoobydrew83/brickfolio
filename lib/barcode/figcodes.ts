@@ -61,7 +61,8 @@ async function seriesTheme(db: DB, series: string): Promise<number | null> {
  * L-Scan table; a code with the matching factory and year beats a bare code. Links each figure to your Rebrickable
  * checklist (number, photo, how many you own) when that series is loaded. `loadSeries` fetches a missing checklist.
  */
-export async function resolveFigCode(db: DB, text: unknown, opts: { loadSeries?: (themeId: number) => Promise<unknown> } = {}): Promise<FigResolution> {
+/** `scope`: the collections whose minifigures count as owned (#50: the ones the person can see). */
+export async function resolveFigCode(db: DB, text: unknown, opts: { loadSeries?: (themeId: number) => Promise<unknown>; scope?: number[] | 'all' } = {}): Promise<FigResolution> {
   const code = parseFigCode(text);
   if (!code) return { status: 'invalid', error: 'That isn’t a Collectible Minifigures box code. Scan the square code on the bottom of the box.' };
   const saved = (await db.select().from(minifigCodes).where(eq(minifigCodes.code, code.code)).all()) as Row[];
@@ -86,8 +87,10 @@ export async function resolveFigCode(db: DB, text: unknown, opts: { loadSeries?:
     }
     const fig = (r.rbFigNo && figs.find((f) => f.rbFigNo === r.rbFigNo)) || figs.find((f) => loose(f.name) === loose(r.name));
     const rbFigNo = fig?.rbFigNo ?? r.rbFigNo;
-    const own = rbFigNo ? await db.select({ qty: minifigs.qty }).from(minifigs).where(and(eq(minifigs.rbFigNo, rbFigNo))).get() : undefined;
-    candidates.push({ name: r.name, series: r.series, rbFigNo, imageUrl: fig?.imageUrl ?? null, themeId, source: r.source, verified: r.verified, exact: exact(r), owned: own?.qty ?? 0 });
+    // Summed over collections: a figure has one row in each it's in (#49).
+    const inScope = !opts.scope || opts.scope === 'all' ? undefined : opts.scope.length ? inArray(minifigs.collectionId, opts.scope) : sql`0 = 1`;
+    const own = rbFigNo ? await db.select({ qty: sql<number>`coalesce(sum(${minifigs.qty}), 0)` }).from(minifigs).where(and(eq(minifigs.rbFigNo, rbFigNo), inScope)).get() : undefined;
+    candidates.push({ name: r.name, series: r.series, rbFigNo, imageUrl: fig?.imageUrl ?? null, themeId, source: r.source, verified: r.verified, exact: exact(r), owned: Number(own?.qty ?? 0) });
   }
   return { status: candidates.length === 1 ? 'matched' : 'ambiguous', code, candidates };
 }

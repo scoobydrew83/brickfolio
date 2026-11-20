@@ -7,7 +7,8 @@
 import { createRemoteJWKSet, jwtVerify } from 'jose';
 
 export type AuthMode = 'none' | 'tailscale' | 'cloudflare-access';
-export type Identity = { user: string; via: AuthMode | 'token' | 'cron' };
+/** `owner`: for an API token, the login that created it (#50); none for tokens from before, which act as admin. */
+export type Identity = { user: string; via: AuthMode | 'token' | 'cron'; owner?: string | null };
 
 export const authMode = (): AuthMode => {
   const m = process.env.AUTH_MODE || 'none';
@@ -15,7 +16,8 @@ export const authMode = (): AuthMode => {
   return m;
 };
 
-const allowed = (user: string) => {
+/** Whether ALLOWED_USERS lets this login in (everyone when it is unset). */
+export const allowed = (user: string) => {
   const list = (process.env.ALLOWED_USERS || '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
   return !list.length || list.includes(user.toLowerCase());
 };

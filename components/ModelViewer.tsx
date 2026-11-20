@@ -11,10 +11,11 @@ type Props = {
   library: boolean; // an LDraw parts library is configured on the server
   photo: React.ReactNode;
   initialView?: View; // e.g. from ?view=3d on the set page
+  canEdit?: boolean; // #50: false hides upload, find and remove
 };
 
 /** A set's photo, its LDraw model in 3D, and the model's building steps. */
-export function ModelViewer({ setNo, model, library, photo, initialView }: Props) {
+export function ModelViewer({ setNo, model, library, photo, initialView, canEdit = true }: Props) {
   const [view, setView] = useState<View>(initialView ?? 'photo');
   return (
     <section aria-label="Photo and model" className="space-y-3">
@@ -24,7 +25,7 @@ export function ModelViewer({ setNo, model, library, photo, initialView }: Props
         onChange={setView}
         options={[{ value: 'photo', label: 'Photo' }, { value: '3d', label: '3D model' }, { value: 'steps', label: 'Steps' }]}
       />
-      {view === 'photo' ? photo : !library ? <NoLibrary /> : !model ? <UploadModel setNo={setNo} /> : <Model setNo={setNo} steps={view === 'steps'} fileName={model.fileName} author={model.author} />}
+      {view === 'photo' ? photo : !library ? <NoLibrary /> : !model ? (canEdit ? <UploadModel setNo={setNo} /> : <div className={`${frame} flex items-center justify-center p-8 text-center text-sm text-tile-ink/80`}><p>No model for this set yet.</p></div>) : <Model setNo={setNo} steps={view === 'steps'} fileName={model.fileName} author={model.author} canEdit={canEdit} />}
     </section>
   );
 }
@@ -82,7 +83,7 @@ function UploadModel({ setNo }: { setNo: string }) {
 }
 
 /** Loads three.js only when the 3D view opens, then the model, then its parts from the library. */
-function Model({ setNo, steps, fileName, author }: { setNo: string; steps: boolean; fileName: string; author: string | null }) {
+function Model({ setNo, steps, fileName, author, canEdit = true }: { setNo: string; steps: boolean; fileName: string; author: string | null; canEdit?: boolean }) {
   const host = useRef<HTMLDivElement>(null);
   const [state, setState] = useState<{ status: 'loading' | 'ready' | 'error'; error?: string; total?: number }>({ status: 'loading' });
   const [step, setStep] = useState(0);
@@ -196,9 +197,11 @@ function Model({ setNo, steps, fileName, author }: { setNo: string; steps: boole
       {message && <Banner kind="error" onDismiss={() => setMessage(null)}>{message}</Banner>}
       <p className="flex flex-wrap items-center gap-x-3 text-xs text-fg-3">
         <span>Model: {fileName}{author ? ` by ${author}` : ''}. Parts from the LDraw library (CC BY 2.0).</span>
-        <Button variant="danger-link" className="text-xs" disabled={pending} onClick={() => start(async () => { const r = await removeModel(setNo); if (!r.ok) setMessage(r.error); })}>
-          <Trash2 aria-hidden className="size-3.5" />Remove model
-        </Button>
+        {canEdit && (
+          <Button variant="danger-link" className="text-xs" disabled={pending} onClick={() => start(async () => { const r = await removeModel(setNo); if (!r.ok) setMessage(r.error); })}>
+            <Trash2 aria-hidden className="size-3.5" />Remove model
+          </Button>
+        )}
       </p>
     </div>
   );

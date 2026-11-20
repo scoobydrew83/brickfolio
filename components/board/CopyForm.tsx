@@ -1,10 +1,12 @@
 import { CONDITIONS, STATUSES, STATUS_LABEL, type CopyRow } from '@/lib/sets';
 import { Button, Dialog, field } from '../ui';
 
-type Props = { copy: CopyRow | null; title: string; locations: string[]; pending: boolean; onClose: () => void; onSubmit: (form: Record<string, unknown>) => void };
+/** `collections` (#49): shown as a Collection field when there are two or more; `collection` is a new copy's default. */
+type Collections = { collections?: { id: number; name: string }[]; collection?: number };
+type Props = { copy: CopyRow | null; title: string; locations: string[]; pending: boolean; onClose: () => void; onSubmit: (form: Record<string, unknown>) => void } & Collections;
 
 /** Add or edit one copy of a set: status, condition, location, dates, what it cost, and notes. */
-export function CopyForm({ copy, title, locations, pending, onClose, onSubmit }: Props) {
+export function CopyForm({ copy, title, locations, pending, onClose, onSubmit, collections, collection }: Props) {
   const footer = (
     <>
       <Button variant="ghost" onClick={onClose}>Cancel</Button>
@@ -22,7 +24,7 @@ export function CopyForm({ copy, title, locations, pending, onClose, onSubmit }:
           onSubmit({ ...f, gwp: f.gwp === 'on' });
         }}
       >
-        <CopyFields copy={copy} locations={locations} />
+        <CopyFields copy={copy} locations={locations} collections={collections} collection={collection} />
         <label className="block text-sm">Notes about this copy
           <textarea name="notes" defaultValue={copy?.notes ?? ''} maxLength={2000} rows={2} className={field} />
         </label>
@@ -35,9 +37,16 @@ export function CopyForm({ copy, title, locations, pending, onClose, onSubmit }:
  * The copy fields, shared by the copy form and the add-a-set form. `withPlace` shows condition, location and
  * Missing % (the add-a-set form has its own).
  */
-export function CopyFields({ copy, locations, withPlace = true }: { copy: CopyRow | null; locations: string[]; withPlace?: boolean }) {
+export function CopyFields({ copy, locations, withPlace = true, collections = [], collection }: { copy: CopyRow | null; locations: string[]; withPlace?: boolean } & Collections) {
   return (
     <div className="grid grid-cols-2 gap-3">
+      {collections.length > 1 && (
+        <label className="col-span-2 block text-sm">Collection
+          <select name="collectionId" defaultValue={String(copy?.collectionId ?? collection ?? collections[0].id)} className={field}>
+            {collections.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+        </label>
+      )}
       <label className="block text-sm">Status
         <select name="status" defaultValue={copy?.status ?? ''} className={field}>
           {!copy && <option value="">From condition</option>}

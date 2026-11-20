@@ -4,7 +4,9 @@ import { connection } from 'next/server';
 import Board from '@/components/Board';
 import { getDb } from '@/lib/db';
 import { getCollection } from '@/lib/service/sets';
-import { bricklink, currentUser } from '@/lib/session';
+import { listCollections } from '@/lib/service/collections';
+import { bricklink, currentAccess, currentCollection, currentUser, pageBlock } from '@/lib/session';
+import { writable } from '@/lib/service/permissions';
 
 export default function Page() {
   return (
@@ -19,8 +21,10 @@ export default function Page() {
 async function Sets() {
   await connection(); // always read fresh, never at build time
   const user = await currentUser();
-  if (!user) return <p className="py-24 text-center text-fg-3">Not signed in.</p>;
-  const data = await getDb().then(getCollection).catch((e: unknown) => (e instanceof Error ? e.message : String(e)));
+  const blocked = await pageBlock('member'); // #50
+  if (!user || blocked) return <p className="py-24 text-center text-fg-3">{blocked ?? 'Not signed in.'}</p>;
+  const collectionId = await currentCollection();
+  const data = await getDb().then((db) => getCollection(db, { collectionId })).catch((e: unknown) => (e instanceof Error ? e.message : String(e)));
   if (typeof data === 'string') {
     return (
       <div className="rounded-card border border-danger-ring bg-danger-soft p-6 text-danger">
@@ -29,5 +33,7 @@ async function Sets() {
       </div>
     );
   }
-  return <Board {...data} user={user.user} priced={!!bricklink()} />;
+  const access = (await currentAccess())!;
+  const collections = (await getDb().then(listCollections).catch(() => [])).filter((c) => access.admin || access.roles.has(c.id));
+  return <Board {...data} user={user.user} priced={!!bricklink()} collections={collections} collection={typeof collectionId === 'number' ? collectionId : 'all'} writable={writable(access)} />;
 }

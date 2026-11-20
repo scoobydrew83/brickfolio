@@ -8,6 +8,7 @@ import { KIND_LABEL, MAX_CELLS, MAX_MODULE, MODULE_KINDS, ROTATIONS, footprint, 
 import { displayNo, STATUS_LABEL, type CopyRow } from '../sets';
 import type { Result } from './sets';
 import { autoReserve, availability } from './allocations';
+import { inScope, type ReadScope } from './collections';
 
 const nowIso = () => new Date().toISOString();
 
@@ -126,14 +127,17 @@ export async function listLayouts(db: DB): Promise<LayoutSummary[]> {
   return rows.map((r) => ({ ...r, modules: Number(r.modules) }));
 }
 
-/** A layout with its modules (top to bottom, left to right) and what stands on each. Undefined when unknown. */
-export async function getLayout(db: DB, id: number): Promise<LayoutDetail | undefined> {
+/**
+ * A layout with its modules (top to bottom, left to right) and what stands on each. Undefined when unknown. Layouts
+ * are shared, but set copies outside `scope` (the reader's collections, #50) are left off.
+ */
+export async function getLayout(db: DB, id: number, scope: ReadScope = 'all'): Promise<LayoutDetail | undefined> {
   const l = await db.select().from(layouts).where(eq(layouts.id, id)).get();
   if (!l) return undefined;
   const mods = await db.select().from(layoutModules).where(eq(layoutModules.layoutId, id)).orderBy(asc(layoutModules.y), asc(layoutModules.x)).all();
   const items = await db.select({
     moduleId: layoutModuleItems.moduleId, setCopyId: layoutModuleItems.setCopyId, buildId: layoutModuleItems.buildId,
-    copyStatus: setCopies.status,
+    copyStatus: setCopies.status, copyCollection: setCopies.collectionId,
     copyNo: sql<number>`(select count(*) from "set_copies" c where c."set_id" = "set_copies"."set_id" and c."id" <= "set_copies"."id")`,
     copies: sql<number>`(select count(*) from "set_copies" c where c."set_id" = "set_copies"."set_id")`,
     setNo: sets.setNo, setName: sets.name, setImage: sets.imageUrl,
@@ -145,6 +149,7 @@ export async function getLayout(db: DB, id: number): Promise<LayoutDetail | unde
     .where(eq(layoutModules.layoutId, id)).orderBy(asc(layoutModuleItems.id)).all();
   const byModule = new Map<number, LayoutItem[]>();
   for (const i of items) {
+    if (i.setCopyId != null && !inScope(scope, i.copyCollection)) continue;
     const item: LayoutItem | null = i.setCopyId != null && i.setNo
       ? {
         kind: 'copy', refId: i.setCopyId, name: i.setName ?? displayNo(i.setNo), imageUrl: i.setImage, setNo: i.setNo, url: null,
@@ -258,11 +263,16 @@ export async function removeModule(db: DB, id: number): Promise<Result> {
  * Replaces what stands on a module. Every id must exist, and a copy or build already on another module (in any layout)
  * is refused with where it is: moving one is done by removing it there first.
  */
-export async function setModuleItems(db: DB, moduleId: number, items: { setCopyIds: number[]; buildIds: number[] }): Promise<Result> {
+/**
+ * Replaces what stands on a module. `scope` is the collections the caller may change (#50): copies outside it can't
+ * be placed (they read as unknown), and ones already on the module that the caller can't see stay where they are.
+ */
+export async function setModuleItems(db: DB, moduleId: number, items: { setCopyIds: number[]; buildIds: number[] }, scope: ReadScope = 'all'): Promise<Result> {
   const m = await getModule(db, moduleId);
   if (!m) return notFound(`Module ${moduleId}`);
   const copyIds = [...new Set(items.setCopyIds)], buildIds = [...new Set(items.buildIds)];
-  const copies = await inChunks(copyIds, (ids) => db.select({ id: setCopies.id, setNo: sets.setNo, name: sets.name }).from(setCopies).innerJoin(sets, eq(sets.id, setCopies.setId)).where(inArray(setCopies.id, ids)).all());
+  const copies = (await inChunks(copyIds, (ids) => db.select({ id: setCopies.id, setNo: sets.setNo, name: sets.name, collectionId: setCopies.collectionId }).from(setCopies).innerJoin(sets, eq(sets.id, setCopies.setId)).where(inArray(setCopies.id, ids)).all()))
+    .filter((c) => inScope(scope, c.collectionId));
   const missingCopy = copyIds.find((id) => !copies.some((c) => c.id === id));
   if (missingCopy) return { ok: false, status: 400, error: `Copy ${missingCopy} doesn't exist.` };
   const found = await inChunks(buildIds, (ids) => db.select({ id: builds.id, name: builds.name }).from(builds).where(inArray(builds.id, ids)).all());
@@ -281,8 +291,11 @@ export async function setModuleItems(db: DB, moduleId: number, items: { setCopyI
     return { ok: false, status: 409, error: `${what} is already on ${e.layoutName}, ${moduleLabel(e)}. Remove it there first.` };
   }
 
+  const hidden = scope === 'all' ? [] : (await db.select({ id: layoutModuleItems.setCopyId, collectionId: setCopies.collectionId }).from(layoutModuleItems)
+    .innerJoin(setCopies, eq(setCopies.id, layoutModuleItems.setCopyId)).where(eq(layoutModuleItems.moduleId, moduleId)).all())
+    .filter((c) => !inScope(scope, c.collectionId)).map((c) => c.id!);
   await db.delete(layoutModuleItems).where(eq(layoutModuleItems.moduleId, moduleId));
-  const rows = [...copyIds.map((id) => ({ moduleId, setCopyId: id, buildId: null })), ...buildIds.map((id) => ({ moduleId, setCopyId: null, buildId: id }))];
+  const rows = [...[...copyIds, ...hidden].map((id) => ({ moduleId, setCopyId: id, buildId: null })), ...buildIds.map((id) => ({ moduleId, setCopyId: null, buildId: id }))];
   for (let i = 0; i < rows.length; i += 30) await db.insert(layoutModuleItems).values(rows.slice(i, i + 30));
   await touch(db, m.layoutId);
   return { ok: true };
@@ -310,7 +323,8 @@ export type Linkable = {
 };
 
 /** Set copies (not parted out) and builds matching `q` (name, set number or MOC number), for the Link dialog. */
-export async function searchLinkables(db: DB, q = '', limit = 40): Promise<Linkable[]> {
+/** `scope`: only copies in these collections (#50: the ones the person can see); builds are shared. */
+export async function searchLinkables(db: DB, q = '', limit = 40, scope: number[] | 'all' = 'all'): Promise<Linkable[]> {
   const t = q.trim();
   const n = Math.min(Math.max(limit, 1), 100);
   const copyRows = await db.select({
@@ -318,7 +332,8 @@ export async function searchLinkables(db: DB, q = '', limit = 40): Promise<Linka
     copyNo: sql<number>`(select count(*) from "set_copies" c where c."set_id" = "set_copies"."set_id" and c."id" <= "set_copies"."id")`,
     copies: sql<number>`(select count(*) from "set_copies" c where c."set_id" = "set_copies"."set_id")`,
   }).from(setCopies).innerJoin(sets, eq(sets.id, setCopies.setId))
-    .where(and(ne(setCopies.status, 'parted_out'), t ? or(like(sets.name, `%${t}%`), like(sets.setNo, `%${t}%`)) : undefined))
+    .where(and(ne(setCopies.status, 'parted_out'), t ? or(like(sets.name, `%${t}%`), like(sets.setNo, `%${t}%`)) : undefined,
+      scope === 'all' ? undefined : scope.length ? inArray(sql`coalesce(${setCopies.collectionId}, 1)`, scope) : sql`0 = 1`))
     .orderBy(asc(sets.setNo), asc(setCopies.id)).limit(n).all();
   const buildRows = await db.select({ id: builds.id, mocNo: builds.mocNo, name: builds.name, imageUrl: builds.imageUrl, sourceSetNo: builds.sourceSetNo, kind: builds.kind }).from(builds)
     .where(t ? or(like(builds.name, `%${t}%`), like(builds.mocNo, `%${t}%`), like(builds.sourceSetNo, `%${t}%`)) : undefined)
@@ -373,10 +388,10 @@ export type LayoutNeeds = {
  * too (unlike "What can I build?", which asks whether you could build it). Set copies add the parts marked missing
  * from them. A parted-out copy is in lots, not standing, so it adds nothing. One query per table, no per-line queries.
  */
-export async function layoutNeeds(db: DB, layoutId: number): Promise<LayoutNeeds | undefined> {
+export async function layoutNeeds(db: DB, layoutId: number, scope: ReadScope = 'all'): Promise<LayoutNeeds | undefined> {
   const l = await db.select({ id: layouts.id }).from(layouts).where(eq(layouts.id, layoutId)).get();
   if (!l) return undefined;
-  const links = await db.select({ moduleId: layoutModuleItems.moduleId, setCopyId: layoutModuleItems.setCopyId, buildId: layoutModuleItems.buildId, copyStatus: setCopies.status })
+  const links = await db.select({ moduleId: layoutModuleItems.moduleId, setCopyId: layoutModuleItems.setCopyId, buildId: layoutModuleItems.buildId, copyStatus: setCopies.status, copyCollection: setCopies.collectionId })
     .from(layoutModuleItems).innerJoin(layoutModules, eq(layoutModules.id, layoutModuleItems.moduleId))
     .leftJoin(setCopies, eq(setCopies.id, layoutModuleItems.setCopyId))
     .where(eq(layoutModules.layoutId, layoutId)).orderBy(asc(layoutModuleItems.moduleId)).all();
@@ -385,7 +400,7 @@ export async function layoutNeeds(db: DB, layoutId: number): Promise<LayoutNeeds
   const buildMods = new Map<number, number[]>(), copyMods = new Map<number, number[]>();
   for (const k of links) {
     if (k.buildId != null) buildMods.set(k.buildId, [...(buildMods.get(k.buildId) ?? []), k.moduleId]);
-    else if (k.setCopyId != null && k.copyStatus !== 'parted_out') copyMods.set(k.setCopyId, [...(copyMods.get(k.setCopyId) ?? []), k.moduleId]);
+    else if (k.setCopyId != null && k.copyStatus !== 'parted_out' && inScope(scope, k.copyCollection)) copyMods.set(k.setCopyId, [...(copyMods.get(k.setCopyId) ?? []), k.moduleId]);
   }
   const { freeLots, reservedBy } = await availability(db);
 
@@ -456,9 +471,9 @@ export async function moduleNeeds(db: DB, layoutId: number): Promise<Map<number,
 }
 
 /** The layout's to-buy lines as a BrickLink Wanted List. Null when the layout isn't known. */
-export async function layoutWantedListXml(db: DB, layoutId: number): Promise<{ xml: string; items: number; skipped: number; name: string } | null> {
+export async function layoutWantedListXml(db: DB, layoutId: number, scope: ReadScope = 'all'): Promise<{ xml: string; items: number; skipped: number; name: string } | null> {
   const l = await db.select({ name: layouts.name }).from(layouts).where(eq(layouts.id, layoutId)).get();
-  const n = l && (await layoutNeeds(db, layoutId));
+  const n = l && (await layoutNeeds(db, layoutId, scope));
   if (!l || !n) return null;
   const items: WantedItem[] = n.lines.filter((x) => x.toBuy > 0).map((x) => ({ type: x.type, partNo: x.partNo, colorId: x.colorId, qty: x.toBuy }));
   return { xml: toWantedListXml(items, `Parts to buy for layout ${l.name}`), items: items.length, skipped: n.unmapped, name: l.name };

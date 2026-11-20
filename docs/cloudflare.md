@@ -103,7 +103,7 @@ npx wrangler secret put ALERT_WEBHOOK_URL      # optional: wishlist alerts (ntfy
 npx wrangler secret put COMPARETHEBRICKS_API_KEY  # optional: barcode lookups for the scanner
 ```
 
-Optional: `ALLOWED_USERS` (comma-separated emails) as a second check on top of the Access policy.
+Optional: `ALLOWED_USERS` (comma-separated emails) as a second check on top of the Access policy, and `ADMIN_USERS` (comma-separated emails) to name the admins; everyone else then gets only the collections they're given (see [People and permissions](install.md#people-and-permissions)).
 
 ## 5. Deploy
 

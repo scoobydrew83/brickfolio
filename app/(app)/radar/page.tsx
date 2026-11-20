@@ -5,7 +5,7 @@ import { PageSkeleton } from '@/components/ui';
 import { getDb } from '@/lib/db';
 import { getRadar } from '@/lib/service/radar';
 import { listProjects } from '@/lib/service/designer';
-import { brickset, currentUser } from '@/lib/session';
+import { brickset, currentCollection, pageBlock } from '@/lib/session';
 
 export const metadata = { title: 'Retirement Radar' };
 
@@ -19,8 +19,10 @@ export default function Page() {
 
 async function Content() {
   await connection();
-  if (!(await currentUser())) return <p className="py-24 text-center text-fg-3">Not signed in.</p>;
+  const blocked = await pageBlock('member'); // #50
+  if (blocked) return <p className="py-24 text-center text-fg-3">{blocked}</p>;
   const db = await getDb();
-  const [radar, projects] = await Promise.all([getRadar(db), listProjects(db)]);
+  const scope = await currentCollection();
+  const [radar, projects] = await Promise.all([getRadar(db, undefined, { collectionId: scope }), listProjects(db, undefined, scope)]);
   return <RadarView radar={radar} projects={projects} hasBrickset={!!brickset()} />;
 }

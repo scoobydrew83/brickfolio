@@ -1,9 +1,9 @@
 'use client';
 import Link from 'next/link';
 import { ClipboardList, LayoutGrid, Plus, RefreshCw, Rows3, ScanBarcode } from 'lucide-react';
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, useTransition } from 'react';
-import { addSet, editSet, quickAddList, relookupSet, reload, removeSet, runSync, type Result } from '@/app/actions';
+import { addSet, editSet, quickAddList, relookupSet, reload, removeSet, runSync, selectCollection, type Result } from '@/app/actions';
 import type { SyncStatus } from '@/lib/service/sets';
 import { dailyHistory, filterSets, groupTotals, STATUSES, STATUS_LABEL, totals, type Filters, type HistoryRow, type SetRow } from '@/lib/sets';
 import { availability, collectionGain, retirement } from '@/lib/retail';
@@ -24,9 +24,14 @@ const SORTS: Filters['sort'][] = ['setNo', 'value', 'name', 'year'];
 type View = 'cards' | 'table';
 const noop = () => () => {};
 
-type Props = { sets: SetRow[]; history: HistoryRow[]; sync: SyncStatus; locations: string[]; currency: string; readAt: string; user: string; priced: boolean };
+/** `collections` (#49): with two or more and All selected, a Collection row shows each one's totals and switches to it. */
+type Props = { sets: SetRow[]; history: HistoryRow[]; sync: SyncStatus; locations: string[]; currency: string; readAt: string; user: string; priced: boolean; collections?: { id: number; name: string }[]; collection?: number | 'all'; writable?: 'all' | number[] };
 
-export default function Board({ sets, history, sync, locations, currency, readAt, user, priced }: Props) {
+export default function Board({ sets, history, sync, locations, currency, readAt, user, priced, collections = [], collection = 'all', writable = 'all' }: Props) {
+  // #50: what the viewer can change. Adding needs a collection they can add to; editing a set, every copy's collection.
+  const canAdd = writable === 'all' || writable.length > 0;
+  const canEdit = (s: SetRow) => writable === 'all' || s.copies.every((c) => writable.includes(c.collectionId ?? 1));
+  const router = useRouter();
   const params = useSearchParams();
   const [filters, setFilters] = useState<Filters>(() => {
     const sort = params.get('sort') as Filters['sort'];
@@ -86,7 +91,7 @@ export default function Board({ sets, history, sync, locations, currency, readAt
   const retiring = useMemo(() => sets.filter((s) => retirement(s)?.kind === 'retiring').length, [sets]);
   const remove = (s: SetRow) => act(() => removeSet(s.setNo), s.copies.length > 1 ? `Removed one ${s.name}. ${Math.max(0, s.qty - 1)} left.` : `Removed ${s.name}.`);
   const retry = (s: SetRow) => act(() => relookupSet(s.setNo), `Lookup worked for ${s.name}.`);
-  const rowProps = { onEdit: setEditing, onParts: setPartsOf, onRemove: remove, onRetry: retry, pending, money, currency };
+  const rowProps = { onEdit: setEditing, onParts: setPartsOf, onRemove: remove, onRetry: retry, pending, money, currency, canEdit };
 
   return (
     <div className="space-y-6">
@@ -101,9 +106,9 @@ export default function Board({ sets, history, sync, locations, currency, readAt
                 {syncing ? `Syncing… ${sync.processed}/${sync.total}` : 'Sync BrickLink'}
               </Button>
             )}
-            <Link href="/scan" className={buttonClass()}><ScanBarcode aria-hidden className="size-4" />Scan</Link>
-            <Button icon={ClipboardList} onClick={() => setPasting(true)}>Paste a list</Button>
-            <Button variant="primary" icon={Plus} onClick={() => setEditing('new')}>Add set</Button>
+            {canAdd && <Link href="/scan" className={buttonClass()}><ScanBarcode aria-hidden className="size-4" />Scan</Link>}
+            {canAdd && <Button icon={ClipboardList} onClick={() => setPasting(true)}>Paste a list</Button>}
+            {canAdd && <Button variant="primary" icon={Plus} onClick={() => setEditing('new')}>Add set</Button>}
           </span>
         }
       >
@@ -162,6 +167,16 @@ export default function Board({ sets, history, sync, locations, currency, readAt
       </div>
 
       <section aria-label="Filters" className="space-y-2 text-sm">
+        {collections.length > 1 && collection === 'all' && (
+          <div className="-mx-4 flex items-center gap-2 overflow-x-auto px-4 pb-1 sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0 sm:pb-0">
+            <span className="w-20 shrink-0 text-sm text-fg-3">Collection</span>
+            {groupTotals(sets, 'collection', new Map(collections.map((c) => [c.id, c.name]))).map((g) => (
+              <FilterChip key={g.label} active={false} onClick={() => { const c = collections.find((x) => x.name === g.label); if (c) void selectCollection(c.id).then(() => router.refresh()); }}>
+                {g.label} · {g.count} · <span className="tabular-nums">{money(g.estValue)}</span>
+              </FilterChip>
+            ))}
+          </div>
+        )}
         {(['location', 'condition', ...(themed ? ['theme'] as const : []), ...(dated ? ['availability'] as const : [])] as const).map((k) => (
           <div key={k} className="-mx-4 flex items-center gap-2 overflow-x-auto px-4 pb-1 [mask-image:linear-gradient(to_right,black_85%,transparent)] sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0 sm:pb-0 sm:[mask-image:none]">
             <span className="w-20 shrink-0 text-sm capitalize text-fg-3">{k}</span>

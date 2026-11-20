@@ -1,6 +1,7 @@
 // Copies of a set: each physical box or build, with its own status, condition, location, cost basis and value.
 // The set row (lib/service/sets.ts) holds the catalog data and the fetched prices; copies hold everything per box.
-import { and, eq, inArray, ne } from 'drizzle-orm';
+import { collectionExists, scopeIds, targetCollection, type ReadScope } from './collections';
+import { and, eq, inArray, ne, sql } from 'drizzle-orm';
 import type { Lookup } from '../bricklink/client';
 import { setCopies, sets } from '../db/schema';
 import type { DB } from '../db/types';
@@ -30,8 +31,10 @@ export async function needsRelookup(db: DB, setNo: string, copies: Pick<CopyRow,
 export async function insertCopies(db: DB, setId: number, c: CopyInput, n: number): Promise<number[]> {
   if (n < 1) return [];
   const status = c.status ?? (c.condition === 'New' ? 'sealed' : 'built');
+  const col = await targetCollection(db, c.collectionId);
+  if (!col.ok) throw new Error(col.error);
   const row = {
-    setId, status, condition: status === 'sealed' ? 'New' as const : (c.condition ?? 'Used'), missingPct: c.missingPct ?? null, location: c.location ?? null,
+    setId, status, collectionId: col.id, condition: status === 'sealed' ? 'New' as const : (c.condition ?? 'Used'), missingPct: c.missingPct ?? null, location: c.location ?? null,
     acquiredDate: c.acquiredDate ?? null, buildDate: c.buildDate ?? null, pricePaid: c.gwp ? 0 : (c.pricePaid ?? null), tax: c.tax ?? null,
     shipping: c.shipping ?? null, gwp: c.gwp ?? false, notes: c.notes ?? null,
   };
@@ -124,6 +127,7 @@ export async function editCopy(db: DB, copyId: number, input: CopyInput, lookup:
     fields.condition = 'New';
   }
   if (fields.gwp) fields.pricePaid = 0;
+  if (fields.collectionId !== undefined && !(await collectionExists(db, fields.collectionId))) return { ok: false, status: 400, error: `Collection ${fields.collectionId} doesn't exist.` };
   // A copy parted out becomes loose-part lots; put back together, its lots go (refused if they were changed or reserved).
   const partingOut = after.status === 'parted_out' && c.status !== 'parted_out';
   if (c.status === 'parted_out' && after.status !== 'parted_out') {
@@ -165,11 +169,14 @@ async function reprice(db: DB, s: SetRow, lookup: Lookup | null): Promise<void> 
  * What you own per set number, from the copies that aren't parted out: how many, and the condition and location when
  * they all share one (else null). Sets with no such copies are left out. Used by the scanner and the Designer list.
  */
-export async function ownedSummary(db: DB, nos?: string[]): Promise<Map<string, { qty: number; condition: CopyRow['condition'] | null; location: string | null; name: string }>> {
+export async function ownedSummary(db: DB, nos?: string[], scope: ReadScope = 'all'): Promise<Map<string, { qty: number; condition: CopyRow['condition'] | null; location: string | null; name: string }>> {
   if (nos && !nos.length) return new Map();
+  const ids = scopeIds(scope); // only copies in these collections (#49, #50)
+  if (ids && !ids.length) return new Map();
   const q = db.select({ setNo: sets.setNo, name: sets.name, status: setCopies.status, condition: setCopies.condition, location: setCopies.location })
     .from(setCopies).innerJoin(sets, eq(sets.id, setCopies.setId));
-  const rows = await (nos ? q.where(and(inArray(sets.setNo, nos), ne(setCopies.status, 'parted_out'))) : q.where(ne(setCopies.status, 'parted_out'))).all();
+  const inScope = ids ? inArray(sql`coalesce(${setCopies.collectionId}, 1)`, ids) : undefined;
+  const rows = await (nos ? q.where(and(inArray(sets.setNo, nos), ne(setCopies.status, 'parted_out'), inScope)) : q.where(and(ne(setCopies.status, 'parted_out'), inScope))).all();
   const out = new Map<string, { qty: number; condition: CopyRow['condition'] | null; location: string | null; name: string }>();
   for (const r of rows) {
     const o = out.get(r.setNo);

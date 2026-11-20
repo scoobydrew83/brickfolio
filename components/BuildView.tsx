@@ -19,7 +19,8 @@ type Message = { kind: 'ok' | 'error'; text: string };
 const plural = (n: number) => `${n} ${n === 1 ? 'build' : 'builds'}`;
 
 /** Builds ranked by how much of each you already have: alternates of your sets, Rebrickable MOCs and your own. */
-export default function BuildView({ builds, hasKey, hasParts, hasLots }: { builds: BuildMatch[]; hasKey: boolean; hasParts: boolean; hasLots: boolean }) {
+/** `collection`: the selected collection (#49), so Wanted Lists count only its sets' parts, like the page. */
+export default function BuildView({ builds, hasKey, hasParts, hasLots, collection }: { builds: BuildMatch[]; hasKey: boolean; hasParts: boolean; hasLots: boolean; collection?: number }) {
   const [filter, setFilter] = useState<Filter>('all');
   const [kind, setKind] = useState<Kind>('all');
   const [message, setMessage] = useState<Message | null>(null);
@@ -88,7 +89,7 @@ export default function BuildView({ builds, hasKey, hasParts, hasLots }: { build
             <EmptyState title="No builds match">Try another filter.</EmptyState>
           ) : (
             <ul className="divide-y divide-line border-y border-line">
-              {shown.map((b) => <BuildRow key={b.mocNo} b={b} hasLots={hasLots} onMessage={setMessage} onReserved={() => setReserved(b)} />)}
+              {shown.map((b) => <BuildRow key={b.mocNo} b={b} hasLots={hasLots} collection={collection} onMessage={setMessage} onReserved={() => setReserved(b)} />)}
             </ul>
           )}
           <p className="text-xs text-fg-3">Builds and part lists from Rebrickable. Spare parts and alternates in your sets aren’t counted. Loose parts reserved for one build don’t count for the others.</p>
@@ -101,7 +102,7 @@ export default function BuildView({ builds, hasKey, hasParts, hasLots }: { build
   );
 }
 
-function BuildRow({ b, hasLots, onMessage, onReserved }: { b: BuildMatch; hasLots: boolean; onMessage: (m: Message) => void; onReserved: () => void }) {
+function BuildRow({ b, hasLots, collection, onMessage, onReserved }: { b: BuildMatch; hasLots: boolean; collection?: number; onMessage: (m: Message) => void; onReserved: () => void }) {
   const [pending, start] = useTransition();
   const [confirm, setConfirm] = useState(false);
   const file = useRef<HTMLInputElement>(null);
@@ -148,7 +149,7 @@ function BuildRow({ b, hasLots, onMessage, onReserved }: { b: BuildMatch; hasLot
         )}
         {b.reserved > 0 && <Button size="sm" variant="ghost" onClick={onReserved}><Count n={b.reserved} /> reserved</Button>}
         {b.partsKnown && b.missingPieces > 0 && (
-          <a href={`/api/v1/builds/${encodeURIComponent(b.mocNo)}/wanted.xml`} className={buttonClass('secondary', 'sm')} title="Upload this in BrickLink under Wanted → Upload">
+          <a href={`/api/v1/builds/${encodeURIComponent(b.mocNo)}/wanted.xml${collection ? `?collection=${collection}` : ''}`} className={buttonClass('secondary', 'sm')} title="Upload this in BrickLink under Wanted → Upload">
             <Download aria-hidden className="size-4" />Wanted List
           </a>
         )}

@@ -6,7 +6,7 @@ import { getDb } from '@/lib/db';
 import { listImports, listLots } from '@/lib/service/lots';
 import { ensureColors } from '@/lib/service/parts';
 import { listLocations } from '@/lib/service/sets';
-import { brickColors, currentUser } from '@/lib/session';
+import { brickColors, pageBlock } from '@/lib/session';
 
 export const metadata = { title: 'Loose parts' };
 
@@ -22,7 +22,8 @@ export default function Page() {
 
 async function Content() {
   await connection();
-  if (!(await currentUser())) return <p className="py-24 text-center text-fg-3">Not signed in.</p>;
+  const blocked = await pageBlock('member'); // #50
+  if (blocked) return <p className="py-24 text-center text-fg-3">{blocked}</p>;
   const db = await getDb();
   await ensureColors(db, brickColors());
   const [first, locations, imports] = await Promise.all([listLots(db, { limit: 200 }), listLocations(db), listImports(db)]);

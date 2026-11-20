@@ -1,9 +1,10 @@
-import { beforeEach, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { barcodeRows, saveBarcode } from '../identifiers/barcodes';
 import { openNodeDb } from '../db/node';
 import type { DB } from '../db/types';
-import { minifigCodes } from '../db/schema';
-import { applyCommunity, communityStatus, ensureCommunity, parseCommunity, shareable, shareIssueUrl, syncCommunity } from './community';
+import { minifigCodes, minifigs } from '../db/schema';
+import { remember, resolve } from '../identifiers/resolve';
+import { applyCommunity, communityStatus, ensureCommunity, parseCommunity, shareable, shareableFigNumbers, shareIssueUrl, syncCommunity } from './community';
 import { resolveBarcode } from './resolve';
 import { rememberBarcode } from '../service/barcodes';
 import { rememberFigCode } from './figcodes';
@@ -89,4 +90,55 @@ it('shares only your confirmed codes, with nothing else from the collection', as
   expect(parseCommunity(f).errors).toEqual([]); // what you share is what the list accepts
   expect(shareIssueUrl(f)).toMatch(/^https:\/\/github\.com\/scoobydrew83\/brickfolio\/issues\/new\?/);
   expect(shareIssueUrl({ ...f, sets: Array.from({ length: 300 }, () => f.sets[0]) })).toBeNull();
+});
+
+describe('minifigure numbers', () => {
+  const nums = (minifigNumbers: object[]) => ({ license: 'CC0-1.0', sets: [], minifigs: [], minifigNumbers });
+
+  it('checks each pair and reports bad ones, duplicates and conflicts', () => {
+    const p = parseCommunity(nums([
+      { rbFigNo: 'fig-012345', figNo: 'LOR115' },
+      { rbFigNo: 'fig-12', figNo: 'sw0001' },
+      { rbFigNo: 'fig-000001', figNo: 'not a number' },
+      { rbFigNo: 'fig-012345', figNo: 'lor115' },
+      { rbFigNo: 'fig-000002', figNo: 'sw0001' },
+      { rbFigNo: 'fig-000002', figNo: 'sw0002' },
+      { rbFigNo: 'fig-000003', figNo: 'sw0002' },
+    ]));
+    expect(p.minifigNumbers[0]).toEqual({ rbFigNo: 'fig-012345', figNo: 'lor115' });
+    expect(p.errors).toHaveLength(3); // short fig number, bad BrickLink number, listed twice
+    expect(p.conflicts).toEqual(['fig-000002: sw0001 and sw0002', 'sw0002: fig-000002 and fig-000003']);
+    // Older files without the section still load.
+    expect(parseCommunity({ license: 'CC0-1.0', sets: [], minifigs: [] }).minifigNumbers).toEqual([]);
+  });
+
+  it('applies the pairs, skips disputed ones, and drops pairs removed from the list but never your own', async () => {
+    await remember(db, [{ kind: 'minifig', scheme: 'rebrickable', value: 'fig-000009', canonical: 'sw0009', source: 'bricklink' }]);
+    const r = await applyCommunity(db, nums([{ rbFigNo: 'fig-012345', figNo: 'lor115' }, { rbFigNo: 'fig-000002', figNo: 'sw0001' }, { rbFigNo: 'fig-000002', figNo: 'sw0002' }]));
+    expect(r).toMatchObject({ minifigNumbers: 1 });
+    expect((await resolve(db, 'minifig', 'rebrickable', 'fig-012345')).canonical).toBe('lor115');
+    expect((await resolve(db, 'minifig', 'rebrickable', 'fig-000002')).canonical).toBeNull();
+    expect(await communityStatus(db, {})).toMatchObject({ minifigNumbers: 1 });
+
+    await applyCommunity(db, nums([]));
+    expect((await resolve(db, 'minifig', 'rebrickable', 'fig-012345')).canonical).toBeNull();
+    expect((await resolve(db, 'minifig', 'rebrickable', 'fig-000009')).canonical).toBe('sw0009');
+  });
+
+  it('shares minifigure numbers only when asked, and only ones the list lacks', async () => {
+    await remember(db, [
+      { kind: 'minifig', scheme: 'rebrickable', value: 'fig-000009', canonical: 'sw0009', source: 'bricklink' },
+      { kind: 'minifig', scheme: 'rebrickable', value: 'fig-012345', canonical: 'lor115', source: 'bricklink' },
+    ]);
+    await db.insert(minifigs).values({ figNo: 'col123', rbFigNo: 'fig-000777', name: 'Owned', qty: 1, condition: 'Used' }).run();
+    await applyCommunity(db, nums([{ rbFigNo: 'fig-012345', figNo: 'lor115' }]));
+    expect((await shareable(db)).minifigNumbers).toBeUndefined();
+    const f = await shareable(db, { minifigNumbers: true });
+    expect(f.minifigNumbers).toEqual([{ rbFigNo: 'fig-000009', figNo: 'sw0009' }, { rbFigNo: 'fig-000777', figNo: 'col123' }]);
+    expect(await shareableFigNumbers(db)).toHaveLength(2);
+    const url = shareIssueUrl(f)!;
+    expect(decodeURIComponent(url)).toContain('fig-000009');
+    expect(new URL(url).searchParams.get('title')).toBe('Community barcodes: 2 codes');
+    expect(parseCommunity(f).errors).toEqual([]);
+  });
 });

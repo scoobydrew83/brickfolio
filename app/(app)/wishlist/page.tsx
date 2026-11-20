@@ -1,4 +1,5 @@
 import { Suspense } from 'react';
+import { can } from '@/lib/service/permissions';
 import { connection } from 'next/server';
 import WishlistView from '@/components/WishlistView';
 import { PageSkeleton } from '@/components/ui';
@@ -7,7 +8,7 @@ import { getCurrency, syncStatus } from '@/lib/service/sets';
 import { listWishlist } from '@/lib/service/wishlist';
 import { bestOffers } from '@/lib/service/offers';
 import { sourceLabel } from '@/lib/service/prices';
-import { bricklink, currentUser } from '@/lib/session';
+import { bricklink, pageBlock, currentAccess } from '@/lib/session';
 
 export const metadata = { title: 'Wishlist' };
 
@@ -21,7 +22,8 @@ export default function Page() {
 
 async function Content() {
   await connection();
-  if (!(await currentUser())) return <p className="py-24 text-center text-fg-3">Not signed in.</p>;
+  const blocked = await pageBlock('member'); // #50
+  if (blocked) return <p className="py-24 text-center text-fg-3">{blocked}</p>;
   const db = await getDb();
   const [items, currency, sync] = await Promise.all([listWishlist(db), getCurrency(db), syncStatus(db)]);
   // The best recent retailer offer for each wish, in its own condition (posted by your flows to /api/v1/prices).
@@ -30,5 +32,5 @@ async function Content() {
     const o = best.get(w.setNo)?.[w.condition === 'Used' ? 'U' : 'N'];
     return o ? [[w.setNo, { ...o, label: sourceLabel(o.source) }]] : [];
   }));
-  return <WishlistView items={items} currency={currency} priced={!!bricklink()} offers={offers} lastSync={sync?.finishedAt ?? null} />;
+  return <WishlistView items={items} currency={currency} priced={!!bricklink()} offers={offers} lastSync={sync?.finishedAt ?? null} canEdit={can((await currentAccess())!, 'shared')} />;
 }

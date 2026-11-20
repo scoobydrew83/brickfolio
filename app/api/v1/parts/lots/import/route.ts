@@ -7,7 +7,7 @@ import { rebrickable } from '@/lib/session';
  * POST /api/v1/parts/lots/import?location=&mode=add|replace&approximate=1 – BrickLink XML (application/xml) or a
  * Rebrickable parts CSV (text/csv) into one location. Returns { batch, lots, pieces, merged, unmapped, skipped }.
  */
-export const POST = api(async (req, { db }) => {
+export const POST = api('shared', async (req, { db }) => {
   const p = new URL(req.url).searchParams;
   const location = p.get('location')?.trim() || null;
   if (location && !(await listLocations(db)).includes(location)) return json({ error: `Unknown location "${location}".` }, 400);

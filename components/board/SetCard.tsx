@@ -7,9 +7,10 @@ import { retailGain, retirement } from '@/lib/retail';
 import { blLink, type Money } from './ui';
 import { Button, Callout, CONDITION_TONE, Chip, IconButton, buttonClass, cx } from '../ui';
 
-export type RowActions = { onEdit: (s: SetRow) => void; onParts: (s: SetRow) => void; onRemove: (s: SetRow) => void; onRetry: (s: SetRow) => void; pending: boolean; money: Money; currency: string };
+/** `canEdit` (#50): false hides edit and remove for a set the viewer can't change. */
+export type RowActions = { onEdit: (s: SetRow) => void; onParts: (s: SetRow) => void; onRemove: (s: SetRow) => void; onRetry: (s: SetRow) => void; pending: boolean; money: Money; currency: string; canEdit?: (s: SetRow) => boolean };
 
-export function SetCard({ s, onEdit, onParts, onRemove, onRetry, pending, money, currency }: { s: SetRow } & RowActions) {
+export function SetCard({ s, onEdit, onParts, onRemove, onRetry, pending, money, currency, canEdit }: { s: SetRow } & RowActions) {
   const theme = s.theme ? (s.subtheme ? `${s.theme} › ${s.subtheme}` : s.theme) : null;
   const href = `/sets/${encodeURIComponent(displayNo(s.setNo))}`;
   const gain = retailGain(s, currency);
@@ -88,8 +89,8 @@ export function SetCard({ s, onEdit, onParts, onRemove, onRetry, pending, money,
           <span className="mr-auto truncate text-xs text-fg-3" title="Location">{locationLabel(s)}</span>
           <a href={blLink(s.setNo)} target="_blank" rel="noreferrer" aria-label="Open on BrickLink" title="Open on BrickLink" className={cx(buttonClass('ghost', 'sm'), 'size-8 px-0')}><ExternalLink aria-hidden className="size-4" /></a>
           <IconButton icon={Puzzle} label="Parts list" onClick={() => onParts(s)} />
-          <IconButton icon={Pencil} label="Edit" onClick={() => onEdit(s)} />
-          <RemoveButton s={s} onRemove={() => onRemove(s)} busy={pending} />
+          {canEdit?.(s) !== false && <IconButton icon={Pencil} label="Edit" onClick={() => onEdit(s)} />}
+          {canEdit?.(s) !== false && <RemoveButton s={s} onRemove={() => onRemove(s)} busy={pending} />}
         </div>
       </div>
     </article>

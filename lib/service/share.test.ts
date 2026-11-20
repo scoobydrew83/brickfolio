@@ -13,7 +13,7 @@ vi.mock('server-only', () => ({}));
 
 let db: DB;
 const NOW = new Date('2026-11-04T12:00:00Z');
-const input = (o: Partial<ShareInput> = {}): ShareInput => ({ name: 'For Dad', showValues: false, showLocations: false, showNotes: false, showMinifigs: true, expiresAt: null, ...o });
+const input = (o: Partial<ShareInput> = {}): ShareInput => ({ collectionId: null, name: 'For Dad', showValues: false, showLocations: false, showNotes: false, showMinifigs: true, expiresAt: null, ...o });
 const make = async (o: Partial<ShareInput> = {}) => {
   const r = await createShareLink(db, input(o));
   if (!r.ok) throw new Error(r.error);

@@ -21,12 +21,17 @@ import { SetForm } from './board/SetForm';
 import { blLink, moneyIn } from './board/ui';
 import { Banner, Button, Callout, CONDITION_TONE, Chip, EmptyState, FilterChip, buttonClass, cx } from './ui';
 
-type Props = { set: SetRow; parts: PartRow[]; prices: { date: string; avgSold: number | null }[]; currency: string; locations: string[]; priced: boolean; model: { fileName: string; author: string | null } | null; library: boolean; builds: BuildMatch[]; view?: '3d'; missing: MissingSummary; missingCopyId: number | null; guide: 'N' | 'U' | null; partout: (Partout & { unpriced: number }) | null; partsPriced: boolean; sources: ValueSources; conditions: Conditions };
+type Props = { set: SetRow; parts: PartRow[]; prices: { date: string; avgSold: number | null }[]; currency: string; locations: string[]; priced: boolean; model: { fileName: string; author: string | null } | null; library: boolean; builds: BuildMatch[]; view?: '3d'; missing: MissingSummary; missingCopyId: number | null; guide: 'N' | 'U' | null; partout: (Partout & { unpriced: number }) | null; partsPriced: boolean; sources: ValueSources; conditions: Conditions; collections?: { id: number; name: string }[]; collection?: number; writable?: 'all' | number[] };
 type Side = { amount: number | null; observedOn: string; sampleSize: number | null } | null;
 type Conditions = { n: Side; u: Side; gap: ConditionGap | null };
 
 /** One set: its photo, value and price history, parts list and copies. */
-export default function SetDetail({ set: s, parts, prices, currency, locations, priced, model, library, builds, view, missing, missingCopyId, guide, partout, partsPriced, sources, conditions }: Props) {
+export default function SetDetail({ set: s, parts, prices, currency, locations, priced, model, library, builds, view, missing, missingCopyId, guide, partout, partsPriced, sources, conditions, collections = [], collection, writable = 'all' }: Props) {
+  // #50: what the viewer may change. Set-wide edits need every copy's collection; set facts (parts, model, price
+  // lookups) at least one; a copy its own; a new copy a collection they can add to.
+  const canCopy = (c: { collectionId: number | null }) => writable === 'all' || writable.includes(c.collectionId ?? 1);
+  const canAll = s.copies.every(canCopy), canAny = s.copies.some(canCopy);
+  const addTo = collections.filter((c) => writable === 'all' || writable.includes(c.id));
   const router = useRouter();
   const money = useMemo(() => moneyIn(currency), [currency]);
   const [editing, setEditing] = useState(false);
@@ -81,13 +86,14 @@ export default function SetDetail({ set: s, parts, prices, currency, locations, 
       {s.blError && (
         <Banner kind="error">
           {s.blError}{' '}
-          {priced && <Button variant="danger-link" className="underline" disabled={pending} onClick={() => act(() => relookupSet(s.setNo), 'Lookup worked.')}>Retry lookup</Button>}
+          {priced && canAny && <Button variant="danger-link" className="underline" disabled={pending} onClick={() => act(() => relookupSet(s.setNo), 'Lookup worked.')}>Retry lookup</Button>}
         </Banner>
       )}
 
       <div className="grid gap-8 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)] lg:gap-10">
         <ModelViewer
           setNo={s.setNo}
+          canEdit={canAny}
           initialView={view}
           model={model}
           library={library}
@@ -172,7 +178,7 @@ export default function SetDetail({ set: s, parts, prices, currency, locations, 
 
           {partout && (
             <PartoutCallout
-              p={partout} complete={s.avgSold} money={money} canPrice={partsPriced} pending={pending}
+              p={partout} complete={s.avgSold} money={money} canPrice={partsPriced && canAny} pending={pending}
               onPrice={() => start(async () => {
                 const r = await priceSetParts(s.setNo);
                 setMessage(r.ok ? { kind: 'ok', text: r.message ?? 'Pricing parts.' } : { kind: 'error', text: r.error });
@@ -181,14 +187,14 @@ export default function SetDetail({ set: s, parts, prices, currency, locations, 
           )}
 
           <div className="flex flex-wrap items-center gap-2">
-            <Button variant="primary" icon={Pencil} onClick={() => setEditing(true)}>Edit</Button>
+            {canAll && <Button variant="primary" icon={Pencil} onClick={() => setEditing(true)}>Edit</Button>}
             <a href={blLink(s.setNo)} target="_blank" rel="noreferrer" className={buttonClass('secondary')}><ExternalLink aria-hidden className="size-4" />BrickLink</a>
-            <span className="ml-auto"><RemoveButton s={s} onRemove={remove} busy={pending} compact={false} /></span>
+            {canAll && <span className="ml-auto"><RemoveButton s={s} onRemove={remove} busy={pending} compact={false} /></span>}
           </div>
 
           <CopiesSection
-            s={s} money={money} pending={pending} label={copyLabel}
-            onAdd={() => setCopyForm('new')} onEdit={(c) => setCopyForm(c)}
+            s={s} money={money} pending={pending} label={copyLabel} collectionName={collections.length > 1 ? (id) => collections.find((c) => c.id === id)?.name ?? null : undefined}
+            onAdd={addTo.length || writable === 'all' ? () => setCopyForm('new') : undefined} onEdit={(c) => setCopyForm(c)} canCopy={canCopy}
             onRemove={(c) => act(() => removeCopy(c.id), s.copies.length > 1 ? `Removed ${copyLabel(c).toLowerCase()}.` : `Removed ${s.name}.`, () => { if (s.copies.length <= 1) router.push('/'); })}
           />
 
@@ -224,12 +230,12 @@ export default function SetDetail({ set: s, parts, prices, currency, locations, 
           <h2 id="parts-title" className="text-xl font-extrabold [font-stretch:110%]">Parts</h2>
           <p className="text-sm text-fg-3 tabular-nums">
             {parts.length ? `${num(s.pieces).toLocaleString()} pieces in ${regular.length} lots` : ''}
-            {priced && !marking && (
+            {priced && !marking && canAny && (
               <Button variant="link" className="ml-3" disabled={pending} onClick={() => act(() => refreshPartsFor(s.setNo), 'Parts list updated.')}>
                 <RefreshCw aria-hidden className="size-4" />{parts.length ? 'Refresh parts list' : 'Fetch parts list'}
               </Button>
             )}
-            {regular.length > 0 && !marking && (
+            {regular.length > 0 && !marking && (!missingCopy || canCopy(missingCopy)) && (
               <Button variant="link" className="ml-3" disabled={pending} onClick={() => { setDraft(saved); setMissingOnly(false); setMarking(true); }}>
                 <ListX aria-hidden className="size-4" />Mark missing parts
               </Button>
@@ -289,6 +295,8 @@ export default function SetDetail({ set: s, parts, prices, currency, locations, 
           copy={copyForm === 'new' ? null : copyForm}
           title={copyForm === 'new' ? `Add a copy of #${displayNo(s.setNo)}` : `Edit ${copyLabel(copyForm).toLowerCase()} of #${displayNo(s.setNo)}`}
           locations={locations}
+          collections={addTo}
+          collection={collection}
           pending={pending}
           onClose={() => setCopyForm(null)}
           onSubmit={(form) => act(() => (copyForm === 'new' ? addCopy(s.setNo, form) : editCopy(copyForm.id, form)), 'Saved.', () => setCopyForm(null))}
@@ -311,13 +319,13 @@ export default function SetDetail({ set: s, parts, prices, currency, locations, 
 }
 
 /** One row per copy: status, condition, place, dates, cost, value and gain, with Edit and Remove. */
-function CopiesSection({ s, money, pending, label, onAdd, onEdit, onRemove }: { s: SetRow; money: (v: unknown) => string; pending: boolean; label: (c: CopyRow) => string; onAdd: () => void; onEdit: (c: CopyRow) => void; onRemove: (c: CopyRow) => void }) {
+function CopiesSection({ s, money, pending, label, onAdd, onEdit, onRemove, collectionName, canCopy = () => true }: { s: SetRow; money: (v: unknown) => string; pending: boolean; label: (c: CopyRow) => string; onAdd?: () => void; onEdit: (c: CopyRow) => void; onRemove: (c: CopyRow) => void; collectionName?: (id: number) => string | null; canCopy?: (c: CopyRow) => boolean }) {
   const [confirm, setConfirm] = useState<number | null>(null);
   return (
     <section aria-labelledby="copies-title">
       <div className="flex items-baseline justify-between gap-3">
         <h2 id="copies-title" className="text-sm font-semibold">Copies</h2>
-        <Button variant="link" icon={Plus} disabled={pending} onClick={onAdd}>Add a copy</Button>
+        {onAdd && <Button variant="link" icon={Plus} disabled={pending} onClick={onAdd}>Add a copy</Button>}
       </div>
       <Callout className="mt-2 divide-y divide-line">
         {s.copies.map((c) => {
@@ -335,12 +343,12 @@ function CopiesSection({ s, money, pending, label, onAdd, onEdit, onRemove }: { 
                 <span className="ml-auto text-right font-bold tabular-nums">{c.status === 'parted_out' ? 'not counted' : money(c.estValue)}</span>
               </div>
               <p className="mt-0.5 text-xs text-fg-3">
-                {[c.location ?? 'No location', c.acquiredDate && `acquired ${c.acquiredDate}`, c.buildDate && `built ${c.buildDate}`, cost != null && `cost ${money(cost)}`].filter(Boolean).join(' · ')}
+                {[collectionName?.(c.collectionId ?? 1), c.location ?? 'No location', c.acquiredDate && `acquired ${c.acquiredDate}`, c.buildDate && `built ${c.buildDate}`, cost != null && `cost ${money(cost)}`].filter(Boolean).join(' · ')}
                 {gain !== null && <> · <b className={gain >= 0 ? 'text-ok' : 'text-danger'}>{gain >= 0 ? '+' : '−'}{money(Math.abs(gain))}</b></>}
                 {fallback && <> · priced from {c.estGuide === 'U' ? 'used' : 'new'} sales</>}
               </p>
               {c.notes && <p className="mt-0.5 whitespace-pre-line text-xs text-fg-2">{c.notes}</p>}
-              <div className="mt-1 flex gap-1">
+              {canCopy(c) && <div className="mt-1 flex gap-1">
                 <Button variant="ghost" size="sm" icon={Pencil} disabled={pending} onClick={() => onEdit(c)}>Edit</Button>
                 {confirm === c.id ? (
                   <>
@@ -350,7 +358,7 @@ function CopiesSection({ s, money, pending, label, onAdd, onEdit, onRemove }: { 
                 ) : (
                   <Button variant="ghost" size="sm" disabled={pending} onClick={() => setConfirm(c.id)} className="text-danger">Remove</Button>
                 )}
-              </div>
+              </div>}
             </div>
           );
         })}

@@ -1,11 +1,12 @@
 import { api, json } from '@/lib/api';
 import { layoutWantedListXml } from '@/lib/service/layouts';
+import { readable } from '@/lib/service/permissions';
 import { idOf } from '../params';
 
 /** GET /api/v1/layouts/:id/wanted.xml – the parts to buy for the layout, as a BrickLink Wanted List upload. */
-export const GET = api<{ id: string }>(async (_req, { db, params }) => {
+export const GET = api<{ id: string }>('member', async (_req, { db, params, access }) => {
   const id = idOf(params.id);
-  const w = id === null ? null : await layoutWantedListXml(db, id);
+  const w = id === null ? null : await layoutWantedListXml(db, id, readable(access));
   if (!w) return json({ error: 'Layout not found.' }, 404);
   const file = w.name.replace(/[^A-Za-z0-9-]+/g, '-').replace(/^-|-$/g, '').slice(0, 60) || `layout-${id}`;
   return new Response(w.xml, {

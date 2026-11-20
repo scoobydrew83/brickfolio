@@ -52,9 +52,10 @@ const median = (xs: number[]) => {
 const gain = (value: number | null, retail: number | null, rc: string | null, currency: string) =>
   value != null && retail && rc === currency ? Math.round(((value - retail) / retail) * 1000) / 10 : null;
 
-export async function getRadar(db: DB, todayIso = new Date().toISOString().slice(0, 10)): Promise<Radar> {
+/** The Radar for every collection or one (#49); the wishlist is shared, so wished sets always show. */
+export async function getRadar(db: DB, todayIso = new Date().toISOString().slice(0, 10), opts: { collectionId?: import('./collections').ReadScope } = {}): Promise<Radar> {
   const currency = await getCurrency(db);
-  const owned = await listSets(db);
+  const owned = await listSets(db, { collectionId: opts.collectionId ?? 'all' });
   const wishes = await db.select().from(wishlist).all();
 
   // Stored prices for retired sets, in the guide most of each set's copies need today.

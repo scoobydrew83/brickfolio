@@ -16,7 +16,8 @@ import { Banner, Button, Chip, Dialog, EmptyState, IconButton, buttonClass, cx, 
 export type WishOffer = { amount: number; label: string; url: string | null; observedAt: string };
 const ago = (iso: string) => { const d = Math.floor((Date.now() - Date.parse(iso)) / 86_400_000); return d <= 0 ? 'today' : d === 1 ? 'yesterday' : `${d} days ago`; };
 
-export default function WishlistView({ items, currency, priced, offers = {}, lastSync = null }: { items: WishRow[]; currency: string; priced: boolean; offers?: Record<string, WishOffer>; lastSync?: string | null }) {
+/** `canEdit` (#50): admins and editors of any collection change the shared wishlist; viewers only look. */
+export default function WishlistView({ items, currency, priced, offers = {}, lastSync = null, canEdit = true }: { items: WishRow[]; currency: string; priced: boolean; offers?: Record<string, WishOffer>; lastSync?: string | null; canEdit?: boolean }) {
   const money = useMemo(() => moneyIn(currency), [currency]);
   const [editing, setEditing] = useState<WishRow | 'new' | null>(null);
   const [message, setMessage] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
@@ -37,7 +38,7 @@ export default function WishlistView({ items, currency, priced, offers = {}, las
       <PageHeader
         title="Wishlist"
         badge={<span className="text-sm text-fg-3 tabular-nums">{items.length} {items.length === 1 ? 'set' : 'sets'}</span>}
-        actions={<span className="flex flex-wrap gap-2"><Link href="/scan" className={buttonClass()}><ScanBarcode aria-hidden className="size-4" />Scan</Link><Button variant="primary" icon={Plus} onClick={() => setEditing('new')}>Add to wishlist</Button></span>}
+        actions={canEdit ? <span className="flex flex-wrap gap-2"><Link href="/scan" className={buttonClass()}><ScanBarcode aria-hidden className="size-4" />Scan</Link><Button variant="primary" icon={Plus} onClick={() => setEditing('new')}>Add to wishlist</Button></span> : undefined}
       >
         <p>{priced ? <>Prices are BrickLink average sold prices for the condition you want, checked in the daily sync{lastSync ? <> (last run {timeAgo(lastSync)})</> : null} and when you add a set. Offers your own flows post show under the price.</> : 'Add BrickLink API keys to price your wishlist.'}</p>
       </PageHeader>
@@ -86,10 +87,10 @@ export default function WishlistView({ items, currency, priced, offers = {}, las
                 })()}
               </span>
               <span className="col-span-3 flex items-center justify-end gap-0.5 sm:col-span-1">
-                <Button size="sm" icon={Check} disabled={pending} onClick={() => act(() => acquireWish(w.setNo), `Added ${w.name ?? displayNo(w.setNo)} to your sets.`)}>Got it</Button>
+                {canEdit && <Button size="sm" icon={Check} disabled={pending} onClick={() => act(() => acquireWish(w.setNo), `Added ${w.name ?? displayNo(w.setNo)} to your sets.`)}>Got it</Button>}
                 <a href={blLink(w.setNo)} target="_blank" rel="noreferrer" aria-label="Open on BrickLink" title="Open on BrickLink" className={cx(buttonClass('ghost', 'sm'), 'size-8 px-0')}><ExternalLink aria-hidden className="size-4" /></a>
-                <IconButton icon={Pencil} label="Edit" onClick={() => setEditing(w)} />
-                <IconButton icon={Trash2} label="Remove from wishlist" tone="danger" disabled={pending} onClick={() => act(() => removeWish(w.setNo), `Removed ${w.name ?? displayNo(w.setNo)} from your wishlist.`)} />
+                {canEdit && <IconButton icon={Pencil} label="Edit" onClick={() => setEditing(w)} />}
+                {canEdit && <IconButton icon={Trash2} label="Remove from wishlist" tone="danger" disabled={pending} onClick={() => act(() => removeWish(w.setNo), `Removed ${w.name ?? displayNo(w.setNo)} from your wishlist.`)} />}
               </span>
             </li>
           ))}

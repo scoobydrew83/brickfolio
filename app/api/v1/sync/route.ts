@@ -5,10 +5,10 @@ import { runSync, startSync, syncStatus } from '@/lib/service/sets';
 import { brickMinifig, brickPartPrice, brickPrice, brickStore, bricklink, brickset, rebrickable } from '@/lib/session';
 
 /** GET /api/v1/sync – status of the latest sync. */
-export const GET = api(async (_req, { db }) => json({ sync: await syncStatus(db) }));
+export const GET = api('member', async (_req, { db }) => json({ sync: await syncStatus(db) }));
 
 /** POST /api/v1/sync – start a full sync (BrickLink prices, plus Rebrickable themes and Brickset retail prices when their keys are set) in the background (409 if one is running). Also used by the scheduler. */
-export const POST = api(async (_req, { db }) => {
+export const POST = api('admin', async (_req, { db }) => {
   const lookup = bricklink();
   if (!lookup) return json({ error: 'BrickLink API keys are not set.' }, 400);
   const r = await startSync(db);

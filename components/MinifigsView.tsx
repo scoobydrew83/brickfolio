@@ -14,9 +14,15 @@ const key = (m: Pick<MinifigRow, 'figNo' | 'rbFigNo'>) => (m.figNo ?? m.rbFigNo)
 const blFigLink = (no: string) => `https://www.bricklink.com/v2/catalog/catalogitem.page?M=${encodeURIComponent(no)}`;
 const rbFigLink = (no: string) => `https://rebrickable.com/minifigs/${encodeURIComponent(no)}/`;
 
-type Props = { figs: MinifigRow[]; series: CmfSeries[]; locations: string[]; currency: string; priced: boolean; hasRebrickable: boolean };
+/** `collections` (#49): shown when there are two or more; `collection` is the selected one (new figures go there). */
+type Props = { figs: MinifigRow[]; series: CmfSeries[]; locations: string[]; currency: string; priced: boolean; hasRebrickable: boolean; collections?: { id: number; name: string }[]; collection?: number; writable?: 'all' | number[] };
 
-export default function MinifigsView({ figs, series, locations, currency, priced, hasRebrickable }: Props) {
+export default function MinifigsView({ figs, series, locations, currency, priced, hasRebrickable, collections = [], collection, writable = 'all' }: Props) {
+  // #50: add, change and remove only where the viewer can.
+  const canFig = (id: number) => writable === 'all' || writable.includes(id);
+  const addTo = collections.filter((c) => canFig(c.id));
+  const canAdd = writable === 'all' || writable.length > 0;
+  const colName = (id: number) => (collections.length > 1 ? collections.find((c) => c.id === id)?.name ?? null : null);
   const money = useMemo(() => moneyIn(currency), [currency]);
   const t = useMemo(() => minifigTotals(figs), [figs]);
   const [editing, setEditing] = useState<MinifigRow | 'new' | null>(null);
@@ -38,7 +44,7 @@ export default function MinifigsView({ figs, series, locations, currency, priced
       <PageHeader
         title="Minifigures"
         badge={<span className="text-sm text-fg-3 tabular-nums">{t.count} figures · {t.copies} copies</span>}
-        actions={<Button variant="primary" icon={Plus} onClick={() => setEditing('new')}>Add minifig</Button>}
+        actions={canAdd ? <Button variant="primary" icon={Plus} onClick={() => setEditing('new')}>Add minifig</Button> : undefined}
       >
         <p>Loose figures you own, not the ones inside your sets. {priced ? 'Prices are BrickLink average sold prices, refreshed in the daily sync.' : 'Add BrickLink API keys to price them.'}</p>
       </PageHeader>
@@ -54,7 +60,7 @@ export default function MinifigsView({ figs, series, locations, currency, priced
       )}
 
       {figs.length === 0 ? (
-        <EmptyState title="No minifigures yet" action={<Button variant="primary" icon={Plus} onClick={() => setEditing('new')}>Add a minifig</Button>}>
+        <EmptyState title="No minifigures yet" action={canAdd ? <Button variant="primary" icon={Plus} onClick={() => setEditing('new')}>Add a minifig</Button> : undefined}>
           Add a figure by its BrickLink number, like sw0001, or tick figures off a Collectible Minifigures series below.
         </EmptyState>
       ) : (
@@ -70,6 +76,7 @@ export default function MinifigsView({ figs, series, locations, currency, priced
                   <span className="font-semibold tabular-nums">{m.figNo ?? m.rbFigNo}</span>
                   <Chip tone={CONDITION_TONE[m.condition] ?? 'neutral'}>{m.condition}</Chip>
                   {m.qty > 1 && <span>{m.qty} copies</span>}
+                  {colName(m.collectionId) && <span>· {colName(m.collectionId)}</span>}
                   {m.location && <span>· {m.location}</span>}
                   {m.year && <span>· {m.year}</span>}
                   {!m.figNo && <span>· No BrickLink number, so no price</span>}
@@ -80,8 +87,8 @@ export default function MinifigsView({ figs, series, locations, currency, priced
                 <span className="text-lg font-extrabold tabular-nums [font-stretch:112%]">{money(m.estValue)}</span>
                 <span className="flex items-center gap-0.5">
                   <a href={m.figNo ? blFigLink(m.figNo) : rbFigLink(m.rbFigNo!)} target="_blank" rel="noreferrer" aria-label={m.figNo ? 'Open on BrickLink' : 'Open on Rebrickable'} title={m.figNo ? 'Open on BrickLink' : 'Open on Rebrickable'} className={cx(buttonClass('ghost', 'sm'), 'size-8 px-0')}><ExternalLink aria-hidden className="size-4" /></a>
-                  <IconButton icon={Pencil} label="Edit" onClick={() => setEditing(m)} />
-                  <IconButton icon={Trash2} label={m.qty > 1 ? 'Remove one copy' : 'Remove'} tone="danger" disabled={pending} onClick={() => act(() => removeMinifig(key(m)), m.qty > 1 ? `Removed one ${m.name}.` : `Removed ${m.name}.`)} />
+                  {canFig(m.collectionId) && <IconButton icon={Pencil} label="Edit" onClick={() => setEditing(m)} />}
+                  {canFig(m.collectionId) && <IconButton icon={Trash2} label={m.qty > 1 ? 'Remove one copy' : 'Remove'} tone="danger" disabled={pending} onClick={() => act(() => removeMinifig(key(m), m.collectionId), m.qty > 1 ? `Removed one ${m.name}.` : `Removed ${m.name}.`)} />}
                 </span>
               </span>
             </li>
@@ -95,6 +102,8 @@ export default function MinifigsView({ figs, series, locations, currency, priced
         <FigForm
           fig={editing === 'new' ? null : editing}
           locations={locations}
+          collections={addTo}
+          collection={collection}
           pending={pending}
           dupe={dupe}
           money={money}
@@ -102,7 +111,7 @@ export default function MinifigsView({ figs, series, locations, currency, priced
           onAddAnother={() => dupe && act(() => addMinifig(dupe.form, true), `Added another ${dupe.name}.`, close)}
           onSubmit={(form) => editing === 'new'
             ? act(() => addMinifig(form), 'Added.', close, form)
-            : act(() => editMinifig(key(editing), form), 'Saved.', close)}
+            : act(() => editMinifig(key(editing), form, editing.collectionId), 'Saved.', close)}
         />
       )}
     </div>
@@ -177,10 +186,11 @@ function CmfChecklist({ series, hasRebrickable, onTicked }: { series: CmfSeries[
 
 type FormProps = {
   fig: MinifigRow | null; locations: string[]; pending: boolean; dupe: { name: string; qty: number } | null; money: Money;
+  collections: { id: number; name: string }[]; collection?: number;
   onClose: () => void; onAddAnother: () => void; onSubmit: (form: Record<string, unknown>) => void;
 };
 
-function FigForm({ fig, locations, pending, dupe, money, onClose, onAddAnother, onSubmit }: FormProps) {
+function FigForm({ fig, locations, collections, collection, pending, dupe, money, onClose, onAddAnother, onSubmit }: FormProps) {
   const footer = dupe ? (
     <><Button variant="ghost" onClick={onClose}>Skip</Button><Button variant="primary" loading={pending} onClick={onAddAnother}>Add another (makes {dupe.qty + 1})</Button></>
   ) : (
@@ -205,6 +215,13 @@ function FigForm({ fig, locations, pending, dupe, money, onClose, onAddAnother, 
               {locations.map((l) => <option key={l}>{l}</option>)}
             </select>
           </label>
+          {collections.length > 1 && (
+            <label className="block text-sm">Collection
+              <select name="collectionId" defaultValue={String(fig?.collectionId ?? collection ?? collections[0].id)} className={field}>
+                {collections.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </label>
+          )}
           <label className="block text-sm">Qty
             <input name="qty" type="number" min={1} max={999} step={1} defaultValue={fig?.qty ?? 1} className={field} />
           </label>

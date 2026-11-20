@@ -6,7 +6,8 @@ import { PageSkeleton } from '@/components/ui';
 import { getDb } from '@/lib/db';
 import { getLayout, layoutNeeds } from '@/lib/service/layouts';
 import { ensureColors } from '@/lib/service/parts';
-import { brickColors, currentUser } from '@/lib/session';
+import { readable } from '@/lib/service/permissions';
+import { brickColors, currentAccess, currentUser, pageBlock } from '@/lib/session';
 
 const idOf = (s: string) => (/^\d+$/.test(s) ? Number(s) : null);
 
@@ -28,12 +29,14 @@ export default function Page({ params }: PageProps<'/layouts/[id]'>) {
 
 async function Content({ params }: Pick<PageProps<'/layouts/[id]'>, 'params'>) {
   await connection();
-  if (!(await currentUser())) return <p className="py-24 text-center text-fg-3">Not signed in.</p>;
+  const blocked = await pageBlock('member'); // #50
+  if (blocked) return <p className="py-24 text-center text-fg-3">{blocked}</p>;
   const id = idOf((await params).id);
   const db = await getDb();
-  const layout = id === null ? undefined : await getLayout(db, id);
+  const scope = readable((await currentAccess())!);
+  const layout = id === null ? undefined : await getLayout(db, id, scope);
   if (!layout) notFound();
   await ensureColors(db, brickColors());
-  const needs = (await layoutNeeds(db, layout.id))!;
+  const needs = (await layoutNeeds(db, layout.id, scope))!;
   return <LayoutEditor layout={layout} needs={needs} />;
 }

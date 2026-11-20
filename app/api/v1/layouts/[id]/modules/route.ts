@@ -1,9 +1,10 @@
 import { api, body, fromResult, json } from '@/lib/api';
 import { addModule, getLayout, parseModuleInput } from '@/lib/service/layouts';
+import { readable } from '@/lib/service/permissions';
 import { idOf } from '../params';
 
 /** POST /api/v1/layouts/:id/modules – { x, y, w?, h?, rotation?, kind?, name?, notes? }. 409 when it overlaps or doesn't fit. */
-export const POST = api<{ id: string }>(async (req, { db, params }) => {
+export const POST = api<{ id: string }>('shared', async (req, { db, params, access }) => {
   const id = idOf(params.id);
   if (id === null) return json({ error: 'Layout not found.' }, 404);
   const b = await body(req);
@@ -12,5 +13,5 @@ export const POST = api<{ id: string }>(async (req, { db, params }) => {
   if (!p.ok) return json({ error: p.error }, 400);
   const r = await addModule(db, id, p.value);
   if (!r.ok) return fromResult(r);
-  return json({ module: (await getLayout(db, id))!.modules.find((m) => m.id === r.id) }, 201);
+  return json({ module: (await getLayout(db, id, readable(access)))!.modules.find((m) => m.id === r.id) }, 201);
 });

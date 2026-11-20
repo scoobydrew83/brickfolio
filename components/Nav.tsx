@@ -19,14 +19,16 @@ const isActive = (path: string, href: string) =>
 
 /** Top-level page links: a row in the header on wider screens, a bottom tab bar on phones. */
 /** `alerts` = wishlist sets under target, shown as a count on the Wishlist link; `update` = a newer release is out (a dot on Settings). */
-export function Nav({ variant = 'top', alerts = 0, update = false }: { variant?: 'top' | 'bottom'; alerts?: number; update?: boolean }) {
+/** `admin` (#50): Store and Orders (your BrickLink store's business) are shown to admins only. */
+export function Nav({ variant = 'top', alerts = 0, update = false, admin = true }: { variant?: 'top' | 'bottom'; alerts?: number; update?: boolean; admin?: boolean }) {
+  const links = admin ? LINKS : LINKS.filter(([href]) => href !== '/store' && href !== '/orders');
   const dot = (href: string) => update && href === '/settings';
   const badge = (href: string) => (href === '/wishlist' && alerts > 0 ? alerts : 0);
   const path = usePathname();
   if (variant === 'bottom') {
     return (
-      <nav aria-label="Pages" className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-8 border-t border-line bg-surface/95 pb-[env(safe-area-inset-bottom)] backdrop-blur sm:hidden">
-        {LINKS.map(([href, label, Icon]) => {
+      <nav aria-label="Pages" style={{ gridTemplateColumns: `repeat(${links.length}, minmax(0, 1fr))` }} className="fixed inset-x-0 bottom-0 z-30 grid border-t border-line bg-surface/95 pb-[env(safe-area-inset-bottom)] backdrop-blur sm:hidden">
+        {links.map(([href, label, Icon]) => {
           const active = isActive(path, href);
           return (
             <Link key={href} href={href} aria-current={active ? 'page' : undefined} className={`flex flex-col items-center gap-0.5 py-2 text-2xs font-medium ${active ? 'text-fg' : 'text-fg-3'}`}>
@@ -46,7 +48,7 @@ export function Nav({ variant = 'top', alerts = 0, update = false }: { variant?:
   }
   return (
     <nav className="hidden gap-0.5 text-sm sm:flex lg:gap-1" aria-label="Pages">
-      {LINKS.map(([href, label, Icon]) => {
+      {links.map(([href, label, Icon]) => {
         const active = isActive(path, href);
         return (
           <Link

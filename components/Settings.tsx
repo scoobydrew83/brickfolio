@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useState, useTransition } from 'react';
-import { updateStatus, clearImageCache, imageCacheStatus, type ImageCacheStatus, shareCodes, syncCommunityNow, bricksetStatus, downloadLdrawLibrary, ldrawLibraryStatus, rebrickableStatus, syncBricksetNow, syncRebrickableNow, testBricksetKey, testRebrickableKey, type BricksetStatus, type RebrickableStatus, addLocation, createShareLink, createToken, deleteLocation, revokeShareLink, importFile, renameLocation, revokeToken, setCurrency, setValueSource, type Result } from '@/app/actions';
+import { updateStatus, clearImageCache, imageCacheStatus, type ImageCacheStatus, shareCodes, syncCommunityNow, bricksetStatus, downloadLdrawLibrary, ldrawLibraryStatus, rebrickableStatus, syncBricksetNow, syncRebrickableNow, testBricksetKey, testRebrickableKey, type BricksetStatus, type RebrickableStatus, addLocation, addCollection, renameCollection, deleteCollection, reorderCollections, createShareLink, createToken, deleteLocation, revokeShareLink, importFile, renameLocation, revokeToken, setCurrency, setValueSource, type Result } from '@/app/actions';
 import { Copy } from 'lucide-react';
 import { Banner, Button, Select, field } from './ui';
 import { PageHeader } from './shell/PageHeader';
@@ -8,19 +8,24 @@ import type { LibraryStatus } from '@/lib/ldraw/download';
 import type { BarcodeCapabilities } from '@/lib/barcode/providers';
 import type { CommunityStatus } from '@/lib/barcode/community';
 import Link from 'next/link';
+import { PeopleSection } from './settings/People';
+import type { Person } from '@/lib/service/permissions';
 
 type BarcodeStatus = { caps: BarcodeCapabilities; saved: { total: number; user: number; community: number; brickset: number; providers: number }; community: CommunityStatus };
 
 import type { ShareLinkRow } from '@/lib/service/share';
 import type { UpdateStatus } from '@/lib/service/updates';
 
-type Token = { id: number; name: string; prefix: string; createdAt: string; lastUsedAt: string | null };
-type Props = { version: UpdateStatus; locations: string[]; currency: string; valueSource: { current: string; options: [string, string][] }; tokens: Token[]; shares: ShareLinkRow[]; user: string; authMode: string; priced: boolean; alerts: boolean; rebrickable: RebrickableStatus; brickset: BricksetStatus; ldraw: LibraryStatus; barcodes: BarcodeStatus };
+type Token = { id: number; name: string; prefix: string; createdAt: string; lastUsedAt: string | null; owner?: string | null };
+type Props = { version: UpdateStatus; locations: string[]; currency: string; valueSource: { current: string; options: [string, string][] }; tokens: Token[]; shares: ShareLinkRow[]; user: string; authMode: string; priced: boolean; alerts: boolean; rebrickable: RebrickableStatus; brickset: BricksetStatus; ldraw: LibraryStatus; barcodes: BarcodeStatus ; collections: CollectionInfo[] ; people: Person[]; me: string; envAdmins: boolean };
+
+/** A collection with how many copies and minifigures it holds (#49). */
+export type CollectionInfo = { id: number; name: string; copies: number; minifigs: number };
 
 const h2 = 'text-lg font-extrabold [font-stretch:110%]';
 const section = 'space-y-3 border-t border-line pt-6';
 
-export default function Settings({ version, locations, currency, valueSource, tokens, shares, user, authMode, priced, alerts, rebrickable, brickset, ldraw, barcodes }: Props) {
+export default function Settings({ people, me, envAdmins, collections, version, locations, currency, valueSource, tokens, shares, user, authMode, priced, alerts, rebrickable, brickset, ldraw, barcodes }: Props) {
   const [pending, start] = useTransition();
   const [message, setMessage] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
   const [newToken, setNewToken] = useState<string | null>(null);
@@ -36,6 +41,23 @@ export default function Settings({ version, locations, currency, valueSource, to
       <PageHeader title="Settings" />
 
       {message && <Banner kind={message.kind} onDismiss={() => setMessage(null)}>{message.text}</Banner>}
+
+      <section className={section} aria-labelledby="collections-title">
+        <h2 id="collections-title" className={h2}>Collections</h2>
+        <p className="text-sm text-fg-3">
+          Separate groups with their own totals, history and share links: a personal shelf and a store&apos;s stock, each child&apos;s sets, a sealed investment pile.
+          {collections.length < 2 ? ' Add a second one and a switcher appears in the header.' : ' The switcher in the header picks which one every page shows.'} The wishlist, store and loose parts are shared.
+        </p>
+        <ul className="divide-y divide-line">
+          {collections.map((c, i) => <CollectionRow key={c.id} c={c} first={i === 0} last={i === collections.length - 1} only={collections.length === 1} ids={collections.map((x) => x.id)} pending={pending} run={run} />)}
+        </ul>
+        <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); const f = e.currentTarget; const name = String(new FormData(f).get('name')); run(() => addCollection(name), `Added ${name}.`, () => f.reset()); }}>
+          <input name="name" required maxLength={40} placeholder="New collection" aria-label="New collection" className={`${field} mt-0`} />
+          <Button type="submit" disabled={pending}>Add</Button>
+        </form>
+      </section>
+
+      <PeopleSection people={people} collections={collections} me={me} envAdmins={envAdmins} />
 
       <section className={section}>
         <h2 className={h2}>Locations</h2>
@@ -76,7 +98,15 @@ export default function Settings({ version, locations, currency, valueSource, to
           <input name="file" type="file" accept=".csv,text/csv" required className="min-w-0 max-w-full text-sm file:mr-3 file:rounded-control file:border file:border-line-strong file:bg-surface file:px-3 file:py-1.5 file:text-fg" />
           <Button type="submit" disabled={pending}>{pending ? 'Importing…' : 'Import'}</Button>
         </form>
-        <a href="/api/v1/export.csv" className="inline-block text-sm text-link hover:underline">Download all sets as CSV</a>
+        {collections.length > 1 ? (
+          <form action="/api/v1/export.csv" method="get" className="flex flex-wrap items-center gap-2 text-sm">
+            <select name="collection" defaultValue="all" aria-label="Collection to export" className={`${field} mt-0 w-auto`}>
+              <option value="all">All collections</option>
+              {collections.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+            <Button type="submit">Download sets as CSV</Button>
+          </form>
+        ) : <a href="/api/v1/export.csv" className="inline-block text-sm text-link hover:underline">Download all sets as CSV</a>}
       </section>
 
       <section className={section}>
@@ -88,12 +118,20 @@ export default function Settings({ version, locations, currency, valueSource, to
           <label className="text-sm">Name on the report <span className="text-fg-3">(optional)</span>
             <input name="owner" maxLength={80} placeholder="Your name" className={`${field} w-56`} />
           </label>
+          {collections.length > 1 && (
+            <label className="text-sm">Collection
+              <select name="collection" defaultValue="all" className={`${field} w-auto`}>
+                <option value="all">All collections</option>
+                {collections.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </label>
+          )}
           <label className="flex items-center gap-2 pb-2 text-sm"><input type="checkbox" name="photos" value="1" /> Include photos</label>
           <Button type="submit">Download PDF</Button>
         </form>
       </section>
 
-      <ShareSection links={shares} />
+      <ShareSection links={shares} collections={collections} />
 
       <section className={section}>
         <h2 className={h2}>API tokens</h2>
@@ -110,7 +148,7 @@ export default function Settings({ version, locations, currency, valueSource, to
         <ul className="divide-y divide-line text-sm">
           {tokens.map((t) => (
             <li key={t.id} className="flex items-center justify-between gap-2 py-2">
-              <span><b>{t.name}</b> <code className="text-xs text-fg-3">{t.prefix}…</code></span>
+              <span><b>{t.name}</b> <code className="text-xs text-fg-3">{t.prefix}…</code>{t.owner && t.owner !== me && <span className="text-xs text-fg-3"> · {t.owner}</span>}</span>
               <span className="text-xs text-fg-3">{t.lastUsedAt ? `used ${t.lastUsedAt.slice(0, 10)}` : 'never used'}</span>
               <Button variant="danger-link" onClick={() => run(() => revokeToken(t.id), `Revoked ${t.name}.`)} disabled={pending}>Revoke</Button>
             </li>
@@ -160,6 +198,35 @@ function LocationRow({ name, pending, run }: { name: string; pending: boolean; r
       <span className="flex gap-3">
         <Button variant="link" onClick={() => setEditing(true)}>Rename</Button>
         <Button variant="danger-link" onClick={() => run(() => deleteLocation(name), `Deleted ${name}.`)} disabled={pending}>Delete</Button>
+      </span>
+    </li>
+  );
+}
+
+/** One collection: rename, move up or down, delete (refused while it holds anything, so nothing moves silently). */
+function CollectionRow({ c, first, last, only, ids, pending, run }: { c: CollectionInfo; first: boolean; last: boolean; only: boolean; ids: number[]; pending: boolean; run: (fn: () => Promise<Result>, ok: string) => void }) {
+  const [editing, setEditing] = useState(false);
+  const move = (by: -1 | 1) => { const i = ids.indexOf(c.id); const next = [...ids]; [next[i], next[i + by]] = [next[i + by], next[i]]; run(() => reorderCollections(next), 'Order saved.'); };
+  if (editing) {
+    return (
+      <li className="py-2">
+        <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); const to = String(new FormData(e.currentTarget).get('to')); run(() => renameCollection(c.id, to), `Renamed ${c.name} to ${to}.`); setEditing(false); }}>
+          <input name="to" defaultValue={c.name} required maxLength={40} autoFocus aria-label={`New name for ${c.name}`} className={`${field} mt-0`} />
+          <Button type="submit" disabled={pending}>Save</Button>
+          <Button variant="ghost" onClick={() => setEditing(false)}>Cancel</Button>
+        </form>
+      </li>
+    );
+  }
+  const holds = [c.copies && `${c.copies} cop${c.copies === 1 ? 'y' : 'ies'}`, c.minifigs && `${c.minifigs} minifig${c.minifigs === 1 ? '' : 's'}`].filter(Boolean).join(', ') || 'empty';
+  return (
+    <li className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 py-2 text-sm">
+      <span><span className="font-medium">{c.name}</span> <span className="text-xs text-fg-3">· {holds}{first && !only ? ' · new items go here under All collections' : ''}</span></span>
+      <span className="flex gap-3">
+        {!only && <Button variant="link" disabled={pending || first} aria-label={`Move ${c.name} up`} onClick={() => move(-1)}>Up</Button>}
+        {!only && <Button variant="link" disabled={pending || last} aria-label={`Move ${c.name} down`} onClick={() => move(1)}>Down</Button>}
+        <Button variant="link" onClick={() => setEditing(true)}>Rename</Button>
+        {!only && <Button variant="danger-link" onClick={() => run(() => deleteCollection(c.id), `Deleted ${c.name}.`)} disabled={pending}>Delete</Button>}
       </span>
     </li>
   );
@@ -301,7 +368,15 @@ function BricksetSection({ initial }: { initial: BricksetStatus }) {
 function BarcodeSection({ status: { caps, saved, community } }: { status: BarcodeStatus }) {
   const on = caps.providers.filter((p) => p.enabled);
   const [note, setNote] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
-  const [share, setShare] = useState<{ count: number; issueUrl: string | null; href: string } | null>(null);
+  const [share, setShare] = useState<{ count: number; issueUrl: string | null; href: string; figNumbers: number; available: number } | null>(null);
+  const [withFigs, setWithFigs] = useState(false);
+  const runShare = (figs: boolean) => start(async () => {
+    const r = await shareCodes({ minifigNumbers: figs });
+    if (!r.ok) return setNote({ kind: 'error', text: r.error });
+    const figNumbers = r.file.minifigNumbers?.length ?? 0;
+    const count = r.file.sets.length + r.file.minifigs.length + figNumbers;
+    setShare({ count, issueUrl: r.issueUrl, figNumbers, available: r.figNumbersAvailable, href: URL.createObjectURL(new Blob([JSON.stringify(r.file, null, 1)], { type: 'application/json' })) });
+  });
   const [pending, start] = useTransition();
   const code = (s: string) => <code className="rounded-chip bg-muted px-1">{s}</code>;
   return (
@@ -326,23 +401,31 @@ function BarcodeSection({ status: { caps, saved, community } }: { status: Barcod
           </p>
           <h3 className="pt-2 font-semibold">Community list</h3>
           <p className="text-sm text-fg-3">
-            {community.enabled ? <>Barcodes and minifigure codes other collectors confirmed and a maintainer reviewed (CC0): <b className="text-fg tabular-nums">{community.sets}</b> barcodes and <b className="text-fg tabular-nums">{community.minifigs}</b> minifigure codes here{community.syncedAt ? <>, updated {new Date(community.syncedAt).toLocaleDateString()}</> : null}. Downloaded in the daily sync; nothing is sent.</> : <>Turned off with {code('COMMUNITY_LIST=off')}.</>}
+            {community.enabled ? <>Barcodes and minifigure codes other collectors confirmed and a maintainer reviewed (CC0): <b className="text-fg tabular-nums">{community.sets}</b> barcodes and <b className="text-fg tabular-nums">{community.minifigs}</b> minifigure codes{community.minifigNumbers ? <> and <b className="text-fg tabular-nums">{community.minifigNumbers}</b> Rebrickable → BrickLink minifigure numbers</> : null} here{community.syncedAt ? <>, updated {new Date(community.syncedAt).toLocaleDateString()}</> : null}. Downloaded in the daily sync; nothing is sent.</> : <>Turned off with {code('COMMUNITY_LIST=off')}.</>}
           </p>
           {note && <Banner kind={note.kind} onDismiss={() => setNote(null)}>{note.text}</Banner>}
           <div className="flex flex-wrap gap-2">
             {community.enabled && <Button loading={pending} onClick={() => start(async () => { const r = await syncCommunityNow(); setNote(r.ok ? { kind: 'ok', text: r.message ?? 'Updated.' } : { kind: 'error', text: r.error }); })}>Update now</Button>}
-            <Button disabled={pending} onClick={() => start(async () => {
-              const r = await shareCodes();
-              if (!r.ok) return setNote({ kind: 'error', text: r.error });
-              const count = r.file.sets.length + r.file.minifigs.length;
-              setShare({ count, issueUrl: r.issueUrl, href: URL.createObjectURL(new Blob([JSON.stringify(r.file, null, 1)], { type: 'application/json' })) });
-            })}>Share my codes</Button>
+            <Button disabled={pending} onClick={() => runShare(withFigs)}>Share my codes</Button>
           </div>
           {share && (
             <div className="space-y-2 rounded-control bg-subtle p-3 text-sm" aria-live="polite">
+              {share.available > 0 && (
+                <label className="flex items-start gap-2">
+                  <input type="checkbox" className="mt-1" checked={withFigs} disabled={pending} onChange={(e) => { setWithFigs(e.target.checked); runShare(e.target.checked); }} />
+                  <span>
+                    Include <b className="tabular-nums">{share.available}</b> minifigure number{share.available === 1 ? '' : 's'} (Rebrickable → BrickLink) this server matched from your sets&apos; parts lists.
+                    They save other collectors BrickLink calls, but they hint at which sets you own.
+                  </span>
+                </label>
+              )}
               {share.count === 0 ? <p className="text-fg-3">You haven’t confirmed any codes yet. Scan a box nobody knows and type its set number (or pick the figure in an opened minifigure box) to confirm one.</p> : (
                 <>
-                  <p>{share.count} code{share.count === 1 ? '' : 's'} you confirmed. Only barcodes, set numbers and figure names are shared: nothing else about your collection. By sharing you release them under CC0.</p>
+                  <p>
+                    {share.count - share.figNumbers > 0 && <>{share.count - share.figNumbers} code{share.count - share.figNumbers === 1 ? '' : 's'} you confirmed{share.figNumbers ? ' and ' : '. '}</>}
+                    {share.figNumbers > 0 && <>{share.figNumbers} minifigure number{share.figNumbers === 1 ? '' : 's'}. </>}
+                    Only barcodes, set numbers, figure names{share.figNumbers ? ' and figure numbers' : ''} are shared: nothing else about your collection. By sharing you release them under CC0.
+                  </p>
                   <p className="flex flex-wrap gap-3">
                     {share.issueUrl && <a href={share.issueUrl} target="_blank" rel="noreferrer" className="font-medium text-link hover:underline">Send as a GitHub issue</a>}
                     <a href={share.href} download="brickfolio-codes.json" className="font-medium text-link hover:underline">Download the file</a>
@@ -506,7 +589,8 @@ function Credits() {
 }
 
 /** Read-only links to the collection, for people without access to the app. The URL is shown once. */
-function ShareSection({ links }: { links: ShareLinkRow[] }) {
+export function ShareSection({ links, collections, allowAll = true }: { links: ShareLinkRow[]; collections: CollectionInfo[]; allowAll?: boolean }) {
+  const colName = (id: number | null) => (id == null ? null : collections.find((c) => c.id === id)?.name ?? `collection ${id}`);
   const [pending, start] = useTransition();
   const [message, setMessage] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
   const [url, setUrl] = useState<string | null>(null);
@@ -531,7 +615,7 @@ function ShareSection({ links }: { links: ShareLinkRow[] }) {
       <ul className="divide-y divide-line text-sm">
         {links.map((l) => (
           <li key={l.id} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 py-2">
-            <span><b>{l.name}</b> <code className="text-xs text-fg-3">{l.prefix}…</code> <span className="text-xs text-fg-3">· {opts(l)}</span></span>
+            <span><b>{l.name}</b> <code className="text-xs text-fg-3">{l.prefix}…</code> <span className="text-xs text-fg-3">· {collections.length > 1 ? `${colName(l.collectionId) ?? 'all collections'}, ` : ''}{opts(l)}</span></span>
             <span className="text-xs text-fg-3">
               created {day(l.createdAt)} · {l.expiresAt ? (l.expired ? `expired ${day(l.expiresAt)}` : `expires ${day(l.expiresAt)}`) : 'never expires'} · {l.lastViewedAt ? `viewed ${l.views}×, last ${day(l.lastViewedAt)}` : 'not viewed yet'}
             </span>
@@ -549,7 +633,7 @@ function ShareSection({ links }: { links: ShareLinkRow[] }) {
           const f = e.currentTarget, d = new FormData(f);
           const form = {
             name: d.get('name'), showValues: d.get('showValues') === 'on', showLocations: d.get('showLocations') === 'on', showNotes: d.get('showNotes') === 'on',
-            showMinifigs: d.get('showMinifigs') === 'on', expires: expiry === 'date' ? d.get('expiresOn') : expiry,
+            showMinifigs: d.get('showMinifigs') === 'on', expires: expiry === 'date' ? d.get('expiresOn') : expiry, collectionId: d.get('collectionId') ?? 'all',
           };
           start(async () => {
             const r = await createShareLink(form);
@@ -567,6 +651,14 @@ function ShareSection({ links }: { links: ShareLinkRow[] }) {
           <label className="flex items-center gap-1.5"><input type="checkbox" name="showMinifigs" defaultChecked className="size-4" />Include minifigures</label>
         </fieldset>
         <div className="flex flex-wrap items-end gap-2 text-sm">
+          {(collections.length > 1 || !allowAll) && (
+            <label className="block">Shows
+              <select name="collectionId" defaultValue={allowAll ? 'all' : String(collections[0]?.id ?? '')} className={field}>
+                {allowAll && <option value="all">All collections</option>}
+                {collections.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </label>
+          )}
           <label className="block">Expires
             <select value={expiry} onChange={(e) => setExpiry(e.target.value)} className={field}>
               <option value="never">Never</option><option value="7">In 7 days</option><option value="30">In 30 days</option><option value="date">On a date</option>

@@ -20,12 +20,15 @@ import { listLots } from '../service/lots';
 import { sizeLabel } from '../layouts';
 import { resolveBarcode } from '../barcode/resolve';
 import { resolveFigCode } from '../barcode/figcodes';
+import { collectionCounts, listCollections, type ReadScope } from '../service/collections';
+import { clampScope, readable, type Access } from '../service/permissions';
 
 export const PROTOCOL_VERSIONS = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'] as const;
 const VERSION = pkg.version;
 
 type Json = Record<string, unknown>;
-type Tool = { name: string; title: string; description: string; inputSchema: Json; run: (db: DB, args: Json) => Promise<unknown> };
+/** `access` (#50): what the caller may see; every tool answers only from collections they can read. */
+type Tool = { name: string; title: string; description: string; inputSchema: Json; run: (db: DB, args: Json, access: Access) => Promise<unknown> };
 
 const str = (v: unknown, max = 200) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
 const int = (v: unknown, def: number, min: number, max: number) => { const n = Number(v); return Number.isFinite(n) ? Math.min(Math.max(Math.round(n), min), max) : def; };
@@ -43,17 +46,39 @@ const brief = (s: SetRow) => {
   };
 };
 
+/** The optional `collection` argument (#49): a collection name or id; every collection when left out. */
+const collectionArg = { collection: { type: 'string', description: 'A collection name or id (see list_collections). Every collection when left out.' } };
+async function scopeFor(db: DB, a: Json, access: Access): Promise<ReadScope> {
+  const v = str(a.collection, 40);
+  if (!v || v.toLowerCase() === 'all') return clampScope(access, 'all')!;
+  const all = (await listCollections(db)).filter((c) => access.admin || access.roles.has(c.id));
+  const hit = all.find((c) => String(c.id) === v) ?? all.find((c) => c.name.toLowerCase() === v.toLowerCase());
+  if (!hit) throw new Error(`No collection called ${v}. Collections: ${all.map((c) => c.name).join(', ')}.`);
+  return hit.id;
+}
+
 /** The condition whose guide partout() should price a set in: the guide most of its copies need. */
 const guideCondition = (s: SetRow) => (setGuide(s.copies) === 'N' ? 'New' as const : 'Used' as const);
 
 export const TOOLS: Tool[] = [
   {
+    name: 'list_collections',
+    title: 'Collections',
+    description: 'The named collections in this Brickfolio (for example a personal shelf, a store\'s stock, each child\'s sets), with how many set copies and minifigures each holds. Other tools take a `collection` name or id to answer for one collection; without it they cover every collection.',
+    inputSchema: { type: 'object', properties: {} },
+    async run(db, _a, access) {
+      const counts = await collectionCounts(db);
+      return { collections: (await listCollections(db)).filter((c) => access.admin || access.roles.has(c.id)).map((c) => ({ id: c.id, name: c.name, ...(counts.get(c.id) ?? { copies: 0, minifigs: 0 }) })) };
+    },
+  },
+  {
     name: 'collection_summary',
     title: 'Collection summary',
     description: 'Totals for the whole collection: sets, copies (each physical copy of a set: sealed, built, in progress; parted out copies are not counted), minifigures, estimated value (BrickLink average sold prices, less missing pieces), cost basis and gain where purchase prices are recorded, change over the stored value history, gain over original retail (Brickset), and value by location, condition and theme. Start here.',
-    inputSchema: { type: 'object', properties: {} },
-    async run(db) {
-      const [sets, figs, hist, currency, sync] = await Promise.all([listSets(db), listMinifigs(db), listHistory(db), getCurrency(db), syncStatus(db)]);
+    inputSchema: { type: 'object', properties: { ...collectionArg } },
+    async run(db, a, access) {
+      const scope = { collectionId: await scopeFor(db, a, access) };
+      const [sets, figs, hist, currency, sync] = await Promise.all([listSets(db, scope), listMinifigs(db, scope), listHistory(db, scope), getCurrency(db), syncStatus(db)]);
       const t = totals(sets), f = minifigTotals(figs), d = dailyHistory(hist);
       const group = (k: 'location' | 'condition' | 'theme') => groupTotals(sets, k).map((g) => ({ [k]: g.label, sets: g.count, copies: g.copies, estValue: r2(g.estValue) }));
       return {
@@ -79,12 +104,13 @@ export const TOOLS: Tool[] = [
         availability: { type: 'string', enum: ['Available', 'Retiring soon', 'Retired'] },
         sort: { type: 'string', enum: ['setNo', 'value', 'name', 'year'], default: 'value' },
         limit: { type: 'integer', minimum: 1, maximum: 200, default: 25 },
+        ...collectionArg,
       },
     },
-    async run(db, a) {
+    async run(db, a, access) {
       const sorts = ['setNo', 'value', 'name', 'year'];
       const f: Filters = { q: str(a.query), location: str(a.location), condition: str(a.condition), status: str(a.status), theme: str(a.theme), availability: str(a.availability), sort: (sorts.includes(str(a.sort)) ? str(a.sort) : 'value') as Filters['sort'] };
-      const all = filterSets(await listSets(db), f);
+      const all = filterSets(await listSets(db, { collectionId: await scopeFor(db, a, access) }), f);
       return { currency: await getCurrency(db), matched: all.length, sets: all.slice(0, int(a.limit, 25, 1, 200)).map(brief) };
     },
   },
@@ -93,8 +119,8 @@ export const TOOLS: Tool[] = [
     title: 'Set details',
     description: 'Everything about one set you own: value and BrickLink low/average/high sold prices with the number of sales, recent price history, retail and retirement (Brickset), part-out value (what its parts would sell for), each copy (status, condition, location, dates, cost basis, value and gain), marked missing parts and notes.',
     inputSchema: { type: 'object', properties: { setNo: { type: 'string', description: 'Set number, e.g. 10497 or 10497-1' } }, required: ['setNo'] },
-    async run(db, a) {
-      const s = await getSet(db, fullSetNo(str(a.setNo, 12)));
+    async run(db, a, access) {
+      const s = await getSet(db, fullSetNo(str(a.setNo, 12)), { collectionId: readable(access) });
       if (!s) throw new Error(`Set ${str(a.setNo, 12)} isn't in the collection.`);
       const currency = await getCurrency(db);
       const [prices, po, unpriced, missing, guides] = await Promise.all([priceHistory(db, s.setNo), partout(db, s.id, guideCondition(s), currency), unpricedLots(db, s.id, guideCondition(s), currency), listMissing(db, s.id, pickCopy(s, null, false)?.id ?? null), brickLinkGuides(db, 'set', s.setNo, currency)]);
@@ -114,7 +140,7 @@ export const TOOLS: Tool[] = [
     title: 'Wishlist',
     description: 'Sets on the wishlist with the target price, the current BrickLink average sold price for the wanted condition, whether it is under target, and retail and retirement dates.',
     inputSchema: { type: 'object', properties: {} },
-    async run(db) {
+    async run(db, _a, _access) {
       const rows = await listWishlist(db);
       return {
         currency: await getCurrency(db),
@@ -129,9 +155,9 @@ export const TOOLS: Tool[] = [
     name: 'retirement_radar',
     title: 'Retirement Radar',
     description: 'Sets you own or want that are expected to retire, grouped by month (Brickset dates), and retired sets you own ranked by growth per year since retiring (from stored BrickLink prices, or retail when no early price is stored; `thin` marks short history). Flags BrickLink Designer Program and SMART Play sets.',
-    inputSchema: { type: 'object', properties: { months: { type: 'integer', minimum: 1, maximum: 60, default: 24, description: 'How many months ahead to include' } } },
-    async run(db, a) {
-      const r = await getRadar(db);
+    inputSchema: { type: 'object', properties: { months: { type: 'integer', minimum: 1, maximum: 60, default: 24, description: 'How many months ahead to include' }, ...collectionArg } },
+    async run(db, a, access) {
+      const r = await getRadar(db, undefined, { collectionId: await scopeFor(db, a, access) });
       const until = new Date(Date.parse(r.today) + int(a.months, 24, 1, 60) * 30.44 * 86_400_000).toISOString().slice(0, 7);
       const item = (i: (typeof r.retired)[number]) => ({ kind: i.kind, setNo: displayNo(i.setNo), name: i.name, flags: i.flags, exitDate: i.exitDate, qty: i.qty, value: r2(i.value), retail: i.retailPrice, gainPct: i.gainPct, growth: i.growth, newOverUsedPct: i.gapPct });
       return { currency: r.currency, today: r.today, totals: r.totals, retiring: r.retiring.filter((m) => m.month <= until).map((m) => ({ month: m.month, items: m.items.map(item) })), retired: r.retired.map(item) };
@@ -142,18 +168,18 @@ export const TOOLS: Tool[] = [
     title: 'Designer Program projects',
     description: 'BrickLink Designer Program projects the owner follows: stage, pre-order window (upcoming, open with days left, closed), price, and whether they own or want the set.',
     inputSchema: { type: 'object', properties: {} },
-    async run(db) {
-      return { currency: await getCurrency(db), projects: (await listProjects(db)).map(({ openAlertedAt: _o, closeAlertedAt: _c, createdAt: _a, updatedAt: _u, ...p }) => ({ ...p, setNo: p.setNo ? displayNo(p.setNo) : null })) };
+    async run(db, _a, access) {
+      return { currency: await getCurrency(db), projects: (await listProjects(db, undefined, readable(access))).map(({ openAlertedAt: _o, closeAlertedAt: _c, createdAt: _a, updatedAt: _u, ...p }) => ({ ...p, setNo: p.setNo ? displayNo(p.setNo) : null })) };
     },
   },
   {
     name: 'list_minifigures',
     title: 'Minifigures',
     description: 'Loose minifigures the owner has (not the ones inside sets), with BrickLink numbers, condition, location, quantity and BrickLink average sold price. Optional text filter.',
-    inputSchema: { type: 'object', properties: { query: { type: 'string' }, limit: { type: 'integer', minimum: 1, maximum: 500, default: 100 } } },
-    async run(db, a) {
+    inputSchema: { type: 'object', properties: { query: { type: 'string' }, limit: { type: 'integer', minimum: 1, maximum: 500, default: 100 }, ...collectionArg } },
+    async run(db, a, access) {
       const q = str(a.query).toLowerCase();
-      const rows = (await listMinifigs(db)).filter((m) => !q || [m.figNo, m.rbFigNo, m.name, m.location].some((v) => String(v ?? '').toLowerCase().includes(q)));
+      const rows = (await listMinifigs(db, { collectionId: await scopeFor(db, a, access) })).filter((m) => !q || [m.figNo, m.rbFigNo, m.name, m.location].some((v) => String(v ?? '').toLowerCase().includes(q)));
       return {
         currency: await getCurrency(db), totals: minifigTotals(rows),
         minifigures: rows.slice(0, int(a.limit, 100, 1, 500)).map((m) => ({ figNo: m.figNo, rebrickableNo: m.rbFigNo, name: m.name, qty: m.qty, condition: m.condition, location: m.location, avgSold: m.avgSold, sales: m.qtySold })),
@@ -165,8 +191,8 @@ export const TOOLS: Tool[] = [
     title: 'Search parts',
     description: 'Search the parts lists of every set you own by part number, part name, color or set number, e.g. "which of my sets have 3001 in red?". Returns matching lines with the set they belong to.',
     inputSchema: { type: 'object', properties: { query: { type: 'string' }, limit: { type: 'integer', minimum: 1, maximum: 500, default: 50 } }, required: ['query'] },
-    async run(db, a) {
-      const r = await searchParts(db, { q: str(a.query, 80), limit: int(a.limit, 50, 1, 500) });
+    async run(db, a, access) {
+      const r = await searchParts(db, { q: str(a.query, 80), limit: int(a.limit, 50, 1, 500), collectionId: readable(access) });
       return { total: r.total, parts: r.parts.map((p) => ({ partNo: p.partNo, name: p.name, color: p.colorName, type: p.type, qty: p.qty, alternate: p.alternate, setNo: displayNo(p.setNo), setName: p.setName })) };
     },
   },
@@ -175,7 +201,7 @@ export const TOOLS: Tool[] = [
     title: 'Loose parts',
     description: 'Loose parts the owner keeps outside sets (bins, drawers, parted-out sets), searchable by part number, name, colour or location, with what is reserved on each lot for which build.',
     inputSchema: { type: 'object', properties: { query: { type: 'string' }, location: { type: 'string' }, limit: { type: 'integer', minimum: 1, maximum: 500, default: 100 } } },
-    async run(db, a) {
+    async run(db, a, _access) {
       const r = await listLots(db, { q: str(a.query, 80) || undefined, location: str(a.location, 80) || undefined, limit: int(a.limit, 100, 1, 500) });
       return {
         total: r.total, pieces: r.pieces,
@@ -188,14 +214,14 @@ export const TOOLS: Tool[] = [
     title: 'MILS layout parts to buy',
     description: "The owner's MILS layouts (grids of 32 × 32-stud baseplate modules), and for one layout the parts it still needs: each build's whole parts list (parts in the owner's sets are not taken off, since those sets stand on the layout too) plus parts marked missing from linked set copies, totalled by part and colour. Without `layout`, lists the layouts.",
     inputSchema: { type: 'object', properties: { layout: { type: 'string', description: 'Layout name or id' }, limit: { type: 'integer', minimum: 1, maximum: 1000, default: 200 } } },
-    async run(db, a) {
+    async run(db, a, access) {
       const all = await listLayouts(db);
       const q = str(a.layout, 80).toLowerCase();
       const list = all.map((l) => ({ id: l.id, name: l.name, size: sizeLabel(l.cols, l.rows), modules: l.modules }));
       if (!q) return { layouts: list };
       const l = all.find((x) => String(x.id) === q) ?? all.find((x) => x.name.toLowerCase() === q) ?? all.find((x) => x.name.toLowerCase().includes(q));
       if (!l) return { error: `No layout matches "${str(a.layout, 80)}".`, layouts: list };
-      const n = (await layoutNeeds(db, l.id))!;
+      const n = (await layoutNeeds(db, l.id, readable(access)))!;
       return {
         layout: { id: l.id, name: l.name, size: sizeLabel(l.cols, l.rows) }, totals: n.totals, builds: n.builds, setCopies: n.copies, unmappedLines: n.unmapped, buildsWithoutPartsList: n.buildsWithoutParts,
         lines: n.lines.slice(0, int(a.limit, 200, 1, 1000)).map((x) => ({ type: x.type, partNo: x.partNo, color: x.colorName, name: x.name, need: x.need, inLooseParts: x.inLots, toBuy: x.toBuy })),
@@ -206,9 +232,9 @@ export const TOOLS: Tool[] = [
     name: 'value_history',
     title: 'Value history',
     description: 'Daily totals of the collection (estimated value, sets, copies, pieces) saved after each sync, oldest first.',
-    inputSchema: { type: 'object', properties: { days: { type: 'integer', minimum: 1, maximum: 3650, default: 90 } } },
-    async run(db, a) {
-      const d = dailyHistory(await listHistory(db));
+    inputSchema: { type: 'object', properties: { days: { type: 'integer', minimum: 1, maximum: 3650, default: 90 }, ...collectionArg } },
+    async run(db, a, access) {
+      const d = dailyHistory(await listHistory(db, { collectionId: await scopeFor(db, a, access) }));
       return { currency: await getCurrency(db), history: d.slice(-int(a.days, 90, 1, 3650)) };
     },
   },
@@ -217,8 +243,8 @@ export const TOOLS: Tool[] = [
     title: 'Look up a barcode',
     description: 'Which set a box barcode (12-digit UPC or 13-digit EAN) belongs to, from barcodes saved by the scanner and the Brickset sync, and whether it is in the collection or on the wishlist. Never asks an outside service; an unknown barcode comes back as not_found.',
     inputSchema: { type: 'object', properties: { barcode: { type: 'string', description: 'Digits under the barcode, e.g. 673419264150' } }, required: ['barcode'] },
-    async run(db, a) {
-      const r = await resolveBarcode(db, str(a.barcode, 40), { providers: [], readOnly: true });
+    async run(db, a, access) {
+      const r = await resolveBarcode(db, str(a.barcode, 40), { providers: [], readOnly: true, scope: readable(access) });
       if (r.status === 'invalid') throw new Error(r.error);
       return { status: r.status, barcode: r.barcode, candidates: r.candidates.map((c) => ({ setNo: displayNo(c.setNo), name: c.name, year: c.year, source: c.source, confirmed: c.verified, ownedQty: c.owned?.qty ?? 0, onWishlist: c.wished })) };
     },
@@ -228,8 +254,8 @@ export const TOOLS: Tool[] = [
     title: 'Look up a minifigure box code',
     description: 'Which Collectible Minifigure is in a box, from the square code on its bottom (e.g. "6472866 444S3"): your confirmed codes, the community list, then a fan-collected table (L-Scan). Says whether you own the figure.',
     inputSchema: { type: 'object', properties: { code: { type: 'string' } }, required: ['code'] },
-    async run(db, a) {
-      const r = await resolveFigCode(db, str(a.code, 64));
+    async run(db, a, access) {
+      const r = await resolveFigCode(db, str(a.code, 64), { scope: readable(access) });
       if (r.status === 'invalid') throw new Error(r.error);
       return { status: r.status, code: r.code, candidates: r.candidates.map((c) => ({ name: c.name, series: c.series, source: c.source, exactFactory: c.exact, ownedQty: c.owned })) };
     },
@@ -244,7 +270,8 @@ type RpcOut = { jsonrpc: '2.0'; id: string | number | null; result?: unknown; er
 const fail = (id: Rpc['id'], code: number, message: string): RpcOut => ({ jsonrpc: '2.0', id: id ?? null, error: { code, message } });
 
 /** Handles one JSON-RPC message. Returns null for notifications (no reply). */
-export async function handleRpc(db: DB, msg: Rpc): Promise<RpcOut | null> {
+/** `access`: the caller's (#50); everything when not given (tests, AUTH_MODE=none callers that pass none). */
+export async function handleRpc(db: DB, msg: Rpc, access: Access = { login: 'local', admin: true, roles: new Map() }): Promise<RpcOut | null> {
   if (!msg || typeof msg !== 'object' || msg.jsonrpc !== '2.0' || typeof msg.method !== 'string') return fail(msg?.id, -32600, 'Invalid request');
   if (msg.id === undefined || msg.id === null) return null; // notification, e.g. notifications/initialized
   const { id, method, params = {} } = msg;
@@ -272,7 +299,7 @@ export async function handleRpc(db: DB, msg: Rpc): Promise<RpcOut | null> {
       const tool = TOOLS.find((t) => t.name === params.name);
       if (!tool) return fail(id, -32602, `Unknown tool: ${String(params.name)}`);
       try {
-        const data = await tool.run(db, (params.arguments && typeof params.arguments === 'object' ? params.arguments : {}) as Json);
+        const data = await tool.run(db, (params.arguments && typeof params.arguments === 'object' ? params.arguments : {}) as Json, access);
         return { jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: JSON.stringify(data) }], structuredContent: data, isError: false } };
       } catch (e) {
         return { jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: e instanceof Error ? e.message : String(e) }], isError: true } };

@@ -1,5 +1,6 @@
 // "What can I build?": alternate builds (MOCs) of sets you own, from Rebrickable, matched against every part in
 // your collection's parts lists. Fetched a little at a time in the daily sync to stay under Rebrickable's limit.
+import type { ReadScope } from './collections';
 import { and, asc, eq, isNotNull, isNull, lt, ne, or, sql } from 'drizzle-orm';
 import { PartsUnavailable, type BuildSource, type MocSource, type PartLookup, type RbBuildPart } from '../rebrickable/client';
 import type { DB } from '../db/types';
@@ -134,8 +135,8 @@ function cover(qty: number, k: string, a: Awaited<ReturnType<typeof availability
 }
 
 /** How much of each build you could make from what you own, best first. Filter by source set or kind. */
-export async function buildMatches(db: DB, filter: { sourceSetNo?: string; kind?: BuildKind } = {}): Promise<BuildMatch[]> {
-  const a = await availability(db);
+export async function buildMatches(db: DB, filter: { sourceSetNo?: string; kind?: BuildKind; collectionId?: ReadScope } = {}): Promise<BuildMatch[]> {
+  const a = await availability(db, filter.collectionId ?? 'all');
   const list = await db.select().from(builds)
     .where(and(filter.sourceSetNo ? eq(builds.sourceSetNo, fullSetNo(filter.sourceSetNo)) : undefined, filter.kind ? eq(builds.kind, filter.kind) : undefined)).all();
   const parts = await db.select().from(buildParts).all();
@@ -168,10 +169,10 @@ export async function buildMatches(db: DB, filter: { sourceSetNo?: string; kind?
  * sets, free loose parts and loose parts reserved for it. Parts Rebrickable couldn't map to BrickLink numbers are left
  * out and counted in `skipped`. Null when the build isn't known.
  */
-export async function wantedListXml(db: DB, mocNo: string): Promise<{ xml: string; items: number; skipped: number; name: string } | null> {
+export async function wantedListXml(db: DB, mocNo: string, collectionId: ReadScope = 'all'): Promise<{ xml: string; items: number; skipped: number; name: string } | null> {
   const b = await db.select().from(builds).where(eq(builds.mocNo, mocNo)).get();
   if (!b) return null;
-  const a = await availability(db);
+  const a = await availability(db, collectionId);
   const mine = a.reservedBy.get(b.id);
   const lines = await db.select().from(buildParts).where(eq(buildParts.buildId, b.id)).orderBy(asc(buildParts.partNo)).all();
   const items: WantedItem[] = [];

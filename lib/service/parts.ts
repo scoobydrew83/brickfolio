@@ -1,11 +1,12 @@
 // Each set's parts list (the sheet's Parts tab) and BrickLink color names. A list comes from Rebrickable when it
 // maps to BrickLink numbers (from the local catalog or the API, see rebrickableParts), else from BrickLink.
+import { scopeIds, type ReadScope } from './collections';
 import { and, asc, desc, eq, inArray, isNotNull, like, or, sql } from 'drizzle-orm';
 import { partCounts, type Color, type SetPart } from '../bricklink/client';
 import { insertChunked } from '../db/chunk';
-import { colors, minifigs, PARTS_SOURCES, rbInventories, rbInventoryParts, rbParts, setParts, sets } from '../db/schema';
+import { colors, identifiers, minifigs, PARTS_SOURCES, rbInventories, rbInventoryParts, rbParts, setParts, sets } from '../db/schema';
 import type { DB } from '../db/types';
-import { remember, resolveMany, type Resolved } from '../identifiers/resolve';
+import { CHUNK, remember, resolveMany, type Resolved } from '../identifiers/resolve';
 import type { RbExternal, SetPartsSource } from '../rebrickable/client';
 import { setNo as fullSetNo } from '../sets';
 import { rbMappings } from './identifiers';
@@ -82,16 +83,41 @@ async function localLines(db: DB, setNo: string): Promise<RbLine[] | null> {
   return rows.length ? rows.map((r) => ({ ...r, name: r.name ?? r.partNo })) : null;
 }
 
-/** BrickLink numbers for Rebrickable minifigures: the identifiers map, else a minifigure you own that has both numbers. */
+/** Which Rebrickable → BrickLink minifigure pair wins: yours, then one learned from BrickLink's own list, then the community list. */
+const FIG_SOURCE_ORDER = ['user', 'bricklink', 'community'];
+const warnedFigs = new Set<string>();
+
+/**
+ * BrickLink numbers for Rebrickable minifigures: the identifiers map, else a minifigure you own that has both numbers.
+ * Unlike other lookups, a pair learned here from BrickLink's own list of one of your sets beats the community list,
+ * and a disagreement is logged once so a maintainer can fix the list.
+ */
 async function figNumbers(db: DB, figNos: string[]): Promise<Map<string, string>> {
   const out = new Map<string, string>();
-  for (const [no, r] of await resolveMany(db, 'minifig', 'rebrickable', figNos)) { const bl = blOf(r); if (bl) out.set(no, bl); }
-  const rest = figNos.filter((n) => !out.has(n));
+  const nos = [...new Set(figNos.map((n) => n.toLowerCase()))];
+  const rows: { value: string; canonical: string; source: string; verified: boolean }[] = [];
+  for (let i = 0; i < nos.length; i += CHUNK) {
+    rows.push(...await db.select({ value: identifiers.value, canonical: identifiers.canonical, source: identifiers.source, verified: identifiers.verified }).from(identifiers)
+      .where(and(eq(identifiers.kind, 'minifig'), eq(identifiers.scheme, 'rebrickable'), inArray(identifiers.value, nos.slice(i, i + CHUNK)))).all());
+  }
+  const rank = (r: (typeof rows)[number]) => (r.verified ? -1 : 0) + (FIG_SOURCE_ORDER.includes(r.source) ? FIG_SOURCE_ORDER.indexOf(r.source) : FIG_SOURCE_ORDER.length);
+  for (const no of nos) {
+    const mine = rows.filter((r) => r.value === no).sort((a, b) => rank(a) - rank(b));
+    if (!mine.length) continue;
+    out.set(no, mine[0].canonical);
+    const community = mine.find((r) => r.source === 'community');
+    if (community && community.canonical !== mine[0].canonical && !warnedFigs.has(no)) {
+      warnedFigs.add(no);
+      console.warn(`Minifigure ${no}: the community list says ${community.canonical}, but ${mine[0].source === 'bricklink' ? "BrickLink's list for one of your sets" : 'you'} said ${mine[0].canonical}. Using ${mine[0].canonical}.`);
+    }
+  }
+  const rest = figNos.filter((n) => !out.has(n.toLowerCase()));
   if (rest.length) {
     const own = await db.select({ rb: minifigs.rbFigNo, bl: minifigs.figNo }).from(minifigs).where(and(inArray(minifigs.rbFigNo, rest), isNotNull(minifigs.figNo))).all();
-    for (const o of own) if (o.rb && o.bl) out.set(o.rb, o.bl);
+    for (const o of own) if (o.rb && o.bl) out.set(o.rb.toLowerCase(), o.bl);
   }
-  return out;
+  // Keyed as given.
+  return new Map(figNos.flatMap((n) => (out.has(n.toLowerCase()) ? [[n, out.get(n.toLowerCase())!] as [string, string]] : [])));
 }
 
 /** A set's minifigure on Rebrickable, with its BrickLink number when one is known. */
@@ -222,12 +248,18 @@ export async function listSetParts(db: DB, setId: number): Promise<PartRow[]> {
     .orderBy(asc(setParts.alternate), asc(setParts.matchNo), asc(setParts.type), asc(setParts.partNo)).all();
 }
 
-export type PartSearch = { q?: string; type?: string; limit?: number; offset?: number };
+/** `collectionId`: only sets with a copy in that collection (#49). */
+export type PartSearch = { q?: string; type?: string; limit?: number; offset?: number; collectionId?: ReadScope };
 
 /** Searches parts across every set, like filtering the Parts tab. Matches part #, name or color. */
 export async function searchParts(db: DB, f: PartSearch): Promise<{ parts: PartSearchRow[]; total: number }> {
   const q = f.q?.trim();
+  const ids = scopeIds(f.collectionId ?? 'all');
+  const inCollection = !ids ? undefined : ids.length
+    ? sql`exists (select 1 from "set_copies" c where c."set_id" = ${setParts.setId} and coalesce(c."collection_id", 1) in (${sql.join(ids.map((i) => sql`${i}`), sql`, `)}))`
+    : sql`0 = 1`;
   const where = and(
+    inCollection,
     f.type ? eq(setParts.type, f.type) : undefined,
     q ? or(like(setParts.partNo, `%${q}%`), like(setParts.name, `%${q}%`), like(colors.name, `%${q}%`), like(sets.setNo, `%${q}%`)) : undefined,
   );
