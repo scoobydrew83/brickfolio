@@ -1,0 +1,65 @@
+# Render Blueprint, free instance type: Brickfolio from the Dockerfile with its database on libSQL/Turso (the free
+# instance type has no persistent disk, and it spins down after 15 minutes without traffic, so the app's own
+# scheduler can't be relied on). A cron job wakes it once a day, starts the sync through GET /api/v1/sync/cron and
+# keeps it awake until the sync is done.
+# Cron jobs are a paid service type (billed per second of run time, with a monthly minimum: check current pricing);
+# delete the cron job below and use any free external scheduler instead if you prefer (docs/hosting.md#render).
+# Use it from the Render Dashboard: New → Blueprint → this repository → Blueprint path deploy/render-turso.yaml.
+services:
+  - type: web
+    name: brickfolio
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    healthCheckPath: /api/health
+    autoDeployTrigger: "off"
+    envVars:
+      - key: DATABASE_URL # libsql://<db>-<org>.turso.io
+        sync: false
+      - key: DATABASE_AUTH_TOKEN
+        sync: false
+      - key: AUTH_MODE
+        value: better-auth
+      - key: BETTER_AUTH_SECRET
+        generateValue: true
+      - key: BETTER_AUTH_URL
+        fromService:
+          name: brickfolio
+          type: web
+          envVarKey: RENDER_EXTERNAL_URL
+      - key: CRON_SECRET
+        generateValue: true
+      - key: SYNC_HOUR # the cron job below starts the sync; the in-process scheduler would only run while awake
+        value: "off"
+      - key: TZ
+        value: UTC
+      - key: BRICKLINK_CONSUMER_KEY
+        sync: false
+      - key: BRICKLINK_CONSUMER_SECRET
+        sync: false
+      - key: BRICKLINK_TOKEN
+        sync: false
+      - key: BRICKLINK_TOKEN_SECRET
+        sync: false
+
+  - type: cron
+    name: brickfolio-daily-sync
+    runtime: node
+    plan: 0.5c-512mb
+    schedule: "17 4 * * *" # UTC
+    buildCommand: "true" # the script needs nothing installed
+    # --wait: checks the sync's progress once a minute until it's done, which keeps the free instance awake (it
+    # spins down after 15 minutes without requests) and puts the result in this job's logs.
+    startCommand: node scripts/cron-trigger.mjs --wait
+    autoDeployTrigger: "off"
+    envVars:
+      - key: BRICKFOLIO_URL
+        fromService:
+          name: brickfolio
+          type: web
+          envVarKey: RENDER_EXTERNAL_URL
+      - key: CRON_SECRET
+        fromService:
+          name: brickfolio
+          type: web
+          envVarKey: CRON_SECRET

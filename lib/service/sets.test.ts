@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Lookup, PriceLookup } from '../bricklink/client';
 import { eq } from 'drizzle-orm';
 import { priceObservations } from '../db/schema';
@@ -205,4 +205,45 @@ it('logs one line per sync and groups set lookup errors', () => {
   lines.length = 0;
   svc.logSync(100, 1, 1, new Map([['BrickLink is down for maintenance.', ['10316-1']]]), '', (l) => lines.push(l));
   expect(lines[0]).toBe('Sync finished: 0 of 100 sets looked up, 1 failed, 99 skipped');
+});
+
+describe('sync with a time limit (Vercel)', () => {
+  it('looks up the oldest sets first, stops at the deadline and still finishes the run', async () => {
+    const { sets: setsTable } = await import('../db/schema');
+    for (const no of ['10280-1', '10497-1', '21325-1']) await add(no);
+    // 10497 was never looked up, 21325 longest ago, 10280 most recently.
+    await db.update(setsTable).set({ lastUpdated: '2026-01-03T00:00:00.000Z' }).where(eq(setsTable.setNo, '10280-1'));
+    await db.update(setsTable).set({ lastUpdated: null }).where(eq(setsTable.setNo, '10497-1'));
+    await db.update(setsTable).set({ lastUpdated: '2026-01-01T00:00:00.000Z' }).where(eq(setsTable.setNo, '21325-1'));
+    let clock = 1_000_000;
+    const spy = vi.spyOn(Date, 'now').mockImplementation(() => clock);
+    try {
+      const seen: string[] = [];
+      const slow: Lookup = async (no, ...rest) => { seen.push(no); clock += 1000; return lookup(no, ...rest); };
+      const s = await svc.startSync(db);
+      if (!s.ok) throw new Error(s.error);
+      await svc.runSync(db, s.runId, slow, undefined, undefined, undefined, { deadline: clock + 1500 });
+      expect(seen).toEqual(['10497-1', '21325-1']);
+      expect(await svc.syncStatus(db)).toMatchObject({ running: false, processed: 2, errors: 0, message: `${svc.TIME_LIMIT_MESSAGE} 2 of 3 sets were looked up first.` });
+      expect(await svc.listHistory(db)).toHaveLength(1); // history is still saved
+      // The next run starts with the set this one didn't reach.
+      seen.length = 0;
+      const next = await svc.startSync(db);
+      if (!next.ok) throw new Error(next.error);
+      await svc.runSync(db, next.runId, slow, undefined, undefined, undefined, { deadline: clock + 500 });
+      expect(seen).toEqual(['10280-1']);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('keeps the usual order and does everything without a time limit', async () => {
+    for (const no of ['10280-1', '10497-1']) await add(no);
+    calls.length = 0;
+    const s = await svc.startSync(db);
+    if (!s.ok) throw new Error(s.error);
+    await svc.runSync(db, s.runId, lookup);
+    expect(calls).toEqual(['10280-1:U', '10497-1:U']);
+    expect(await svc.syncStatus(db)).toMatchObject({ processed: 2, message: null });
+  });
 });

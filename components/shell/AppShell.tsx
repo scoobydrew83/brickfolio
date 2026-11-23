@@ -13,6 +13,7 @@ import { ScanBarcode } from 'lucide-react';
 import { Logo } from '../ui';
 import { Nav } from '../Nav';
 import { ThemeToggle } from './ThemeToggle';
+import { AccountLink } from '../account/AccountLink';
 
 /** Shell shared by every page: brand, page links, theme toggle. */
 export function AppShell({ children }: { children: React.ReactNode }) {
@@ -31,6 +32,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </Link>
           <Suspense fallback={null}><Switcher /></Suspense>
           <ThemeToggle />
+          <Suspense fallback={null}><AccountLink /></Suspense>
         </div>
       </header>
       <Suspense fallback={null}><DemoNotice /></Suspense>

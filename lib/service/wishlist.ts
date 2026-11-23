@@ -106,8 +106,11 @@ export async function acquireWish(db: DB, no: string, lookup: Lookup | null, opt
 }
 
 /** Re-prices every wish. Returns how many lookups failed. */
-export async function syncWishlist(db: DB, lookup: Lookup, currency: string): Promise<number> {
+export async function syncWishlist(db: DB, lookup: Lookup, currency: string, deadline?: number): Promise<number> {
   let errors = 0;
-  for (const w of await listWishlist(db)) if (await lookupWish(db, w, lookup, currency)) errors++;
+  for (const w of await listWishlist(db)) {
+    if (deadline !== undefined && Date.now() >= deadline) break; // the sync's time limit (Vercel)
+    if (await lookupWish(db, w, lookup, currency)) errors++;
+  }
   return errors;
 }

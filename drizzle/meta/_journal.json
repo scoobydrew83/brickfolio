@@ -239,6 +239,27 @@
       "when": 1795131014922,
       "tag": "0033_users",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "6",
+      "when": 1795287644127,
+      "tag": "0034_better_auth",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "6",
+      "when": 1795287650242,
+      "tag": "0035_better_auth_backfill",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "6",
+      "when": 1795352248806,
+      "tag": "0036_passkey_two_factor",
+      "breakpoints": true
     }
   ]
 }

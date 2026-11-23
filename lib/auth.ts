@@ -2,17 +2,18 @@
 //   none              – no login (local use only)
 //   tailscale         – behind `tailscale serve`, which adds the Tailscale-User-Login header
 //   cloudflare-access – behind Cloudflare Access, which adds a signed Cf-Access-Jwt-Assertion header
-// In every mode, the REST API also accepts `Authorization: Bearer <api token>` (Settings → API tokens).
+//   better-auth       – Brickfolio's own sign-in (email + password, lib/better-auth.ts, #90); works on any host
+// In every mode, the REST API also accepts `Authorization: Bearer <api token>` or `x-api-key` (Settings → API tokens).
 // ALLOWED_USERS (comma-separated logins/emails) narrows tailscale and cloudflare-access to those users.
 import { createRemoteJWKSet, jwtVerify } from 'jose';
 
-export type AuthMode = 'none' | 'tailscale' | 'cloudflare-access';
+export type AuthMode = 'none' | 'tailscale' | 'cloudflare-access' | 'better-auth';
 /** `owner`: for an API token, the login that created it (#50); none for tokens from before, which act as admin. */
 export type Identity = { user: string; via: AuthMode | 'token' | 'cron'; owner?: string | null };
 
 export const authMode = (): AuthMode => {
   const m = process.env.AUTH_MODE || 'none';
-  if (m !== 'none' && m !== 'tailscale' && m !== 'cloudflare-access') throw new Error(`Unknown AUTH_MODE: ${m}`);
+  if (m !== 'none' && m !== 'tailscale' && m !== 'cloudflare-access' && m !== 'better-auth') throw new Error(`Unknown AUTH_MODE: ${m}`);
   return m;
 };
 
@@ -40,6 +41,13 @@ async function verifyAccess(jwt: string): Promise<string | null> {
 export async function identify(h: Headers): Promise<Identity | null> {
   const mode = authMode();
   if (mode === 'none') return { user: 'local', via: 'none' };
+  if (mode === 'better-auth') {
+    // Loaded only in this mode, so the proxy modes don't pull in Better Auth (or a database) here.
+    const [{ getDb }, { getAuth }] = await Promise.all([import('./db'), import('./better-auth')]);
+    const s = await getAuth(await getDb()).api.getSession({ headers: h });
+    const user = s?.user.email.toLowerCase();
+    return user && s?.user.emailVerified && allowed(user) ? { user, via: 'better-auth' } : null; // verified only (#90)
+  }
   if (mode === 'tailscale') {
     const user = h.get('tailscale-user-login');
     return user && allowed(user) ? { user, via: 'tailscale' } : null;
@@ -60,6 +68,9 @@ export const isSharePath = (pathname: string) => pathname === '/share' || pathna
 
 /** Bearer token from the Authorization header, if any. */
 export const bearer = (h: Headers) => h.get('authorization')?.match(/^Bearer\s+(\S+)$/i)?.[1] ?? null;
+
+/** An API token from `Authorization: Bearer` or, as Better Auth's apiKey plugin reads it, `x-api-key` (#90). */
+export const apiToken = (h: Headers) => bearer(h) ?? (h.get('x-api-key')?.trim() || null);
 
 /**
  * True when a browser says the request came from another site. Used to block CSRF on API writes that rely on

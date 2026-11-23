@@ -113,7 +113,7 @@ export async function partout(db: DB, setId: number, condition: Condition | null
  * none are given), up to `maxCalls`. Errors are stored on the price row so a bad part isn't retried every day.
  */
 export async function refreshPartPrices(
-  db: DB, lookup: PartPriceLookup, currency: string, opts: { setIds?: number[]; maxCalls: number },
+  db: DB, lookup: PartPriceLookup, currency: string, opts: { setIds?: number[]; maxCalls: number; deadline?: number },
 ): Promise<{ fetched: number; errors: number; remaining: number }> {
   if (opts.maxCalls <= 0) return { fetched: 0, errors: 0, remaining: 0 };
   const copies = await copiesBySet(db, opts.setIds);
@@ -137,7 +137,10 @@ export async function refreshPartPrices(
     }
   }
   let fetched = 0, errors = 0;
+  let tried = 0;
   for (const { line: l, guide } of todo.slice(0, opts.maxCalls)) {
+    if (opts.deadline !== undefined && Date.now() >= opts.deadline) break; // the sync's time limit (Vercel)
+    tried++;
     const colorId = colorOf(l);
     const base = { type: l.type, partNo: l.partNo, colorId, guide, currency, fetchedAt: new Date().toISOString() };
     let row: typeof partPrices.$inferInsert;
@@ -154,7 +157,7 @@ export async function refreshPartPrices(
       set: { avgSold: row.avgSold, qtySold: row.qtySold, error: row.error, fetchedAt: row.fetchedAt },
     });
   }
-  return { fetched, errors, remaining: Math.max(0, todo.length - opts.maxCalls) };
+  return { fetched, errors, remaining: Math.max(0, todo.length - tried) };
 }
 
 /** How many part prices one set still needs, so the UI can say how long "Price parts now" will take. */

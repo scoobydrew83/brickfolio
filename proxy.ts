@@ -2,7 +2,8 @@
 // The REST API (/api/v1) checks its own auth so it can also accept API tokens, and every server action
 // checks the user again, so this is the first line, not the only one.
 import { NextResponse, type NextRequest } from 'next/server';
-import { identify, isPublicShareRequest, isSharePath } from '@/lib/auth';
+import { getSessionCookie } from 'better-auth/cookies';
+import { authMode, identify, isPublicShareRequest, isSharePath } from '@/lib/auth';
 
 export async function proxy(request: NextRequest) {
   // Share pages are public and read-only: no login, and nothing but GET/HEAD (so no server action runs there).
@@ -13,6 +14,19 @@ export async function proxy(request: NextRequest) {
     return res;
   }
   if (isSharePath(request.nextUrl.pathname)) return new NextResponse('Method not allowed.', { status: 405, headers: { Allow: 'GET, HEAD' } });
+  if (authMode() === 'better-auth') {
+    // #90: only whether a session cookie is there (no database here); pages and actions check the session itself.
+    // An invitation (/invite/<id>) opens before its person has an account; the page checks the session itself.
+    if (request.nextUrl.pathname === '/reset-password' || request.nextUrl.pathname.startsWith('/invite/')) {
+      const res = NextResponse.next();
+      res.headers.set('Referrer-Policy', 'no-referrer'); // the reset token (or invitation id) is in the URL
+      return res;
+    }
+    // /sign-in/… too: the two-factor step comes before there is a session.
+    const p = request.nextUrl.pathname;
+    if (p === '/sign-in' || p.startsWith('/sign-in/') || getSessionCookie(request)) return NextResponse.next();
+    return NextResponse.redirect(new URL('/sign-in', request.url));
+  }
   if (await identify(request.headers)) return NextResponse.next();
   return new NextResponse('Not signed in. This app only accepts requests through Tailscale or Cloudflare Access.', { status: 401 });
 }

@@ -41,12 +41,17 @@ Screenshots use the demo data from `npm run seed`, so photos are blank and price
 
 The button copies Brickfolio to your GitHub account, creates the database and deploys it to Cloudflare Workers, which keeps it up to date from then on. Then put [Cloudflare Access](docs/cloudflare.md#one-click-deploy) in front of it. Until you do, the app refuses every request.
 
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fscoobydrew83%2Fbrickfolio&project-name=brickfolio&repository-name=brickfolio&env=DATABASE_URL,DATABASE_AUTH_TOKEN,AUTH_MODE,BETTER_AUTH_SECRET,CRON_SECRET&envDefaults=%7B%22AUTH_MODE%22%3A%22better-auth%22%7D&envDescription=A%20Turso%20database%20(URL%20and%20token)%2C%20a%20sign-in%20secret%20and%20a%20cron%20secret%20(long%20random%20strings).&envLink=https%3A%2F%2Fgithub.com%2Fscoobydrew83%2Fbrickfolio%2Fblob%2Fmain%2Fdocs%2Fhosting.md%23vercel) [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/scoobydrew83/brickfolio)
+
+Vercel (with a [Turso](https://turso.tech) database), Render and Railway sign people in with Brickfolio's own accounts and run the daily sync on their own; see **[docs/hosting.md](docs/hosting.md)** for each, including Railway's volume setup.
+
 | Setup | Good for | Files you need | Login |
 |---|---|---|---|
 | [Local only](docs/install.md#local-only) | Trying it out | `docker-compose.yml`, `.env` | None |
 | [Docker + Tailscale](docs/install.md#docker--tailscale) | A home server or NAS, used from your own devices | `docker-compose.yml`, `compose.tailscale.yml`, `.env` | Your Tailscale account |
 | [Docker + Cloudflare Tunnel](docs/install.md#docker--cloudflare-tunnel) | A home server, reachable from anywhere | `docker-compose.yml`, `compose.cloudflared.yml`, `.env` | Cloudflare Access (email code, Google, …) |
 | [Cloudflare Workers + D1](docs/cloudflare.md) (or the button above) | No server at all (free plan works) | The whole repo | Cloudflare Access |
+| [Vercel, Railway or Render](docs/hosting.md) (or the buttons above) | A hosted app without managing a server | The whole repo | Brickfolio accounts (Better Auth) |
 
 **[docs/install.md](docs/install.md)** has step-by-step instructions for each, including [BrickLink API keys](docs/install.md#get-your-bricklink-api-keys), [Portainer and other Docker GUIs](docs/install.md#portainer-dockge-synology-and-other-docker-guis), [updating](docs/install.md#updating) and [troubleshooting](docs/install.md#troubleshooting).
 

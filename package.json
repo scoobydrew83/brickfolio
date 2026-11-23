@@ -1,6 +1,6 @@
 {
   "name": "brickfolio",
-  "version": "0.18.0",
+  "version": "0.19.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -12,6 +12,7 @@
     "notices": "node scripts/third-party-notices.mjs",
     "ldraw:download": "node scripts/ldraw-download.mjs",
     "db:generate": "drizzle-kit generate",
+    "db:migrate": "node scripts/migrate.mjs",
     "cf:build": "opennextjs-cloudflare build",
     "cf:preview": "opennextjs-cloudflare build && wrangler d1 migrations apply DB --local && wrangler dev --var AUTH_MODE:none",
     "cf:deploy": "opennextjs-cloudflare build && wrangler d1 migrations apply DB --remote && wrangler deploy",
@@ -19,21 +20,28 @@
     "cf:typegen": "wrangler types --env-interface CloudflareEnv cloudflare-env.d.ts"
   },
   "dependencies": {
+    "@better-auth/api-key": "^1.7.27",
+    "@better-auth/passkey": "1.7.27",
+    "@libsql/client": "^0.18.0",
     "@opennextjs/cloudflare": "^1.20.17",
     "@tesseract.js-data/eng": "^1.0.0",
     "@zxing/browser": "^0.2.1",
     "@zxing/library": "^0.23.0",
+    "aws4fetch": "^1.0.20",
+    "better-auth": "^1.7.27",
     "better-sqlite3": "^13.1.1",
     "drizzle-orm": "^0.45.4",
     "jose": "^6.2.17",
     "lucide-react": "^1.72.0",
     "next": "16.4.6",
+    "nodemailer": "^10.3.1",
     "pdf-lib": "^1.17.1",
     "react": "19.3.1",
     "react-dom": "19.3.1",
     "server-only": "^0.0.1",
     "tesseract.js": "^7.0.0",
-    "three": "0.187.0"
+    "three": "0.187.0",
+    "uqr": "0.1.3"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20261114.1",

@@ -422,13 +422,26 @@ export async function startSync(db: DB): Promise<Result<{ runId: number }>> {
  * (when `store` is given) and Rebrickable themes and minifigs (when `catalog` is given). Updates progress as it goes.
  */
 /** Optional BrickLink extras for the sync: minifigure prices and part prices for part-out value. */
-export type SyncExtras = { minifig?: MinifigLookup; partPrice?: PartPriceLookup; price?: PriceLookup; images?: ImageStore };
+export type SyncExtras = {
+  minifig?: MinifigLookup; partPrice?: PartPriceLookup; price?: PriceLookup; images?: ImageStore;
+  /**
+   * Stop starting new work at this time (epoch ms; lib/hosting.ts syncDeadline), for hosts that kill a function after
+   * a fixed time (Vercel). Sets are then looked up oldest first, so a sync cut short today starts with the rest tomorrow;
+   * once it passes, the remaining BrickLink lookups and the optional catalog steps are skipped and the run ends as done.
+   */
+  deadline?: number;
+};
+export const TIME_LIMIT_MESSAGE = 'Time limit reached; the sets not looked up go first at the next sync.';
 
 export async function runSync(db: DB, runId: number, lookup: Lookup, store?: Store, catalog?: Catalog & Partial<BuildSource> & Partial<IdCatalog> & Partial<SetPartsSource>, retail?: RetailSource, extras: SyncExtras = {}): Promise<void> {
   try {
     const currency = await getCurrency(db);
     const copies = await copiesBySet(db);
-    const all = (await db.select({ id: sets.id, setNo: sets.setNo }).from(sets).all()).map((r) => ({ ...r, copies: copies.get(r.id) ?? [] }));
+    const late = () => extras.deadline !== undefined && Date.now() >= extras.deadline;
+    // With a time limit, the sets looked up longest ago (or never) first; otherwise in the order they were added.
+    const rows = await db.select({ id: sets.id, setNo: sets.setNo }).from(sets)
+      .orderBy(...(extras.deadline !== undefined ? [sql`${sets.lastUpdated} is not null`, sets.lastUpdated, sets.id] : [sets.id])).all();
+    const all = rows.map((r) => ({ ...r, copies: copies.get(r.id) ?? [] }));
     let errors = 0;
     let processed = 0;
     const failures = new Map<string, string[]>(); // error message → set numbers, for the log
@@ -439,6 +452,7 @@ export async function runSync(db: DB, runId: number, lookup: Lookup, store?: Sto
     const rb = catalog?.setParts && catalog.setMinifigs ? (catalog as SetPartsSource) : null;
     const counts: PartsCounts = { bricklink: 0, rebrickable: 0, rebrickableCalls: 0, figsLearned: 0 };
     for (const [i, s] of all.entries()) {
+      if (late()) { stopAt = i; stopReason = TIME_LIMIT_MESSAGE; break; }
       const error = await lookupInto(db, s, lookup, currency, { rb, counts });
       processed = i + 1;
       if (error) { errors++; failures.set(error, [...(failures.get(error) ?? []), s.setNo]); }
@@ -446,26 +460,30 @@ export async function runSync(db: DB, runId: number, lookup: Lookup, store?: Sto
       if (error === QUOTA_MESSAGE || isMaintenance(error)) { stopAt = i; stopReason = error!; break; }
     }
     const bl = stopAt === null;
-    const figErrors = extras.minifig && bl ? await syncMinifigs(db, extras.minifig, currency) : 0;
+    // After a time limit (extras.deadline) passes, only the quick steps still run: history, alerts and the small downloads.
+    let skippedLate = false;
+    const inTime = () => { if (!late()) return true; skippedLate = true; return false; };
+    const blMore = () => bl && inTime();
+    const figErrors = extras.minifig && blMore() ? await syncMinifigs(db, extras.minifig, currency, extras.deadline) : 0;
     // BrickLink calls, in priority order: sets, minifigs, wishlist and store first; then the other guide; then part prices.
     const budget = new Budget();
     // Two calls a set for its price, plus one for each parts list BrickLink sent (none for a Rebrickable list whose
     // minifigures all have BrickLink numbers).
     budget.spend(all.length * 2 + counts.bricklink + (extras.minifig ? Number((await db.select({ n: sql<number>`count(*)` }).from(minifigs).where(sql`fig_no is not null`).all())[0].n) * 2 : 0));
     await saveHistory(db);
-    const wishErrors = bl ? await syncWishlist(db, lookup, currency) : 0;
+    const wishErrors = blMore() ? await syncWishlist(db, lookup, currency, extras.deadline) : 0;
     budget.spend(Number((await db.select({ n: sql<number>`count(*)` }).from(wishlist).all())[0].n) * 2 + (store ? 3 : 0));
     const send = alertsFromEnv();
     const alertError = send ? await notifyUnderTarget(db, send) : null;
     const swingError = send && bl ? await notifyPriceSwings(db, send) : null;
-    const storeErrors = store && bl ? await syncStore(db, store) : [];
+    const storeErrors = store && blMore() ? await syncStore(db, store) : [];
     // Rebrickable's catalog downloads: the small `owned` import runs here (Cloudflare's cron). The `full` import on
     // Docker is over a million rows, so the scheduler runs it after this sync instead of holding the sync lock.
-    const catalogErrors = catalog && catalogMode().mode === 'owned' ? await syncRbCatalog(db) : [];
-    if (catalog) catalogErrors.push(...(await syncCatalog(db, catalog)));
-    if (catalog?.colors && catalog.partsPage) catalogErrors.push(...(await syncIdentifiers(db, { colors: catalog.colors, partsPage: catalog.partsPage })));
-    if (catalog?.alternates && catalog.buildParts) catalogErrors.push(...(await syncBuilds(db, { alternates: catalog.alternates, buildParts: catalog.buildParts })));
-    if (retail) catalogErrors.push(...(await syncRetail(db, retail)));
+    const catalogErrors = catalog && catalogMode().mode === 'owned' && inTime() ? await syncRbCatalog(db) : [];
+    if (catalog && inTime()) catalogErrors.push(...(await syncCatalog(db, catalog)));
+    if (catalog?.colors && catalog.partsPage && inTime()) catalogErrors.push(...(await syncIdentifiers(db, { colors: catalog.colors, partsPage: catalog.partsPage })));
+    if (catalog?.alternates && catalog.buildParts && inTime()) catalogErrors.push(...(await syncBuilds(db, { alternates: catalog.alternates, buildParts: catalog.buildParts })));
+    if (retail && inTime()) catalogErrors.push(...(await syncRetail(db, retail)));
     // The shared community barcode list (one small request; unchanged lists cost almost nothing).
     const communityError = await syncCommunity(db);
     if (communityError) catalogErrors.push(communityError);
@@ -478,23 +496,24 @@ export async function runSync(db: DB, runId: number, lookup: Lookup, store?: Sto
     if (designerError) catalogErrors.push(designerError);
     // 3D models from LDraw's OMR, only when a parts library is set up (the 3D view needs it anyway).
     const hasLibrary = !!(process.env.LDRAW_LIBRARY_DIR || process.env.LDRAW_LIBRARY_URL);
-    if (hasLibrary && process.env.LDRAW_OMR_SYNC !== 'off') catalogErrors.push(...(await syncOmrModels(db)));
+    if (hasLibrary && process.env.LDRAW_OMR_SYNC !== 'off' && inTime()) catalogErrors.push(...(await syncOmrModels(db)));
     // Photos not in the image cache yet (CDN fetches, not BrickLink API calls), after the lookups filled in image URLs.
-    if (extras.images) catalogErrors.push(...(await warmImages(db, extras.images)).errors);
+    if (extras.images && inTime()) catalogErrors.push(...(await warmImages(db, extras.images)).errors);
     // The other condition's price guide (new vs. used gap), about weekly per set, 1 call each.
-    if (extras.price && bl) {
-      const r = await refreshOtherGuide(db, extras.price, currency, { maxCalls: Math.min(otherGuideDailyCalls(all.length), budget.left()) });
+    if (extras.price && blMore()) {
+      const r = await refreshOtherGuide(db, extras.price, currency, { maxCalls: Math.min(otherGuideDailyCalls(all.length), budget.left()), deadline: extras.deadline });
       budget.spend(r.fetched + r.errors);
       if (r.errors) catalogErrors.push(`${r.errors} new/used price lookup${r.errors === 1 ? '' : 's'} failed`);
     }
     // Part prices for part-out value, with whatever is left of today's BrickLink budget.
-    if (extras.partPrice && bl) {
-      const r = await refreshPartPrices(db, extras.partPrice, currency, { maxCalls: partoutBudget(budget.used) });
+    if (extras.partPrice && blMore()) {
+      const r = await refreshPartPrices(db, extras.partPrice, currency, { maxCalls: partoutBudget(budget.used), deadline: extras.deadline });
       if (r.fetched) await reapplyMissing(db);
       if (r.errors) catalogErrors.push(`${r.errors} part price lookup${r.errors === 1 ? '' : 's'} failed`);
     }
     const quotaNote = bl ? '' : `${stopReason} ${stopAt} of ${all.length} sets were looked up first.`;
-    const message = [quotaNote, ...storeErrors, alertError ?? '', swingError ?? '', wishErrors ? `${wishErrors} wishlist lookup${wishErrors === 1 ? '' : 's'} failed` : '', figErrors ? `${figErrors} minifig lookup${figErrors === 1 ? '' : 's'} failed` : '', ...catalogErrors.slice(0, 3), catalogErrors.length > 3 ? `and ${catalogErrors.length - 3} more errors` : ''].filter(Boolean).join('; ');
+    const lateNote = bl && skippedLate ? 'Time limit reached; some optional steps were skipped and run at the next sync.' : '';
+    const message = [quotaNote, lateNote, ...storeErrors, alertError ?? '', swingError ?? '', wishErrors ? `${wishErrors} wishlist lookup${wishErrors === 1 ? '' : 's'} failed` : '', figErrors ? `${figErrors} minifig lookup${figErrors === 1 ? '' : 's'} failed` : '', ...catalogErrors.slice(0, 3), catalogErrors.length > 3 ? `and ${catalogErrors.length - 3} more errors` : ''].filter(Boolean).join('; ');
     await db.update(syncRuns).set({ status: 'done', finishedAt: nowIso(), message: message || null }).where(eq(syncRuns.id, runId));
     logSync(all.length, processed, errors, failures, message);
     if (counts.bricklink + counts.rebrickable) console.log(`  Parts lists: ${counts.rebrickable} from Rebrickable (${counts.rebrickableCalls} Rebrickable calls), ${counts.bricklink} BrickLink parts calls, ${counts.figsLearned} minifigure numbers learned`);

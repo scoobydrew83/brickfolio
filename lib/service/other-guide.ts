@@ -15,7 +15,7 @@ const REFRESH_DAYS = 7;
  * Fetches the other guide for sets whose newest price in it is missing or older than a week, oldest first, using at
  * most `maxCalls` calls, and re-values their copies. Never throws.
  */
-export async function refreshOtherGuide(db: DB, price: PriceLookup, currency: string, opts: { maxCalls: number }): Promise<{ fetched: number; errors: number; remaining: number }> {
+export async function refreshOtherGuide(db: DB, price: PriceLookup, currency: string, opts: { maxCalls: number; deadline?: number }): Promise<{ fetched: number; errors: number; remaining: number }> {
   if (opts.maxCalls <= 0) return { fetched: 0, errors: 0, remaining: 0 };
   const copies = await copiesBySet(db);
   const owned = (await db.select({ id: sets.id, setNo: sets.setNo }).from(sets).all())
@@ -29,6 +29,7 @@ export async function refreshOtherGuide(db: DB, price: PriceLookup, currency: st
 
   let fetched = 0, errors = 0, failedInARow = 0;
   for (const s of due) {
+    if (opts.deadline !== undefined && Date.now() >= opts.deadline) break; // the sync's time limit (Vercel)
     if (fetched + errors >= opts.maxCalls || failedInARow >= 3) break;
     try {
       const r = await price('SET', s.setNo, s.other, currency);

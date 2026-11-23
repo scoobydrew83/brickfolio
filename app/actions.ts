@@ -197,6 +197,15 @@ export async function deleteLocation(name: string) { return act('admin', async (
 // ---- people and roles (#50) ----
 export async function addPerson(login: string) { return act('admin', async () => perm.addPerson(await getDb(), login)); }
 export async function setAdmin(login: string, admin: boolean) { return act('admin', async (a) => perm.setAdmin(await getDb(), a, login, admin)); }
+/** Admins set someone's Better Auth password (#90): people moved over from #50 or added here have none. */
+export async function setPassword(login: string, password: string) {
+  // Setting your own password while an admin keeps you an admin after the switch to AUTH_MODE=better-auth.
+  return act('admin', async (a) => (await import('@/lib/better-auth')).setPassword(await getDb(), login, String(password ?? ''), { keepAdmin: perm.normLogin(login) === a.login }));
+}
+/** Admins get a password-reset link for someone (#90): emailed when email is set up, else returned once to copy. */
+export async function resetLink(login: string) {
+  return act('admin', async () => (await import('@/lib/better-auth')).resetLink(await getDb(), login));
+}
 /** Admins, and the collection's owners, give a login a role there (`null` takes it away). */
 export async function setRole(collectionId: number, login: string, role: perm.Role | null) {
   return act('member', async (a) => perm.setRole(await getDb(), a, Number(collectionId), login, role));
@@ -225,7 +234,7 @@ export async function setCurrency(code: string) { return act('admin', async () =
 /** Settings → the source Est. Value comes from. Re-values every set right away. */
 export async function setValueSource(source: string) { return act('admin', async () => prices.setPrimarySource(await getDb(), source, copies.refreshEstValues)); }
 /** A token acts with the permissions of the person who creates it (#50). */
-export async function createToken(name: string) { return act('signed-in', async (a) => tokens.createToken(await getDb(), name, a.login)); }
+export async function createToken(name: string, expiresInDays: number | null = null) { return act('signed-in', async (a) => tokens.createToken(await getDb(), name, a.login, expiresInDays)); }
 /** Public origin for share links: SHARE_BASE_URL, else APP_URL, else this request's host. */
 async function shareBase(): Promise<string> {
   const env = process.env.SHARE_BASE_URL || process.env.APP_URL;
@@ -257,7 +266,7 @@ export async function revokeShareLink(id: number): Promise<Result> {
   });
 }
 
-export async function revokeToken(id: number) {
+export async function revokeToken(id: string) {
   return act('signed-in', async (a) => { await tokens.revokeToken(await getDb(), id, a.admin ? undefined : a.login); return { ok: true }; }); // others' tokens: admins only
 }
 

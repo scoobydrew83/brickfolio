@@ -17,11 +17,11 @@ const KINDS = ['plain', 'road_straight', 'road_corner', 'road_t', 'road_cross', 
 
 const spec = {
   openapi: '3.1.0',
-  info: { title: `${APP_NAME} API`, version: '1.0.0', description: 'Every request acts with the permissions of the token\'s owner (or the signed-in person): admins can do everything; anyone else only reads and changes the collections they have a role in, and gets 403 for the rest. Create a token in Settings → API tokens and send it as `Authorization: Bearer <token>`. Send request bodies as `application/json` (import: `text/csv`); other types get 415.' },
+  info: { title: `${APP_NAME} API`, version: '1.0.0', description: 'Every request acts with the permissions of the token\'s owner (or the signed-in person): admins can do everything; anyone else only reads and changes the collections they have a role in, and gets 403 for the rest. Create a token in Settings → API tokens (it starts with `bf_`) and send it as `Authorization: Bearer <token>` or `x-api-key: <token>`. Send request bodies as `application/json` (import: `text/csv`); other types get 415.' },
   servers: [{ url: '/api/v1' }],
-  security: [{ bearer: [] }],
+  security: [{ bearer: [] }, { apiKey: [] }],
   components: {
-    securitySchemes: { bearer: { type: 'http', scheme: 'bearer' } },
+    securitySchemes: { bearer: { type: 'http', scheme: 'bearer' }, apiKey: { type: 'apiKey', in: 'header', name: 'x-api-key' } },
     schemas: {
       Error: { type: 'object', properties: { error: { type: 'string' }, existing: { type: 'object', properties: { name: { type: 'string' }, qty: { type: 'integer' } } } } },
       Set: {
@@ -245,8 +245,11 @@ const spec = {
     },
     '/sets/{setNo}/prices': { parameters: [setNo], get: { summary: 'BrickLink sold prices per day (in the current currency)', responses: { 200: ok({ type: 'object' }), 404: err } } },
     '/sync': {
-      get: { summary: 'Latest sync status', responses: { 200: ok({ type: 'object', properties: { sync: ref('Sync') } }) } },
+      get: { summary: 'Latest sync status, and the latest Rebrickable/Brickset-only run the cron route started without BrickLink keys (`catalogOnly`, null when none ran in this process)', responses: { 200: ok({ type: 'object', properties: { sync: ref('Sync'), catalogOnly: { type: 'object', nullable: true, properties: { running: { type: 'boolean' }, startedAt: { type: 'string' }, finishedAt: { type: 'string', nullable: true }, errors: { type: 'array', items: { type: 'string' } } } } } }) } },
       post: { summary: 'Start a full BrickLink sync (sets, then store inventory and orders)', responses: { 202: ok({ type: 'object', properties: { runId: { type: 'integer' } } }, 'Started'), 400: err, 409: err } },
+    },
+    '/sync/cron': {
+      get: { summary: 'Start the daily sync from a cron service that only sends GET (Vercel Cron). Only `Authorization: Bearer <CRON_SECRET>`; does nothing when a sync already started today', responses: { 202: ok({ type: 'object', properties: { runId: { type: 'integer' }, started: { type: 'string', description: 'Without BrickLink keys: the Rebrickable and Brickset steps that started' } } }, 'Started'), 200: ok({ type: 'object', properties: { skipped: { type: 'string' } } }, 'Already synced today'), 400: err, 401: err, 409: err } },
     },
     '/history': { get: { summary: 'Collection totals per day, for everything or one collection', parameters: [collectionQ], responses: { 200: ok({ type: 'object', properties: { history: { type: 'array', items: ref('History') } } }) } } },
     '/collections': {

@@ -4,7 +4,7 @@
 // so every write checks the id here.
 import { asc, eq, sql } from 'drizzle-orm';
 import type { DB } from '../db/types';
-import { collectionMembers, collections, minifigs, setCopies, shareLinks } from '../db/schema';
+import { collections, minifigs, setCopies, shareLinks } from '../db/schema';
 import type { Result } from './sets';
 
 export type CollectionRow = { id: number; name: string; sort: number };
@@ -69,7 +69,9 @@ export async function addCollection(db: DB, raw: unknown): Promise<Result<{ coll
   if (!p.ok) return { ...p, status: 400 };
   const [{ max }] = await db.select({ max: sql<number>`coalesce(max(${collections.sort}), -1)` }).from(collections).all();
   const r = await db.insert(collections).values({ name: p.value, sort: Number(max) + 1 }).onConflictDoNothing().returning().all();
-  return r.length ? { ok: true, collection: { id: r[0].id, name: r[0].name, sort: r[0].sort } } : { ok: false, status: 409, error: `${p.value} already exists.` };
+  if (!r.length) return { ok: false, status: 409, error: `${p.value} already exists.` };
+  await (await import('./permissions')).syncOrg(db, r[0].id, r[0].name); // its Better Auth organization (#90)
+  return { ok: true, collection: { id: r[0].id, name: r[0].name, sort: r[0].sort } };
 }
 
 export async function renameCollection(db: DB, id: number, raw: unknown): Promise<Result> {
@@ -78,7 +80,9 @@ export async function renameCollection(db: DB, id: number, raw: unknown): Promis
   const clash = await db.select({ id: collections.id }).from(collections).where(eq(collections.name, p.value)).get();
   if (clash && clash.id !== id) return { ok: false, status: 409, error: `${p.value} already exists.` };
   const r = await db.update(collections).set({ name: p.value }).where(eq(collections.id, id)).returning().all();
-  return r.length ? { ok: true } : { ok: false, status: 404, error: `Collection ${id} doesn't exist.` };
+  if (!r.length) return { ok: false, status: 404, error: `Collection ${id} doesn't exist.` };
+  await (await import('./permissions')).syncOrg(db, id, p.value); // the organization keeps its name (#90)
+  return { ok: true };
 }
 
 /** Puts collections in the given order; ids left out keep their place after the ones given. */
@@ -117,6 +121,6 @@ export async function deleteCollection(db: DB, id: number): Promise<Result> {
   const [links] = await db.select({ n: sql<number>`count(*)` }).from(shareLinks).where(eq(shareLinks.collectionId, id)).all();
   if (Number(links.n)) return { ok: false, status: 409, error: `${Number(links.n)} share link${Number(links.n) === 1 ? ' shows' : 's show'} ${c.name}. Revoke ${Number(links.n) === 1 ? 'it' : 'them'} first.` };
   await db.delete(collections).where(eq(collections.id, id));
-  await db.delete(collectionMembers).where(eq(collectionMembers.collectionId, id)); // its roles go with it (#50)
+  await (await import('./permissions')).dropMembers(db, id); // its roles go with it (#50, #90)
   return { ok: true };
 }

@@ -1,7 +1,7 @@
 // Server-only helpers for pages, server actions and route handlers.
 import 'server-only';
 import { cookies, headers } from 'next/headers';
-import { allowed, identify, bearer, type Identity } from './auth';
+import { allowed, apiToken, identify, bearer, type Identity } from './auth';
 import { brickLinkFromEnv } from './bricklink/client';
 import { rebrickableFromEnv } from './rebrickable/client';
 import { bricksetFromEnv } from './brickset/client';
@@ -24,10 +24,11 @@ export async function currentUser(): Promise<Identity | null> {
 
 /** For REST routes: CRON_SECRET (scheduler), an API token, or the same identity as the browser. */
 export async function apiUser(req: Request): Promise<Identity | null> {
-  const token = bearer(req.headers);
+  const token = apiToken(req.headers);
   if (token) {
     const cron = process.env.CRON_SECRET;
-    if (cron && (await sha256Hex(token)) === (await sha256Hex(cron))) return { user: 'cron', via: 'cron' };
+    // CRON_SECRET only as a Bearer token, as before; API tokens either way.
+    if (cron && token === bearer(req.headers) && (await sha256Hex(token)) === (await sha256Hex(cron))) return { user: 'cron', via: 'cron' };
     const t = await checkToken(await getDb(), token);
     // A token stops working when its owner is no longer allowed in (#50); ones without a login are unaffected.
     if (!t || (t.owner && t.owner !== 'local' && !allowed(t.owner))) return null;

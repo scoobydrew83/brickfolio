@@ -47,6 +47,8 @@ it('picks the mode from REBRICKABLE_CATALOG and the database driver', () => {
   expect(catalogMode({})).toEqual({ mode: 'full', clamped: false });
   expect(catalogMode({ DB_DRIVER: 'd1' })).toEqual({ mode: 'owned', clamped: false });
   expect(catalogMode({ DB_DRIVER: 'd1', REBRICKABLE_CATALOG: 'full' })).toEqual({ mode: 'owned', clamped: true });
+  expect(catalogMode({ VERCEL: '1' })).toEqual({ mode: 'owned', clamped: false }); // nothing runs the full import there
+  expect(catalogMode({ VERCEL: '1', REBRICKABLE_CATALOG: 'full' })).toEqual({ mode: 'owned', clamped: true });
   expect(catalogMode({ REBRICKABLE_CATALOG: 'off' }).mode).toBe('off');
   expect(filesFor('owned')).toEqual(['themes', 'colors', 'sets']);
   expect(filesFor('off')).toEqual([]);

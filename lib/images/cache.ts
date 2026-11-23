@@ -2,6 +2,7 @@
 // is /data/images in the Docker volume) or an R2 bucket on Cloudflare (binding IMAGE_CACHE). IMAGE_CACHE=off turns it
 // off; the image routes then pass photos through without keeping them.
 import 'server-only';
+import { hasDisk } from '../hosting';
 
 export type ImageStore = {
   kind: 'disk' | 'r2';
@@ -22,6 +23,8 @@ export async function imageStore(): Promise<ImageStore | null> {
     const bucket = (getCloudflareContext().env as { IMAGE_CACHE?: R2Like }).IMAGE_CACHE;
     return bucket ? r2Store(bucket) : null;
   }
+  // Vercel: no writable, kept disk (unless IMAGE_CACHE_DIR points somewhere, e.g. /tmp): pass photos through.
+  if (!hasDisk(process.env)) return null;
   return diskStore(process.env.IMAGE_CACHE_DIR || './data/images');
 }
 

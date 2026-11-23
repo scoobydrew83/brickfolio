@@ -57,3 +57,12 @@ it('leaves room in the daily budget', () => {
   expect(partoutBudget(4000, 1500)).toBe(500);
   expect(partoutBudget(4800, 1500)).toBe(0);
 });
+
+it("stops at the sync's time limit and says what's left (Vercel, #94 review)", async () => {
+  const slow: PartPriceLookup = async (...a) => { const r = await price(...a); await new Promise((go) => setTimeout(go, 30)); return r; };
+  const r = await refreshPartPrices(db, slow, 'USD', { maxCalls: 10, deadline: Date.now() + 40 });
+  expect(r.fetched).toBeGreaterThan(0);
+  expect(r.fetched).toBeLessThan(3);
+  expect(r.remaining).toBe(3 - r.fetched);
+  expect((await refreshPartPrices(db, price, 'USD', { maxCalls: 10, deadline: Date.now() - 1 })).fetched).toBe(0);
+});

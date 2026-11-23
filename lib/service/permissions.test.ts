@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { openNodeDb } from '../db/node';
 import type { DB } from '../db/types';
-import { users } from '../db/schema';
+import { authUser } from '../db/schema';
 import { addCollection } from './collections';
 import * as perm from './permissions';
 import { createToken, listTokens, revokeToken } from './tokens';
@@ -27,10 +27,10 @@ describe('who is an admin', () => {
     expect(perm.can(a, 'admin')).toBe(true);
   });
 
-  it('only ADMIN_USERS (and users.admin) once it is set, case-insensitively', async () => {
+  it('only ADMIN_USERS (and user.role admin) once it is set, case-insensitively', async () => {
     expect((await perm.resolveAccess(db, tailscale('A@X'), env('a@x, c@x'))).admin).toBe(true);
     expect((await perm.resolveAccess(db, tailscale('b@x'), env('a@x'))).admin).toBe(false);
-    await db.insert(users).values({ login: 'b@x', admin: true }).onConflictDoUpdate({ target: users.login, set: { admin: true } });
+    await db.insert(authUser).values({ id: 'b', name: 'b@x', email: 'b@x', role: 'admin' }).onConflictDoUpdate({ target: authUser.email, set: { role: 'admin' } }); // #90: Better Auth's admin role
     expect((await perm.resolveAccess(db, tailscale('b@x'), env('a@x'))).admin).toBe(true);
   });
 

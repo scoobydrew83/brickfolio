@@ -8,6 +8,7 @@ Step-by-step instructions for each setup. Pick one:
 | [Docker + Tailscale](#docker--tailscale) | A home server or NAS, used from your own devices | `docker-compose.yml`, `compose.tailscale.yml`, `.env` | Your Tailscale account |
 | [Docker + Cloudflare Tunnel](#docker--cloudflare-tunnel) | A home server, reachable from anywhere | `docker-compose.yml`, `compose.cloudflared.yml`, `.env` | Cloudflare Access (email code, Google, …) |
 | [Cloudflare Workers + D1](cloudflare.md) | No server at all (free plan works) | The whole repo (you deploy from it) | Cloudflare Access |
+| [Vercel, Railway or Render](hosting.md) | A hosted app without managing a server | The whole repo (you deploy from it) | Brickfolio accounts (Better Auth) |
 
 Using Portainer, Dockge, Synology or similar? Read [Before you start](#before-you-start), pick a setup above, then see [Docker GUIs](#portainer-dockge-synology-and-other-docker-guis).
 
@@ -15,6 +16,7 @@ Using Portainer, Dockge, Synology or similar? Read [Before you start](#before-yo
 - [Local only](#local-only)
 - [Docker + Tailscale](#docker--tailscale)
 - [Docker + Cloudflare Tunnel](#docker--cloudflare-tunnel)
+- [Better Auth sign-in](#better-auth-sign-in)
 - [Portainer, Dockge, Synology and other Docker GUIs](#portainer-dockge-synology-and-other-docker-guis)
 - [Run a public demo](#run-a-public-demo)
 - [Updating](#updating)
@@ -149,6 +151,20 @@ Watched BrickLink Designer Program projects (Radar → Designer Program) alert `
 `GET /api/v1/prices?id=75192&type=offer&days=14` lists what was stored, to check a flow.
 
 Set `APP_URL` to your Brickfolio address so alerts link back to the wishlist. Settings → About this server shows whether alerts are on.
+
+### Optional: email
+
+Better Auth sign-in (#90) sends password reset, email verification and invitation links by email. Set `EMAIL_PROVIDER` and `EMAIL_FROM` (`Brickfolio <noreply@your-domain>`, an address the provider has verified) plus that provider's keys; until then nothing is sent. Variables are listed in `.env.example`.
+
+| `EMAIL_PROVIDER` | Keys | Notes |
+|---|---|---|
+| `smtp` | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_SECURE` | Any mail server or relay (Gmail app password, Fastmail, Mailgun SMTP, your own). Not on Cloudflare Workers. |
+| `resend` | `RESEND_API_KEY` | [resend.com](https://resend.com); verify your domain first. |
+| `postmark` | `POSTMARK_SERVER_TOKEN` | [postmarkapp.com](https://postmarkapp.com); the sender needs a confirmed Sender Signature or domain. |
+| `ses` | `AWS_SES_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` | Amazon SES v2. New SES accounts can only send to verified addresses until you leave the sandbox. |
+| `cloudflare` | `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_EMAIL_API_TOKEN` | [Cloudflare Email Service](https://developers.cloudflare.com/email-service/) (beta; Workers Paid plan to send to any address, domain on Cloudflare DNS). On Workers a `send_email` binding works without a token: see [cloudflare.md](cloudflare.md#notes). |
+
+Each send waits at most 10 seconds. Failures are reported with the provider's error; the links themselves are never logged.
 
 ### Layouts, loose parts and builds: nothing to set up
 
@@ -347,7 +363,70 @@ Brickfolio has no logins of its own: Tailscale or Cloudflare Access says who som
 - **Unset** (the default, and how every earlier version worked): everyone allowed in is an admin and can do everything.
 - **Set** to one or more logins: those are the admins. Everyone else starts with nothing until an admin gives them a role in a collection under **Settings → People**: **viewer** (sees it), **editor** (also adds, changes and removes its sets and minifigures) or **owner** (also chooses who else can, and makes share links for it). Admins can also make someone an admin there, on top of `ADMIN_USERS`. People appear in the list after their first visit, or add them beforehand by their Tailscale login or Access email.
 
-Things the whole install shares (the wishlist, Designer projects, layouts, loose parts, builds and saved barcodes) can be seen by anyone with a role and changed by admins and anyone who is an editor or owner somewhere. Settings, the sync, keys, locations, collections, Store and Orders are for admins. An API token acts with the permissions of the person who made it; tokens made before this version act as an admin, so revoke and remake them if they belong to someone who isn't one. With `AUTH_MODE=none` (no login) the one user is an admin.
+Things the whole install shares (the wishlist, Designer projects, layouts, loose parts, builds and saved barcodes) can be seen by anyone with a role and changed by admins and anyone who is an editor or owner somewhere. Settings, the sync, keys, locations, collections, Store and Orders are for admins. An API token acts with the permissions of the person who made it; tokens made before this version act as an admin, so revoke and remake them if they belong to someone who isn't one (see [API tokens](#api-tokens)). With `AUTH_MODE=none` (no login) the one user is an admin.
+
+## Better Auth sign-in
+
+Brickfolio's own accounts (email and password), for hosts with no Tailscale or Access in front. Set in `.env`:
+
+```bash
+AUTH_MODE=better-auth
+BETTER_AUTH_SECRET=...   # openssl rand -hex 32
+BETTER_AUTH_URL=https://brickfolio.example.com
+```
+
+- **The first account is an admin.** Open the app, choose **Create an account**, and sign up. Do it right after deploying: until then anyone who reaches the page can be first.
+- **Sign-up is then closed.** With [email](#optional-email) set up, `ALLOWED_USERS` (comma-separated emails) lets those emails create their own account and `BETTER_AUTH_OPEN_SIGNUP=1` lets anyone (they start with no collections). Either way they confirm their address from an emailed link before they can sign in, so nobody can claim an address listed in `ALLOWED_USERS` or `ADMIN_USERS`. Without email, sign-up stays closed (except [with Google or GitHub](#sign-in-with-google--github), which confirm the address themselves). Otherwise an admin adds people in **Settings → People** and gives them a password there (**Set password**) or a **Reset link**. Without email set up, the link is shown once to copy: send it privately, it works like a password for an hour.
+- `ADMIN_USERS` still adds admins, and roles work as in [People and permissions](#people-and-permissions).
+- **Moving an existing install over:** people keep their roles, but have no password yet. Before switching, set `BETTER_AUTH_SECRET` and give yourself one in **Settings → People → Set password** while signed in the old way. You stay an admin after the switch (even if you were one only because `ADMIN_USERS` was unset), and can then make others admins. Someone removed from `ALLOWED_USERS` is refused by Better Auth's own endpoints (`/api/auth/organization/*`, `/admin/*`, `/api-key/*`) as well as the app.
+- **Sign-in links:** with email set up, the sign-in page also offers **Email me a sign-in link**. The link works once, for 10 minutes, and confirms the address. New accounts follow the same rules as above; nothing is sent to an address that couldn't sign in. At most 5 requests per 5 minutes from one IP.
+- **Tailscale logins that aren't email addresses** (GitHub logins, `name@github`) can't be Better Auth accounts. Stay on `AUTH_MODE=tailscale` for those.
+
+### Sign in with Google / GitHub
+
+Each provider is on once both its keys are set; the sign-in page then shows **Continue with Google** (GitHub, Apple). The redirect URI is your `BETTER_AUTH_URL` plus `/api/auth/callback/<provider>`, exactly, with no trailing slash.
+
+| Provider | Create the app | Redirect URI | Keys |
+|---|---|---|---|
+| Google | [Google Cloud console](https://console.cloud.google.com/apis/credentials) → **Create credentials → OAuth client ID → Web application**. Set up the consent screen first (scopes `openid`, `email`, `profile`; nothing sensitive, so no review). | `https://brickfolio.example.com/api/auth/callback/google` under **Authorized redirect URIs** | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` |
+| GitHub | GitHub → **Settings → Developer settings → OAuth Apps → New OAuth App** (an OAuth App, not a GitHub App). Scopes `read:user` and `user:email` are asked for at sign-in. | `https://brickfolio.example.com/api/auth/callback/github` as **Authorization callback URL** | `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` |
+| Apple (optional) | [Apple Developer](https://developer.apple.com/account/resources/identifiers/list/serviceId) → a **Services ID** with Sign in with Apple, your domain and the return URL, and a Sign in with Apple **key**. The client secret is a JWT you sign with that key ([Better Auth's guide](https://www.better-auth.com/docs/authentication/apple)); it expires within 6 months, so make a new one before then. | `https://brickfolio.example.com/api/auth/callback/apple` as **Return URL** | `APPLE_CLIENT_ID` (the Services ID), `APPLE_CLIENT_SECRET` (the JWT) |
+
+- **Sign-up rules are the same:** the first account is an admin; after that only emails in `ALLOWED_USERS`, or anyone with `BETTER_AUTH_OPEN_SIGNUP=1`. A provider-verified address counts as confirmed, so this works without email set up. An address the provider hasn't verified gets no account.
+- **Existing people** (added by an admin, or moved over from an older install) sign in with a provider account that has the same, verified address; it's linked to them and keeps their roles. Anything else on that not-yet-confirmed account (a password, sessions) is removed first. A provider that hasn't verified the address is never linked. Apple's **Hide My Email** addresses won't match anyone, so they sign up as a new person.
+- Someone taken out of `ALLOWED_USERS` can't sign in by any method.
+### Passkeys and two-factor
+
+Migration 0036 adds the `passkey` and `two_factor` tables and `user.two_factor_enabled` (new tables and a column; nothing is rebuilt).
+
+- **Passkeys:** signed-in people add them on their account page (a name each; rename or delete them there) and then use **Sign in with a passkey**, or pick one from the browser's autofill. A passkey belongs to the site's hostname, taken from `BETTER_AUTH_URL`: set it to the address people use (it must be HTTPS, or `http://localhost`), and don't change the hostname later, or the passkeys stop working (people can still use their password). Adding one needs a sign-in from the last day.
+- **Two-factor:** on the account page, enter your password, scan the QR code with an authenticator app (or type the key), confirm with a code, and save the 10 backup codes shown (once; each works once; **New backup codes** replaces them). From then on, password sign-in and emailed sign-in links ask for a code (**Don't ask again on this device** skips it for 30 days). An emailed link only proves you can read the inbox, so it isn't enough on its own. Turning it off needs the password. Only authenticator-app codes: no SMS or email codes.
+- **A passkey sign-in doesn't ask for the two-factor code:** a passkey is already two factors (the device and its PIN or biometric). Neither does a Google, GitHub or Apple sign-in: that account has its own sign-in and two-factor.
+- Lost the app and the backup codes? An admin's **Set password** or a **Reset link** doesn't turn two-factor off; ask an admin to run `UPDATE user SET two_factor_enabled = 0 WHERE email = '…'; DELETE FROM two_factor WHERE user_id = (SELECT id FROM user WHERE email = '…');` on the database.
+- Someone taken out of `ALLOWED_USERS` (or whose address isn't confirmed) can't sign in with a passkey either, and their existing sessions stop working.
+### Inviting people
+
+Admins (to any collection) and a collection's owners (to theirs) can invite someone by email under **Settings → Invitations** (below People; owners find it under their collections' members), as viewer, editor or owner. Viewers and editors can't invite, and Better Auth's own invitation endpoints (`/api/auth/organization/invite-member`, `accept-invitation`, `reject-invitation`, `cancel-invitation`) follow the same rules.
+
+- **With [email](#optional-email)** the invitation is mailed. The link opens `/invite/<id>`, where they sign in, or create an account for that address even while sign-up is closed. A new account confirms its address from an emailed link, which brings them back to accept.
+- **Without email** the link is shown to copy and send yourself (**Copy link** in the pending list shows it again). The link by itself proves nothing about who opened it, so it can't create an account: the person needs an account for that address already (for example one you gave a password in **Settings → People**, or a provider sign-in), then signs in and accepts.
+- Accepting needs a signed-in, confirmed address that matches the invitation. The role is given with the inviter's rights at that moment: if they've since lost the collection, the invitation no longer works.
+- Invitations expire after 7 days, and can be cancelled from the pending list. Inviting the same address again replaces the earlier link. Pending invitations count toward a collection's 90-member limit. An address that `ALLOWED_USERS` leaves out can't be invited.
+- Someone already signed in sees their pending invitations on their **Account** page too.
+
+### Your account
+
+The person icon in the header opens **Account** (only with `AUTH_MODE=better-auth`; behind Tailscale or Cloudflare Access it just says who you are, as your login is managed there). It changes your name and your password (which signs out your other sessions), lists where you're signed in (sign out one session, or everywhere else), and lists your sign-in methods (email and password, Google, GitHub). A method can be removed only while another is left, and someone who signs in only through a provider can add a password. The email address can't be changed there: it's your login and what your roles, API tokens and share links are recorded under, so ask an admin.
+
+## API tokens
+
+Scripts, the mobile app, n8n and MCP clients sign in with an API token from **Settings → API tokens**. Send it as `Authorization: Bearer <token>` (or `x-api-key: <token>`) to `/api/v1` or `/api/mcp`. It's shown once; the server keeps only its SHA-256 hash.
+
+- **Whose it is:** a token acts with the current roles of the person who made it, so changing their roles changes what it can do, and it stops working when they're taken out of `ALLOWED_USERS` or deleted. Everyone sees and revokes their own; admins see everyone's.
+- **No owner:** tokens made before 0.18.0, or with `AUTH_MODE=none`, belong to nobody and act as an admin. Admins see them as "no owner, acts as admin" and revoke them there; if one belongs to someone who isn't an admin, revoke it and have them make a new one.
+- **Expiry:** never (the default), or 30, 90 or 365 days. The list shows when each token was made, last used (recorded at most once a minute) and expires.
+- **Revoking** takes effect on the next request.
+- **Where they're kept:** Better Auth's apiKey table (`apikey`), in every `AUTH_MODE`. Tokens from earlier versions (the `api_tokens` table) are copied there the first time the server checks or lists a token, and keep working unchanged. `api_tokens` is left as it was, so after going back to an earlier version the tokens from before still work (ones made since don't), and a token revoked here doesn't come back. With `AUTH_MODE=better-auth`, Better Auth's own `/api/auth/api-key/*` endpoints also work, for your own keys only.
 
 ## Share a read-only link
 

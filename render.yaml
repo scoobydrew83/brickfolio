@@ -1,0 +1,42 @@
+# Render Blueprint (https://render.com/docs/blueprint-spec): Brickfolio from the Dockerfile, with its SQLite database
+# on a persistent disk. Disks need a paid instance type; the service stays up, so the app's own daily scheduler runs
+# the sync (SYNC_HOUR, TZ) and no cron job is needed. For the free instance type with Turso instead of a disk, use
+# deploy/render-turso.yaml (see docs/hosting.md#render).
+services:
+  - type: web
+    name: brickfolio
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: 0.5c-512mb # the smallest paid instance type; disks can't attach to the free one
+    healthCheckPath: /api/health
+    autoDeployTrigger: "off" # copies made with the Deploy button don't redeploy on every push to this repo
+    disk:
+      name: data
+      mountPath: /data # DATABASE_PATH=/data/app.db, daily backups in /data/backups, photos in /data/images
+      sizeGB: 1
+    envVars:
+      - key: AUTH_MODE
+        value: better-auth
+      - key: BETTER_AUTH_SECRET
+        generateValue: true
+      - key: BETTER_AUTH_URL # this service's https://….onrender.com address; change it with a custom domain
+        fromService:
+          name: brickfolio
+          type: web
+          envVarKey: RENDER_EXTERNAL_URL
+      - key: IMAGE_CACHE_DIR
+        value: /data/images
+      - key: LDRAW_LIBRARY_DIR
+        value: /data/ldraw
+      - key: TZ
+        value: UTC
+      - key: SYNC_HOUR
+        value: "4"
+      - key: BRICKLINK_CONSUMER_KEY
+        sync: false
+      - key: BRICKLINK_CONSUMER_SECRET
+        sync: false
+      - key: BRICKLINK_TOKEN
+        sync: false
+      - key: BRICKLINK_TOKEN_SECRET
+        sync: false

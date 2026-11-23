@@ -38,10 +38,12 @@ const BATCH_ROWS = 2000;
 
 /** REBRICKABLE_CATALOG, defaulting to `full` on Node and `owned` on D1. `full` on D1 becomes `owned` (`clamped`). */
 export function catalogMode(env: Record<string, string | undefined> = process.env): { mode: CatalogMode; clamped: boolean } {
-  const d1 = env.DB_DRIVER === 'd1';
+  // D1 and Vercel get the small import: the full one is over a million rows written, and on Vercel nothing runs it
+  // outside a request (the sync imports `owned`; `full` waits for the always-on scheduler, which Vercel doesn't have).
+  const small = env.DB_DRIVER === 'd1' || !!env.VERCEL;
   const raw = env.REBRICKABLE_CATALOG?.trim().toLowerCase();
-  const asked: CatalogMode = raw === 'full' || raw === 'owned' || raw === 'off' ? raw : d1 ? 'owned' : 'full';
-  return d1 && asked === 'full' ? { mode: 'owned', clamped: true } : { mode: asked, clamped: false };
+  const asked: CatalogMode = raw === 'full' || raw === 'owned' || raw === 'off' ? raw : small ? 'owned' : 'full';
+  return small && asked === 'full' ? { mode: 'owned', clamped: true } : { mode: asked, clamped: false };
 }
 
 export const filesFor = (mode: CatalogMode): CatalogFile[] => (mode === 'full' ? [...CATALOG_FILES] : mode === 'owned' ? OWNED_FILES : []);
@@ -55,10 +57,19 @@ type SyncClient = { transaction: (fn: () => number) => () => number };
 
 function executor(db: DB): Exec {
   const client = (db as unknown as { $client?: Partial<SyncClient> & { prepare?: unknown } }).$client;
-  const changes = (r: unknown) => Number((r as { changes?: number; meta?: { changes?: number } } | undefined)?.changes ?? (r as { meta?: { changes?: number } } | undefined)?.meta?.changes ?? 0);
+  // better-sqlite3: changes; D1: meta.changes; libSQL: rowsAffected.
+  const changes = (r: unknown) => {
+    const x = r as { changes?: number; rowsAffected?: number; meta?: { changes?: number } } | undefined;
+    return Number(x?.changes ?? x?.meta?.changes ?? x?.rowsAffected ?? 0);
+  };
   if (client && typeof client.transaction === 'function' && typeof client.prepare === 'function') {
     const run = (db as unknown as { run: (q: SQL) => unknown }).run.bind(db);
     return async (queries) => (queries.length ? (client as SyncClient).transaction(() => queries.reduce((n, q) => n + changes(run(q)), 0))() : 0);
+  }
+  // libSQL (Turso): one batch per call = one atomic round trip, instead of one HTTP request per statement.
+  if (client && typeof (client as { executeMultiple?: unknown }).executeMultiple === 'function') {
+    const batch = (db as unknown as { batch: (qs: unknown[]) => Promise<unknown[]> }).batch.bind(db);
+    return async (queries) => (queries.length ? (await batch(queries.map((q) => db.run(q)))).reduce<number>((n, r) => n + changes(r), 0) : 0);
   }
   return async (queries) => {
     let n = 0;

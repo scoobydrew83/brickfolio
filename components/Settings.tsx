@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useState, useTransition } from 'react';
-import { updateStatus, clearImageCache, imageCacheStatus, type ImageCacheStatus, shareCodes, syncCommunityNow, bricksetStatus, downloadLdrawLibrary, ldrawLibraryStatus, rebrickableStatus, syncBricksetNow, syncRebrickableNow, testBricksetKey, testRebrickableKey, type BricksetStatus, type RebrickableStatus, addLocation, addCollection, renameCollection, deleteCollection, reorderCollections, createShareLink, createToken, deleteLocation, revokeShareLink, importFile, renameLocation, revokeToken, setCurrency, setValueSource, type Result } from '@/app/actions';
+import { updateStatus, clearImageCache, imageCacheStatus, type ImageCacheStatus, shareCodes, syncCommunityNow, bricksetStatus, downloadLdrawLibrary, ldrawLibraryStatus, rebrickableStatus, syncBricksetNow, syncRebrickableNow, testBricksetKey, testRebrickableKey, type BricksetStatus, type RebrickableStatus, addLocation, addCollection, renameCollection, deleteCollection, reorderCollections, createShareLink, deleteLocation, revokeShareLink, importFile, renameLocation, setCurrency, setValueSource, type Result } from '@/app/actions';
 import { Copy } from 'lucide-react';
 import { Banner, Button, Select, field } from './ui';
 import { PageHeader } from './shell/PageHeader';
@@ -9,6 +9,9 @@ import type { BarcodeCapabilities } from '@/lib/barcode/providers';
 import type { CommunityStatus } from '@/lib/barcode/community';
 import Link from 'next/link';
 import { PeopleSection } from './settings/People';
+import { InvitationsSection } from './settings/Invitations';
+import { TokensSection, type Token } from './settings/Tokens';
+import type { InviteRow } from '@/lib/service/invitations';
 import type { Person } from '@/lib/service/permissions';
 
 type BarcodeStatus = { caps: BarcodeCapabilities; saved: { total: number; user: number; community: number; brickset: number; providers: number }; community: CommunityStatus };
@@ -16,8 +19,7 @@ type BarcodeStatus = { caps: BarcodeCapabilities; saved: { total: number; user: 
 import type { ShareLinkRow } from '@/lib/service/share';
 import type { UpdateStatus } from '@/lib/service/updates';
 
-type Token = { id: number; name: string; prefix: string; createdAt: string; lastUsedAt: string | null; owner?: string | null };
-type Props = { version: UpdateStatus; locations: string[]; currency: string; valueSource: { current: string; options: [string, string][] }; tokens: Token[]; shares: ShareLinkRow[]; user: string; authMode: string; priced: boolean; alerts: boolean; rebrickable: RebrickableStatus; brickset: BricksetStatus; ldraw: LibraryStatus; barcodes: BarcodeStatus ; collections: CollectionInfo[] ; people: Person[]; me: string; envAdmins: boolean };
+type Props = { version: UpdateStatus; locations: string[]; currency: string; valueSource: { current: string; options: [string, string][] }; tokens: Token[]; shares: ShareLinkRow[]; user: string; authMode: string; priced: boolean; alerts: boolean; rebrickable: RebrickableStatus; brickset: BricksetStatus; ldraw: LibraryStatus; barcodes: BarcodeStatus ; collections: CollectionInfo[] ; people: Person[]; me: string; envAdmins: boolean; passwords?: boolean; /** AUTH_MODE=better-auth (#90): pending invitations, and whether they're mailed. */ invitations?: { list: InviteRow[]; mail: boolean } };
 
 /** A collection with how many copies and minifigures it holds (#49). */
 export type CollectionInfo = { id: number; name: string; copies: number; minifigs: number };
@@ -25,10 +27,9 @@ export type CollectionInfo = { id: number; name: string; copies: number; minifig
 const h2 = 'text-lg font-extrabold [font-stretch:110%]';
 const section = 'space-y-3 border-t border-line pt-6';
 
-export default function Settings({ people, me, envAdmins, collections, version, locations, currency, valueSource, tokens, shares, user, authMode, priced, alerts, rebrickable, brickset, ldraw, barcodes }: Props) {
+export default function Settings({ people, me, envAdmins, passwords, invitations, collections, version, locations, currency, valueSource, tokens, shares, user, authMode, priced, alerts, rebrickable, brickset, ldraw, barcodes }: Props) {
   const [pending, start] = useTransition();
   const [message, setMessage] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
-  const [newToken, setNewToken] = useState<string | null>(null);
   const run = (fn: () => Promise<Result & { message?: string }>, okText: string, after?: (r: Result) => void) =>
     start(async () => {
       const r = await fn();
@@ -57,7 +58,8 @@ export default function Settings({ people, me, envAdmins, collections, version, 
         </form>
       </section>
 
-      <PeopleSection people={people} collections={collections} me={me} envAdmins={envAdmins} />
+      <PeopleSection people={people} collections={collections} me={me} envAdmins={envAdmins} passwords={authMode === 'better-auth' ? 'reset' : passwords ? 'set' : null} />
+      {invitations && <InvitationsSection collections={collections} invites={invitations.list} mail={invitations.mail} />}
 
       <section className={section}>
         <h2 className={h2}>Locations</h2>
@@ -134,30 +136,14 @@ export default function Settings({ people, me, envAdmins, collections, version, 
       <ShareSection links={shares} collections={collections} />
 
       <section className={section}>
-        <h2 className={h2}>API tokens</h2>
-        <p className="text-sm text-fg-3">
-          For scripts and apps: send <code className="rounded-chip bg-muted px-1">Authorization: Bearer &lt;token&gt;</code> to <code className="rounded-chip bg-muted px-1">/api/v1</code>.
-          See the <a href="/api/v1/openapi.json" className="text-link hover:underline">OpenAPI spec</a>.
-        </p>
-        {newToken && (
-          <div className="space-y-1 rounded-control bg-warn-soft p-3 text-sm text-warn ring-1 ring-warn-ring">
-            <p className="font-semibold">Copy this token now. It won&apos;t be shown again.</p>
-            <code className="block break-all rounded-chip bg-surface px-2 py-1 font-mono text-xs">{newToken}</code>
-          </div>
-        )}
-        <ul className="divide-y divide-line text-sm">
-          {tokens.map((t) => (
-            <li key={t.id} className="flex items-center justify-between gap-2 py-2">
-              <span><b>{t.name}</b> <code className="text-xs text-fg-3">{t.prefix}…</code>{t.owner && t.owner !== me && <span className="text-xs text-fg-3"> · {t.owner}</span>}</span>
-              <span className="text-xs text-fg-3">{t.lastUsedAt ? `used ${t.lastUsedAt.slice(0, 10)}` : 'never used'}</span>
-              <Button variant="danger-link" onClick={() => run(() => revokeToken(t.id), `Revoked ${t.name}.`)} disabled={pending}>Revoke</Button>
-            </li>
-          ))}
-        </ul>
-        <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); const f = e.currentTarget; const name = String(new FormData(f).get('name')); run(() => createToken(name), 'Token created.', (r) => { if (r.ok && r.token) setNewToken(r.token); f.reset(); }); }}>
-          <input name="name" required maxLength={60} placeholder="Token name, e.g. iPhone" className={`${field} mt-0`} />
-          <Button type="submit" disabled={pending}>Create</Button>
-        </form>
+        <TokensSection tokens={tokens} me={me} all pending={pending} run={run} intro={<>
+          <h2 className={h2}>API tokens</h2>
+          <p className="text-sm text-fg-3">
+            For scripts and apps: send <code className="rounded-chip bg-muted px-1">Authorization: Bearer &lt;token&gt;</code> to <code className="rounded-chip bg-muted px-1">/api/v1</code>.
+            A token acts with its owner&apos;s permissions; one with no owner (made before permissions, or without a login) acts as an admin.
+            See the <a href="/api/v1/openapi.json" className="text-link hover:underline">OpenAPI spec</a>.
+          </p>
+        </>} />
       </section>
 
       <RebrickableSection initial={rebrickable} />

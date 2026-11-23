@@ -1,6 +1,6 @@
 'use client';
 import { useState, useTransition } from 'react';
-import { addPerson, setAdmin, setRole, type Result } from '@/app/actions';
+import { addPerson, resetLink, setAdmin, setPassword, setRole, type Result } from '@/app/actions';
 import { Banner, Button, field } from '../ui';
 import type { Person, Role } from '@/lib/service/permissions';
 
@@ -32,13 +32,42 @@ function RoleSelect({ c, login, role, pending, run }: { c: Collection; login: st
   );
 }
 
+/** Set password (#90): a password for someone who has none (or forgot theirs). */
+function PasswordForm({ login, pending, run, done }: { login: string; pending: boolean; run: Run; done: () => void }) {
+  return (
+    <form className="mt-2 flex gap-2" onSubmit={(e) => { e.preventDefault(); const f = e.currentTarget; const pw = String(new FormData(f).get('password')); run(() => setPassword(login, pw), `Set ${login}'s password. Tell them it, and they're signed out everywhere else.`); f.reset(); done(); }}>
+      <input name="password" type="password" required minLength={10} maxLength={128} autoComplete="new-password" placeholder="New password (10+ characters)" aria-label={`New password for ${login}`} className={`${field} mt-0`} />
+      <Button type="submit" disabled={pending}>Set</Button>
+    </form>
+  );
+}
+
+/** A reset link shown once (email isn't set up). It works like a password until it's used or expires. */
+function LinkNote({ login, url, clear }: { login: string; url: string; clear: () => void }) {
+  return (
+    <Banner kind="ok" onDismiss={clear}>
+      Reset link for {login}. Send it to them privately: anyone with it can set their password, for the next hour. It isn&apos;t shown again.
+      <input readOnly value={url} aria-label={`Reset link for ${login}`} className={`${field} mt-2 font-mono text-xs`} onFocus={(e) => e.currentTarget.select()} />
+    </Banner>
+  );
+}
+
 /**
  * Settings → People (admins): everyone who has signed in or been added, whether they're an admin, and their role in
  * each collection. Someone who isn't an admin sees only the collections they have a role in.
  */
-export function PeopleSection({ people, collections, me, envAdmins }: { people: Person[]; collections: Collection[]; me: string; envAdmins: boolean }) {
+export function PeopleSection({ people, collections, me, envAdmins, passwords = null }: { people: Person[]; collections: Collection[]; me: string; envAdmins: boolean; passwords?: 'reset' | 'set' | null }) {
   const [pending, run, note, clear] = useRun();
   const [open, setOpen] = useState<string | null>(null);
+  const [pwFor, setPwFor] = useState<string | null>(null);
+  const [link, setLink] = useState<{ login: string; url: string } | null>(null);
+  const [linking, startLink] = useTransition();
+  const askLink = (login: string) => startLink(async () => {
+    setLink(null);
+    const r = await resetLink(login);
+    if (r.ok && r.url) setLink({ login, url: r.url });
+    else run(async () => r, `Sent ${login} a reset link.`);
+  });
   const day = (iso: string | null) => (iso ? iso.slice(0, 10) : null);
   return (
     <section className={section} aria-labelledby="people-title">
@@ -48,15 +77,18 @@ export function PeopleSection({ people, collections, me, envAdmins }: { people: 
         {!envAdmins && <> Every login allowed in is an admin until <code className="rounded-chip bg-muted px-1">ADMIN_USERS</code> names the admins (see docs/install.md).</>}
       </p>
       {note && <Banner kind={note.kind} onDismiss={clear}>{note.text}</Banner>}
+      {link && <LinkNote login={link.login} url={link.url} clear={() => setLink(null)} />}
       <ul className="divide-y divide-line">
         {people.map((p) => (
           <li key={p.login} className="py-2 text-sm">
             <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
               <span className="min-w-0">
                 <span className="break-all font-medium">{p.login}</span>
-                <span className="text-xs text-fg-3"> · {p.admin ? (p.fromEnv ? 'admin (ADMIN_USERS)' : 'admin') : p.roles.length ? `${p.roles.length} collection${p.roles.length === 1 ? '' : 's'}` : 'no access yet'} · {p.lastSeenAt ? `last seen ${day(p.lastSeenAt)}` : 'not signed in yet'}</span>
+                <span className="text-xs text-fg-3"> · {p.admin ? (p.fromEnv ? 'admin (ADMIN_USERS)' : 'admin') : p.roles.length ? `${p.roles.length} collection${p.roles.length === 1 ? '' : 's'}` : 'no access yet'} · {p.lastSeenAt ? `last seen ${day(p.lastSeenAt)}` : 'not signed in yet'}{passwords && !p.password ? ' · no password' : ''}</span>
               </span>
-              <span className="flex gap-3">
+              <span className="flex flex-wrap gap-3">
+                {passwords && <Button variant="link" onClick={() => setPwFor(pwFor === p.login ? null : p.login)} aria-expanded={pwFor === p.login}>Set password</Button>}
+                {passwords === 'reset' && p.login.includes('@') && <Button variant="link" disabled={linking} onClick={() => askLink(p.login)}>Reset link</Button>}
                 {!p.admin && <Button variant="link" onClick={() => setOpen(open === p.login ? null : p.login)} aria-expanded={open === p.login}>Collections</Button>}
                 {!p.fromEnv && p.login !== me && (
                   <Button variant="link" disabled={pending} onClick={() => run(() => setAdmin(p.login, !p.admin), p.admin ? `${p.login} is no longer an admin.` : `${p.login} is now an admin.`)}>
@@ -65,6 +97,7 @@ export function PeopleSection({ people, collections, me, envAdmins }: { people: 
                 )}
               </span>
             </div>
+            {pwFor === p.login && <PasswordForm login={p.login} pending={pending} run={run} done={() => setPwFor(null)} />}
             {open === p.login && !p.admin && (
               <div className="mt-2 grid gap-2 rounded-control bg-subtle p-3 sm:grid-cols-2">
                 {collections.map((c) => <RoleSelect key={c.id} c={c} login={p.login} role={p.roles.find((r) => r.collectionId === c.id)?.role} pending={pending} run={run} />)}

@@ -18,6 +18,10 @@ const hourNow = () => Number(new Date().toLocaleString('en-US', { hour: 'numeric
 /** SYNC_HOUR (0–23, local time; default 4). Set SYNC_HOUR=off to only sync by hand. */
 let rbOnlyDay = '';
 
+// libSQL/Turso (#90 spike): sync against it; backups are the provider's job (Turso keeps point-in-time history).
+const remote = () => process.env.DB_DRIVER === 'libsql' || /^(libsql|https?|wss?|file):/i.test(process.env.DATABASE_URL ?? '');
+const schedDb = async () => (remote() ? (await import('./db/libsql')).libsqlDb() : nodeDb().db);
+
 async function maybeSync() {
   const setting = process.env.SYNC_HOUR ?? '4';
   const bl = brickLinkFromEnv();
@@ -27,12 +31,12 @@ async function maybeSync() {
     if (rbOnlyDay === today()) return;
     rbOnlyDay = today();
     const rb = rebrickableFromEnv();
-    if (rb) await startRebrickableSync(nodeDb().db, rb);
+    if (rb) await startRebrickableSync(await schedDb(), rb);
     const bs = bricksetFromEnv();
-    if (bs) await syncRetail(nodeDb().db, bs);
+    if (bs) await syncRetail(await schedDb(), bs);
     return;
   }
-  const { db } = nodeDb();
+  const db = await schedDb();
   const last = await syncStatus(db);
   if (last && new Date(last.startedAt).toLocaleDateString('en-CA', { timeZone: process.env.TZ || undefined }) === today()) return;
   const s = await startSync(db);
@@ -47,7 +51,7 @@ async function maybeSync() {
 async function maybeBackup() {
   const dir = process.env.BACKUP_DIR || join(dirname(dbPath()), 'backups');
   const keep = Number(process.env.BACKUP_KEEP || 7);
-  if (keep <= 0) return;
+  if (keep <= 0 || remote()) return;
   mkdirSync(/*turbopackIgnore: true*/ dir, { recursive: true });
   const name = `app-${today()}.db`;
   const existing = readdirSync(/*turbopackIgnore: true*/ dir).filter((f) => /^app-\d{4}-\d{2}-\d{2}\.db$/.test(f)).sort();
@@ -57,6 +61,7 @@ async function maybeBackup() {
 }
 
 export function startScheduler() {
+  if (process.env.VERCEL) return; // serverless: Vercel Cron calls GET /api/v1/sync/cron instead (vercel.json)
   const tick = () => {
     maybeBackup().catch((e) => console.error('backup failed:', e));
     maybeSync().catch((e) => console.error('scheduled sync failed:', e));

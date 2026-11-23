@@ -216,12 +216,15 @@ export async function removeMinifig(db: DB, key: string, collectionId?: number):
  * Re-prices every figure with a BrickLink number. A figure in several collections in the same condition is looked
  * up once and the answer copied to its other rows. Returns how many lookups failed.
  */
-export async function syncMinifigs(db: DB, lookup: MinifigLookup, currency?: string): Promise<number> {
+/** Re-prices every figure. With `deadline` (the sync's time limit) it goes oldest first and stops when time is up. */
+export async function syncMinifigs(db: DB, lookup: MinifigLookup, currency?: string, deadline?: number): Promise<number> {
   const cur = currency ?? (await getCurrency(db));
-  const all = await db.select().from(minifigs).where(isNotNull(minifigs.figNo)).orderBy(asc(minifigs.id)).all();
+  const all = await db.select().from(minifigs).where(isNotNull(minifigs.figNo))
+    .orderBy(...(deadline !== undefined ? [sql`${minifigs.lastUpdated} is not null`, minifigs.lastUpdated, minifigs.id] : [asc(minifigs.id)])).all();
   const done = new Map<string, number>(); // figNo|condition → the row that was looked up
   let errors = 0;
   for (const m of all) {
+    if (deadline !== undefined && Date.now() >= deadline) break;
     const k = `${m.figNo}|${m.condition}`;
     const first = done.get(k);
     if (first !== undefined) {

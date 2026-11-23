@@ -1,6 +1,6 @@
 // Helpers for the REST API route handlers (app/api/v1). JSON in, JSON out, errors as { error }.
 import 'server-only';
-import { bearer, crossSite, type Identity } from './auth';
+import { apiToken, crossSite, type Identity } from './auth';
 import { getDb, type DB } from './db';
 import { getSet, type Result } from './service/sets';
 import { apiUser } from './session';
@@ -51,7 +51,7 @@ export type Ctx<C> = {
 export function api<C>(routeNeed: RouteNeed, fn: (req: Request, ctx: Ctx<C>) => Promise<Response>) {
   return async (req: Request, route: { params: Promise<C> }) => {
     if (demoBlocks(req.method)) return json({ error: DEMO_ERROR }, 403);
-    if (req.method !== 'GET' && req.method !== 'HEAD' && !bearer(req.headers) && crossSite(req.headers)) {
+    if (req.method !== 'GET' && req.method !== 'HEAD' && !apiToken(req.headers) && crossSite(req.headers)) {
       return json({ error: 'Cross-site request blocked. Use an API token for requests from other sites.' }, 403);
     }
     const user = await apiUser(req);
