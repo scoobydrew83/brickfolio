@@ -21,7 +21,12 @@ import type { Result } from './sets';
 // person's organizations, so there's no "active organization": "All collections" works as before.
 
 export type Role = (typeof ROLES)[number];
-export type Access = { login: string; admin: boolean; roles: Map<number, Role> };
+/**
+ * `banned` (#102): a ban an admin set and that hasn't ended. Such a person has no rights at all (currentAccess treats
+ * them as signed out) in every AUTH_MODE. `impersonated`: an admin acting as this person (#102); they get only the
+ * person's rights, never an admin's.
+ */
+export type Access = { login: string; admin: boolean; roles: Map<number, Role>; banned?: boolean; impersonated?: boolean };
 /**
  * What an action needs: `member` = any role (or admin); `shared` = change shared data (admin, or editor/owner of any
  * collection); `admin`; or read/write/manage on one collection.
@@ -36,7 +41,7 @@ export const adminList = (env: Env = process.env) =>
   (env.ADMIN_USERS || '').split(',').map(normLogin).filter(Boolean);
 
 /** With Better Auth accounts, an unset ADMIN_USERS doesn't make everyone an admin: the first account is one. */
-const everyoneAdmin = (env: Env) => !adminList(env).length && env.AUTH_MODE !== 'better-auth';
+export const everyoneAdmin = (env: Env) => !adminList(env).length && env.AUTH_MODE !== 'better-auth';
 
 /** Everything allowed: the scheduler, AUTH_MODE=none, and pre-#50 API tokens. */
 const everything = (login: string): Access => ({ login, admin: true, roles: new Map() });
@@ -46,11 +51,16 @@ export const orgId = (collectionId: number) => `col_${collectionId}`;
 
 const hasAdminRole = (role: string | null | undefined) => !!role && role.split(',').map((r) => r.trim()).includes('admin');
 
+/** Whether a ban is in force: set, and with no end or an end still to come (#102). */
+export const banActive = (u: { banned?: boolean | null; banExpires?: Date | null } | undefined, now = Date.now()) =>
+  !!u?.banned && (!u.banExpires || u.banExpires.getTime() > now);
+
+/** A login's role and ban. */
+const userRow = (db: DB, login: string) =>
+  db.select({ role: authUser.role, banned: authUser.banned, banExpires: authUser.banExpires }).from(authUser).where(eq(authUser.email, login)).get();
+
 /** Whether a login is an admin: ADMIN_USERS (or everyone when it's unset, outside better-auth), or `user.role`. */
-async function isAdmin(db: DB, login: string, env: Env): Promise<boolean> {
-  if (everyoneAdmin(env) || adminList(env).includes(login)) return true;
-  return hasAdminRole((await db.select({ r: authUser.role }).from(authUser).where(eq(authUser.email, login)).get())?.r);
-}
+const adminBy = (login: string, role: string | null | undefined, env: Env) => everyoneAdmin(env) || adminList(env).includes(login) || hasAdminRole(role);
 
 /** The Better Auth user for a login, created (no password, role `user`) when there's none yet. */
 export async function ensureUser(db: DB, login: string, set: { lastSeenAt?: string; role?: string } = {}): Promise<string> {
@@ -121,6 +131,8 @@ export async function resolveAccess(db: DB, id: Identity, env: Env = process.env
   // Tokens from before #50 (no owner) and ones made without a login (AUTH_MODE=none) act as admin.
   if (id.via === 'token' && (!id.owner || id.owner === 'local')) return everything(normLogin(id.user));
   const login = normLogin(id.via === 'token' ? id.owner : id.user);
+  // An admin acting as someone (#102) gets only that person's rights, and isn't a visit of theirs.
+  if (id.impersonatedBy) return { ...(await accessOf(db, login, env)), admin: false, impersonated: true };
   if (id.via !== 'token') await touch(db, login);
   return accessOf(db, login, env);
 }
@@ -128,7 +140,10 @@ export async function resolveAccess(db: DB, id: Identity, env: Env = process.env
 /** What a login may do now, without counting it as a visit (e.g. the person who sent an invitation, when it's accepted). */
 export async function accessOf(db: DB, raw: string, env: Env = process.env): Promise<Access> {
   const login = normLogin(raw);
-  if (await isAdmin(db, login, env)) return { login, admin: true, roles: new Map() };
+  const u = await userRow(db, login);
+  // Banned (#102): no rights at all, in every AUTH_MODE (a proxy still lets them through, so this is what stops them).
+  if (banActive(u)) return { login, admin: false, roles: new Map(), banned: true };
+  if (adminBy(login, u?.role, env)) return { login, admin: true, roles: new Map() };
   return { login, admin: false, roles: new Map((await rolesOf(db, login)).map((r) => [r.c, r.r])) };
 }
 
@@ -140,7 +155,9 @@ export async function accessOf(db: DB, raw: string, env: Env = process.env): Pro
 export async function stillShares(db: DB, createdBy: string | null, collectionId: number | null, env: Env = process.env): Promise<boolean> {
   if (!createdBy || createdBy === 'local') return true;
   const login = normLogin(createdBy);
-  if (await isAdmin(db, login, env)) return true;
+  const u = await userRow(db, login);
+  if (banActive(u)) return false; // #102: a banned person's links stop too
+  if (adminBy(login, u?.role, env)) return true;
   if (collectionId == null) return false;
   return (await rolesOf(db, login, collectionId)).some((r) => allows(r.r, { collection: ['manage'] }));
 }
@@ -189,12 +206,16 @@ export function clampScope(a: Access, scope: number | 'all'): number | number[] 
 
 // ---- people (Settings → People) ----
 
-export type Person = { login: string; name: string | null; admin: boolean; fromEnv: boolean; lastSeenAt: string | null; /** Has a Better Auth password (#90). */ password: boolean; roles: { collectionId: number; role: Role }[] };
+export type Person = {
+  login: string; name: string | null; admin: boolean; fromEnv: boolean; lastSeenAt: string | null; /** Has a Better Auth password (#90). */ password: boolean; roles: { collectionId: number; role: Role }[];
+  /** #102: a ban in force (null: none), and whether two-factor is on. */
+  ban: { reason: string | null; until: string | null } | null; twoFactor: boolean;
+};
 
 /** Everyone seen or added, with their roles. Admins from ADMIN_USERS are marked `fromEnv` (they can't be demoted here). */
 export async function listPeople(db: DB, env: Env = process.env): Promise<Person[]> {
   const list = adminList(env);
-  const rows = await db.select({ login: authUser.email, name: authUser.name, role: authUser.role, lastSeenAt: authUser.lastSeenAt }).from(authUser).orderBy(authUser.email).all();
+  const rows = await db.select({ login: authUser.email, name: authUser.name, role: authUser.role, lastSeenAt: authUser.lastSeenAt, banned: authUser.banned, banReason: authUser.banReason, banExpires: authUser.banExpires, twoFactor: authUser.twoFactorEnabled }).from(authUser).orderBy(authUser.email).all();
   const members = await allMembers(db);
   const withPassword = new Set((await db.select({ login: authUser.email }).from(authAccount).innerJoin(authUser, eq(authUser.id, authAccount.userId)).where(eq(authAccount.providerId, 'credential')).all()).map((r) => r.login));
   const logins = new Set([...rows.map((r) => r.login), ...members.map((m) => m.login), ...list]);
@@ -204,6 +225,7 @@ export async function listPeople(db: DB, env: Env = process.env): Promise<Person
     return {
       login, name: u && u.name !== login ? u.name : null, admin: fromEnv || hasAdminRole(u?.role), fromEnv, lastSeenAt: u?.lastSeenAt ?? null, password: withPassword.has(login),
       roles: members.filter((m) => m.login === login).map((m) => ({ collectionId: m.collectionId, role: m.role })),
+      ban: u && banActive(u) ? { reason: u.banReason, until: u.banExpires?.toISOString() ?? null } : null, twoFactor: !!u?.twoFactor,
     };
   });
 }

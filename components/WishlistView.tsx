@@ -11,7 +11,7 @@ import { blLink, moneyIn, type Money } from './board/ui';
 import { RetireChip } from './board/SetCard';
 import { retirement } from '@/lib/retail';
 import { PageHeader } from './shell/PageHeader';
-import { Banner, Button, Chip, Dialog, EmptyState, IconButton, buttonClass, cx, field } from './ui';
+import { Banner, Button, Chip, Confirm, Dialog, EmptyState, IconButton, Tip, buttonClass, cx, field, toast } from './ui';
 
 export type WishOffer = { amount: number; label: string; url: string | null; observedAt: string };
 const ago = (iso: string) => { const d = Math.floor((Date.now() - Date.parse(iso)) / 86_400_000); return d <= 0 ? 'today' : d === 1 ? 'yesterday' : `${d} days ago`; };
@@ -25,8 +25,10 @@ export default function WishlistView({ items, currency, priced, offers = {}, las
   const act = (fn: () => Promise<Result>, ok: string, after?: () => void) =>
     start(async () => {
       const r = await fn();
-      setMessage(r.ok ? { kind: 'ok', text: ok } : { kind: 'error', text: r.error });
-      if (r.ok) after?.();
+      if (!r.ok) return setMessage({ kind: 'error', text: r.error });
+      setMessage(null);
+      toast.success(ok);
+      after?.();
     });
 
   const rows = useMemo(() => items.map((w) => ({ w, s: wishStatus(w, offers[w.setNo]) })).sort((a, b) => a.s.rank - b.s.rank || (a.w.avgSold ?? 0) / (a.w.target || 1) - (b.w.avgSold ?? 0) / (b.w.target || 1)), [items, offers]);
@@ -77,7 +79,7 @@ export default function WishlistView({ items, currency, priced, offers = {}, las
                 {w.blError && <span className="block text-xs text-danger">{w.blError}</span>}
               </span>
               <span className="flex flex-col items-end gap-1 text-right">
-                <span className="text-lg font-extrabold tabular-nums [font-stretch:112%]" title="BrickLink average sold">{money(w.avgSold)}</span>
+                <Tip label="BrickLink average sold"><span className="text-lg font-extrabold tabular-nums [font-stretch:112%]">{money(w.avgSold)}</span></Tip>
                 <Chip tone={s.tone}>{s.label}</Chip>
                 <span className="text-xs text-fg-3" suppressHydrationWarning>{w.lastUpdated ? `Checked ${timeAgo(w.lastUpdated)}` : 'Not checked yet'}</span>
                 {offers[w.setNo] && (() => {
@@ -88,9 +90,13 @@ export default function WishlistView({ items, currency, priced, offers = {}, las
               </span>
               <span className="col-span-3 flex items-center justify-end gap-0.5 sm:col-span-1">
                 {canEdit && <Button size="sm" icon={Check} disabled={pending} onClick={() => act(() => acquireWish(w.setNo), `Added ${w.name ?? displayNo(w.setNo)} to your sets.`)}>Got it</Button>}
-                <a href={blLink(w.setNo)} target="_blank" rel="noreferrer" aria-label="Open on BrickLink" title="Open on BrickLink" className={cx(buttonClass('ghost', 'sm'), 'size-8 px-0')}><ExternalLink aria-hidden className="size-4" /></a>
+                <Tip label="Open on BrickLink"><a href={blLink(w.setNo)} target="_blank" rel="noreferrer" aria-label="Open on BrickLink" className={cx(buttonClass('ghost', 'sm'), 'size-8 px-0')}><ExternalLink aria-hidden className="size-4" /></a></Tip>
                 {canEdit && <IconButton icon={Pencil} label="Edit" onClick={() => setEditing(w)} />}
-                {canEdit && <IconButton icon={Trash2} label="Remove from wishlist" tone="danger" disabled={pending} onClick={() => act(() => removeWish(w.setNo), `Removed ${w.name ?? displayNo(w.setNo)} from your wishlist.`)} />}
+                {canEdit && (
+                  <Confirm title={`Remove ${w.name ?? displayNo(w.setNo)} from your wishlist?`} body="Its target price, notes and price alerts go with it." confirmLabel="Remove" tone="danger" onConfirm={() => act(() => removeWish(w.setNo), `Removed ${w.name ?? displayNo(w.setNo)} from your wishlist.`)}>
+                    <IconButton icon={Trash2} label="Remove from wishlist" tone="danger" disabled={pending} />
+                  </Confirm>
+                )}
               </span>
             </li>
           ))}

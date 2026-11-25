@@ -3,7 +3,7 @@
 import { useMemo, useState } from 'react';
 import type { SharedCollection } from '@/lib/service/share';
 import { displayNo, money as fmt, num } from '@/lib/sets';
-import { CONDITION_TONE, Callout, Chip, EmptyState, SearchInput, Select } from './ui';
+import { CONDITION_TONE, Callout, Chip, Combobox, EmptyState, SearchInput } from './ui';
 
 const blSet = (no: string) => `https://www.bricklink.com/v2/catalog/catalogitem.page?S=${encodeURIComponent(no)}`;
 
@@ -35,7 +35,7 @@ export default function ShareView({ data }: { data: SharedCollection }) {
 
       <div className="flex flex-wrap gap-3">
         <SearchInput value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search name, set #, theme…" aria-label="Search the collection" />
-        {themes.length > 1 && <Select label="Theme" value={theme} onChange={(e) => setTheme(e.target.value)} options={[['', 'All themes'], ...themes.map((x) => [x, x])]} />}
+        {themes.length > 1 && <label className="flex items-center gap-2 text-sm text-fg-2">Theme<Combobox label="Theme" value={theme} onChange={setTheme} options={[{ value: '', label: 'All themes' }, ...themes.map((x) => ({ value: x, label: x }))]} className="mt-0 w-auto min-w-44" /></label>}
       </div>
 
       {sets.length === 0 ? <EmptyState title="No sets match" /> : (

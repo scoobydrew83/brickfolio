@@ -2,8 +2,12 @@
 // See docs/design.md → Components for when to use each one.
 import type { LucideIcon } from 'lucide-react';
 import { Loader2, Search, X } from 'lucide-react';
+import { cn } from '@/lib/utils';
+import { Tip } from './Tip';
+import { ToggleGroup, ToggleGroupItem } from '../toggle-group';
 
-export const cx = (...c: (string | false | null | undefined)[]) => c.filter(Boolean).join(' ');
+/** Joins class names and resolves Tailwind conflicts (the later class wins). Same function as `cn` from '@/lib/utils'. */
+export const cx = (...c: (string | false | null | undefined)[]) => cn(...c);
 
 /* ---------- Buttons ---------- */
 
@@ -14,7 +18,7 @@ const VARIANT: Record<ButtonVariant, string> = {
   primary: 'bg-primary font-semibold text-on-primary hover:bg-primary-hover',
   secondary: 'border border-line-strong bg-surface font-medium text-fg hover:bg-subtle',
   ghost: 'font-medium text-fg-2 hover:bg-muted hover:text-fg',
-  danger: 'bg-danger-solid font-semibold text-white hover:opacity-90',
+  danger: 'bg-danger-solid font-semibold text-on-danger hover:opacity-90',
   link: 'font-medium text-link hover:underline',
   'danger-link': 'font-medium text-danger hover:underline',
 };
@@ -39,19 +43,20 @@ export function Button({ variant = 'secondary', size = 'md', icon: Icon, loading
 /** Square icon-only button. `label` is required: it is the accessible name and the tooltip. */
 export function IconButton({ icon: Icon, label, tone = 'default', className, type = 'button', ...rest }: React.ButtonHTMLAttributes<HTMLButtonElement> & { icon: LucideIcon; label: string; tone?: 'default' | 'danger' }) {
   return (
-    <button
-      type={type}
-      aria-label={label}
-      title={label}
-      className={cx(
-        'inline-flex size-8 shrink-0 items-center justify-center rounded-control transition-colors disabled:opacity-50',
-        tone === 'danger' ? 'text-fg-3 hover:bg-danger-soft hover:text-danger' : 'text-fg-2 hover:bg-muted hover:text-fg',
-        className,
-      )}
-      {...rest}
-    >
-      <Icon aria-hidden className="size-4" />
-    </button>
+    <Tip label={label}>
+      <button
+        type={type}
+        aria-label={label}
+        className={cx(
+          'inline-flex size-8 shrink-0 items-center justify-center rounded-control transition-colors disabled:opacity-50',
+          tone === 'danger' ? 'text-fg-3 hover:bg-danger-soft hover:text-danger' : 'text-fg-2 hover:bg-muted hover:text-fg',
+          className,
+        )}
+        {...rest}
+      >
+        <Icon aria-hidden className="size-4" />
+      </button>
+    </Tip>
   );
 }
 
@@ -168,23 +173,31 @@ export function Select({ label, options, className, ...rest }: React.SelectHTMLA
   return label ? <label className="flex items-center gap-2 text-sm text-fg-2">{label}{select}</label> : select;
 }
 
-/** Two to four mutually exclusive options, e.g. Cards / Table. */
+/**
+ * Two to four mutually exclusive options, e.g. Cards / Table. shadcn's `toggle-group` (Base UI): one Tab stop, arrow
+ * keys move between the options (the WAI-ARIA toolbar pattern), each option is a button with `aria-pressed`. Pressing
+ * the selected option keeps it selected.
+ */
 export function Segmented<T extends string>({ value, onChange, options, label }: { value: T; onChange: (v: T) => void; options: readonly { value: T; label: string; icon?: LucideIcon }[]; label: string }) {
   return (
-    <div role="group" aria-label={label} className="flex rounded-control border border-line-strong bg-surface p-0.5 text-sm">
+    <ToggleGroup
+      aria-label={label}
+      value={[value]}
+      onValueChange={(v) => { if (v[0]) onChange(v[0] as T); }}
+      // As before: a full-width flex row (not w-fit), no gap between the options, stretched to the same height.
+      className="flex w-auto items-stretch gap-0 rounded-control border border-line-strong bg-surface p-0.5 text-sm"
+    >
       {options.map(({ value: v, label: l, icon: Icon }) => (
-        <button
+        <ToggleGroupItem
           key={v}
-          type="button"
-          onClick={() => onChange(v)}
-          aria-pressed={value === v}
-          className={cx('inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 transition-colors', value === v ? 'bg-primary font-medium text-on-primary' : 'text-fg-2 hover:text-fg')}
+          value={v}
+          className={cx('shrink justify-start rounded-md px-3 py-1.5 font-normal', value === v ? 'bg-primary font-medium text-on-primary' : 'text-fg-2 hover:text-fg')}
         >
           {Icon && <Icon aria-hidden className="size-4" />}
           {l}
-        </button>
+        </ToggleGroupItem>
       ))}
-    </div>
+    </ToggleGroup>
   );
 }
 

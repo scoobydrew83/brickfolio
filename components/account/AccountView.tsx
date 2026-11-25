@@ -5,7 +5,7 @@ import { addPassword, changeName, changePassword, revokeOtherSessions, revokeSes
 import { authClient } from '@/lib/auth-client';
 import type { AccountInfo } from '@/lib/account';
 import type { Result } from '@/lib/service/sets';
-import { Banner, Button, field } from '../ui';
+import { Banner, Button, field, toast } from '../ui';
 import { PageHeader } from '../shell/PageHeader';
 import { InviteActions } from './InviteActions';
 import { PasskeysSection } from './PasskeysSection';
@@ -28,8 +28,14 @@ const when = (iso: string) => new Date(iso).toLocaleString(undefined, { dateStyl
 /** /account with AUTH_MODE=better-auth: invitations for you, profile, password, sign-in methods and sessions. */
 export default function AccountView({ info }: { info: AccountInfo }) {
   const [pending, start] = useTransition();
-  const [note, setNote] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
-  const run: Run = (fn, ok, after) => start(async () => { const r = await fn(); setNote(r.ok ? { kind: 'ok', text: ok } : { kind: 'error', text: r.error }); if (r.ok) after?.(); });
+  const [note, setNote] = useState<{ kind: 'error'; text: string } | null>(null);
+  const run: Run = (fn, ok, after) => start(async () => {
+    const r = await fn();
+    if (!r.ok) return setNote({ kind: 'error', text: r.error });
+    setNote(null);
+    toast.success(ok);
+    after?.();
+  });
   const [out, startOut] = useTransition();
   const router = useRouter();
   const signOut = () => startOut(async () => { await authClient.signOut(); router.replace('/sign-in'); router.refresh(); });

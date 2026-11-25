@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState, useTransition } from 'react';
 import { Search, Trash2, Upload } from 'lucide-react';
 import { findOmrModel, removeModel, uploadModel } from '@/app/actions';
-import { Banner, Button, Segmented } from './ui';
+import { Banner, Button, Confirm, Segmented, toast } from './ui';
 
 type View = 'photo' | '3d' | 'steps';
 type Props = {
@@ -36,8 +36,8 @@ function NoLibrary() {
   return (
     <div className={`${frame} flex items-center justify-center p-8 text-center text-sm text-tile-ink/80`}>
       <p className="max-w-sm">
-        The 3D view needs the LDraw parts library on the server. Set <code className="rounded-chip bg-white px-1">LDRAW_LIBRARY_DIR</code> to the unzipped
-        library (or <code className="rounded-chip bg-white px-1">LDRAW_LIBRARY_URL</code> on Cloudflare). See the install guide.
+        The 3D view needs the LDraw parts library on the server. Set <code className="rounded-chip bg-tile-raised px-1">LDRAW_LIBRARY_DIR</code> to the unzipped
+        library (or <code className="rounded-chip bg-tile-raised px-1">LDRAW_LIBRARY_URL</code> on Cloudflare). See the install guide.
       </p>
     </div>
   );
@@ -74,7 +74,7 @@ function UploadModel({ setNo }: { setNo: string }) {
           });
         }}
       >
-        <input name="file" type="file" accept=".ldr,.mpd,.dat" required aria-label="LDraw model file" className="max-w-full text-sm file:mr-3 file:rounded-control file:border file:border-tile-ink/40 file:bg-white file:px-3 file:py-1.5" />
+        <input name="file" type="file" accept=".ldr,.mpd,.dat" required aria-label="LDraw model file" className="max-w-full text-sm file:mr-3 file:rounded-control file:border file:border-tile-ink/40 file:bg-tile-raised file:px-3 file:py-1.5" />
         <Button type="submit" icon={Upload} loading={pending} disabled={finding}>Upload</Button>
       </form>
       {error && <p role="alert" className="font-semibold text-tile-ink">{error}</p>}
@@ -112,7 +112,7 @@ function Model({ setNo, steps, fileName, author, canEdit = true }: { setNo: stri
         renderer.domElement.setAttribute('role', 'img');
 
         const scene = new THREE.Scene();
-        scene.background = new THREE.Color(getComputedStyle(el).getPropertyValue('--tile').trim() || '#f5f7f9');
+        scene.background = new THREE.Color(getComputedStyle(el).getPropertyValue('--tile').trim());
         scene.add(new THREE.HemisphereLight(0xffffff, 0x8796a3, 2.2));
         const sun = new THREE.DirectionalLight(0xffffff, 1.6);
         sun.position.set(-1, 1.5, 1);
@@ -198,9 +198,12 @@ function Model({ setNo, steps, fileName, author, canEdit = true }: { setNo: stri
       <p className="flex flex-wrap items-center gap-x-3 text-xs text-fg-3">
         <span>Model: {fileName}{author ? ` by ${author}` : ''}. Parts from the LDraw library (CC BY 2.0).</span>
         {canEdit && (
-          <Button variant="danger-link" className="text-xs" disabled={pending} onClick={() => start(async () => { const r = await removeModel(setNo); if (!r.ok) setMessage(r.error); })}>
-            <Trash2 aria-hidden className="size-3.5" />Remove model
-          </Button>
+          <Confirm title="Remove the 3D model?" body={`${fileName} is deleted from the server. To get the 3D and step views back, upload the file again.`} confirmLabel="Remove model" tone="danger"
+            onConfirm={() => start(async () => { const r = await removeModel(setNo); if (!r.ok) setMessage(r.error); else toast.success('Model removed.'); })}>
+            <Button variant="danger-link" className="text-xs" disabled={pending}>
+              <Trash2 aria-hidden className="size-3.5" />Remove model
+            </Button>
+          </Confirm>
         )}
       </p>
     </div>

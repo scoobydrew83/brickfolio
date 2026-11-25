@@ -20,8 +20,13 @@
 //   No rate limit (the mobile app polls), and a key made through them must keep the `bf_` prefix.
 // - Social sign-in (Google, GitHub, Apple; each when its keys are set) and emailed sign-in links (magicLink, when email
 //   is set up) follow the same sign-up rules. A provider that verified the address, or following the link, proves it.
-import { betterAuth, type BetterAuthOptions } from 'better-auth';
-import { APIError, createAuthMiddleware, getSessionFromCtx } from 'better-auth/api';
+// - Settings → People (#102): bans, deletion, sessions and two-factor reset are lib/service/people-admin.ts, and the
+//   admin plugin's /admin/* endpoints follow the same rules (the gate in hooks.before). Impersonation runs through a
+//   server-only endpoint here (/brickfolio/impersonate) so Brickfolio's admins (ADMIN_USERS too, not only
+//   user.role = 'admin') can use it; stopping is the plugin's own /admin/stop-impersonating.
+import { betterAuth, type BetterAuthOptions, type BetterAuthPlugin, type StandardSchemaV1 } from 'better-auth';
+import { APIError, createAuthEndpoint, createAuthMiddleware, getSessionFromCtx, sessionMiddleware } from 'better-auth/api';
+import { deleteSessionCookie, setSessionCookie } from 'better-auth/cookies';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { nextCookies } from 'better-auth/next-js';
 import { admin, magicLink, organization, twoFactor } from 'better-auth/plugins';
@@ -39,6 +44,7 @@ import * as perm from './service/permissions';
 import { magicLinkTwoFactor } from './magic-link-2fa';
 import * as invites from './service/invitations';
 import * as tokens from './service/tokens';
+import * as people from './service/people-admin';
 import type { Result } from './service/sets';
 
 export const authSchema = {
@@ -89,6 +95,7 @@ const viaProvider = (ctx: { path?: string } | null | undefined) => !!ctx?.path &
 const proves = (ctx: { path?: string } | null | undefined, user: Record<string, unknown>) =>
   user.emailVerified === true && (viaProvider(ctx) || ctx?.path === '/magic-link/verify');
 
+const BANNED = "You've been banned from this Brickfolio. Ask an admin.";
 const CLOSED = { code: 'SIGNUP_CLOSED', message: 'Sign-up is closed. Ask an admin to add you.' };
 
 /** Better Auth endpoints that act with someone's rights: they must still be allowed in (ALLOWED_USERS). */
@@ -139,6 +146,63 @@ const refuse = (r: { error: string; status?: number }): never => {
 // Better Auth's invitation endpoints answer with Brickfolio's (lib/service/invitations.ts), so who may invite, at
 // which role, and what accepting needs are the same through either.
 const INVITE_PATHS = new Set(['/organization/invite-member', '/organization/cancel-invitation', '/organization/accept-invitation', '/organization/reject-invitation']);
+
+// The admin plugin's endpoints that act on someone else, with the rule they follow (lib/service/people-admin.ts).
+const ADMIN_TARGETS: Record<string, people.AdminAct> = { '/admin/ban-user': 'ban', '/admin/remove-user': 'delete', '/admin/impersonate-user': 'impersonate' };
+/** How long acting as someone lasts (as the admin plugin's default). */
+export const IMPERSONATE_SECONDS = 60 * 60;
+
+/**
+ * The /admin/* part of the gate (#102). Only Brickfolio's admins, never while acting as someone else, and nobody
+ * bans, deletes or impersonates themselves or an ADMIN_USERS admin. The plugin then also checks `user.role`.
+ */
+async function adminGate(db: DB, path: string, body: Record<string, unknown>, s: { user: { id: string; email: string }; session: Record<string, unknown> }) {
+  const actor = { ...(await perm.accessOf(db, s.user.email)), ...(s.session.impersonatedBy ? { admin: false, impersonated: true } : {}) };
+  const what = ADMIN_TARGETS[path] ?? (path === '/admin/update-user' && (body.data as Record<string, unknown> | undefined)?.banned ? 'ban' : undefined);
+  const target = what && typeof body.userId === 'string' ? (await db.select({ email: authUser.email }).from(authUser).where(eq(authUser.id, body.userId)).get())?.email : undefined;
+  if (what && target) {
+    const r = await people.refusal(db, actor, target, what);
+    if (r) refuse(r);
+  }
+  const r = people.adminRefusal(actor);
+  if (r) refuse(r);
+}
+
+/**
+ * Acting as someone (#102), for the server action only (SERVER_ONLY: no route reaches it). The admin plugin's
+ * impersonate-user, without its `user.role` check (Brickfolio's admins include ADMIN_USERS) and with Brickfolio's
+ * rules: the admin's own session is kept in the plugin's admin_session cookie, so its stop-impersonating brings it back.
+ */
+const userIdBody: StandardSchemaV1<{ userId: string }> = {
+  '~standard': {
+    version: 1, vendor: 'brickfolio',
+    validate: (v) => (v && typeof (v as { userId?: unknown }).userId === 'string' ? { value: { userId: (v as { userId: string }).userId } } : { issues: [{ message: 'userId is required.' }] }),
+  },
+};
+
+function brickfolioAdmin(db: DB) {
+  return {
+    id: 'brickfolio-admin',
+    endpoints: {
+      brickfolioImpersonate: createAuthEndpoint('/brickfolio/impersonate', { method: 'POST', body: userIdBody, requireHeaders: true, use: [sessionMiddleware], metadata: { SERVER_ONLY: true } }, async (ctx) => {
+        const admin = ctx.context.session;
+        const target = await ctx.context.internalAdapter.findUserById(ctx.body.userId);
+        if (!target) throw new APIError('NOT_FOUND', { message: 'Not found.' });
+        const actor = { ...(await perm.accessOf(db, admin.user.email)), ...((admin.session as { impersonatedBy?: string | null }).impersonatedBy ? { admin: false, impersonated: true } : {}) };
+        const r = await people.refusal(db, actor, target.email, 'impersonate');
+        if (r) refuse(r);
+        const session = await ctx.context.internalAdapter.createSession(target.id, true, { impersonatedBy: admin.user.id, expiresAt: new Date(Date.now() + IMPERSONATE_SECONDS * 1000) }, true);
+        if (!session) throw new APIError('INTERNAL_SERVER_ERROR', { message: "Couldn't start acting as them." });
+        const cookies = ctx.context.authCookies;
+        deleteSessionCookie(ctx);
+        const dontRemember = await ctx.getSignedCookie(cookies.dontRememberToken.name, ctx.context.secret);
+        await ctx.setSignedCookie(ctx.context.createAuthCookie('admin_session').name, `${admin.session.token}:${dontRemember || ''}`, ctx.context.secret, cookies.sessionToken.attributes);
+        await setSessionCookie(ctx, { session, user: target }, true);
+        return ctx.json({ ok: true });
+      }),
+    },
+  } satisfies BetterAuthPlugin;
+}
 
 async function invitationEndpoint(db: DB, path: string, body: Record<string, unknown>, s: { user: { email: string; emailVerified: boolean }; session: Record<string, unknown> }, base?: string) {
   const access = () => perm.resolveAccess(db, { user: s.user.email, via: 'better-auth' });
@@ -227,6 +291,12 @@ export function authOptions(db: DB) {
             throw new APIError('BAD_REQUEST', CLOSED);
           },
         },
+        delete: {
+          // Their roles, invitations, API keys, passkeys and two-factor go too (#102), however they're deleted.
+          async before(user: { id: string; email: string }) {
+            await people.cleanupPerson(db, user.id, user.email.toLowerCase());
+          },
+        },
       },
       account: {
         create: {
@@ -243,9 +313,11 @@ export function authOptions(db: DB) {
       session: {
         create: {
           // Someone taken out of ALLOWED_USERS isn't signed in by any method (the app refuses them anyway, lib/auth.ts).
+          // Nor is someone banned (#102): the admin plugin checks too, and clears a ban that has ended.
           async before(session: { userId: string }) {
-            const u = await db.select({ email: authUser.email }).from(authUser).where(eq(authUser.id, session.userId)).get();
+            const u = await db.select({ email: authUser.email, banned: authUser.banned, banExpires: authUser.banExpires }).from(authUser).where(eq(authUser.id, session.userId)).get();
             if (u && !allowed(u.email)) throw new APIError('FORBIDDEN', { code: 'NOT_ALLOWED', message: "You don't have access." });
+            if (perm.banActive(u)) throw new APIError('FORBIDDEN', { code: 'BANNED_USER', message: BANNED });
           },
         },
       },
@@ -274,9 +346,12 @@ export function authOptions(db: DB) {
         if (!GUARDED.some((p) => ctx.path.startsWith(p)) && !GUARDED_PATHS.has(ctx.path)) return;
         const s = await getSessionFromCtx(ctx);
         if (!s) throw new APIError('UNAUTHORIZED');
+        // Stopping brings the admin's own session back: whoever they were acting as may have no rights at all (#102).
+        if (ctx.path === '/admin/stop-impersonating') return;
         // The app refuses people taken out of ALLOWED_USERS (lib/auth.ts); so do Better Auth's own endpoints.
         if (!s.user.emailVerified || !allowed(s.user.email)) throw new APIError('FORBIDDEN', { message: "You don't have access." });
         const body = (ctx.body ?? {}) as Record<string, unknown>;
+        if (ctx.path.startsWith('/admin/')) return adminGate(db, ctx.path, body, s);
         if (ctx.path === '/api-key/create' && body.prefix !== undefined && body.prefix !== tokens.PREFIX) throw new APIError('BAD_REQUEST', { message: `API keys start with ${tokens.PREFIX}.` });
         // A copied token's old row goes first, so a rollback can't bring it back (the plugin then deletes the key, if theirs).
         if (ctx.path === '/api-key/delete' && typeof body.keyId === 'string') {
@@ -297,7 +372,8 @@ export function authOptions(db: DB) {
       }),
     },
     plugins: [
-      admin({ defaultRole: 'user', adminRoles: ['admin'] }),
+      admin({ defaultRole: 'user', adminRoles: ['admin'], bannedUserMessage: BANNED, impersonationSessionDuration: IMPERSONATE_SECONDS }),
+      brickfolioAdmin(db),
       organization({
         ac, roles, creatorRole: 'owner',
         // Collections are made, renamed and deleted in Brickfolio (which keeps their organization in step).

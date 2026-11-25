@@ -7,7 +7,7 @@ import { useCallback, useEffect, useRef, useState, useTransition } from 'react';
 import { cmfChecklistFor } from '@/app/actions';
 import type { FigCandidate, FigCode } from '@/lib/barcode/figcodes';
 import type { CmfFig, CmfSeries } from '@/lib/service/minifigs';
-import { Button, Chip, IconButton, cx, field } from '../ui';
+import { Button, Chip, Combobox, Confirm, IconButton, cx } from '../ui';
 import type { FigLookup } from './useScanNetwork';
 import { cachedImageSrc, fallBackTo } from '@/lib/images/url';
 
@@ -87,7 +87,9 @@ export function FigureList({ rows, setRows, series, pending, onSubmit }: {
       </ul>
       <div className="flex flex-wrap gap-2">
         <Button variant="primary" icon={Check} loading={pending} disabled={!ready.length} onClick={onSubmit}>Add {ready.length} {ready.length === 1 ? 'figure' : 'figures'}</Button>
-        <Button variant="ghost" onClick={() => { if (window.confirm('Clear the scanned list?')) setRows(() => []); }}>Clear list</Button>
+        <Confirm title="Clear the scanned list?" body={`The ${rows.length} scanned ${rows.length === 1 ? 'figure leaves' : 'figures leave'} the list. Nothing is added.`} confirmLabel="Clear list" tone="danger" onConfirm={() => setRows(() => [])}>
+          <Button variant="ghost">Clear list</Button>
+        </Confirm>
       </div>
       <p className="text-xs text-fg-3">Box codes come from collectors, not LEGO, and the same figure has different codes per factory. Treat a match on a sealed box as a good guess.</p>
     </section>
@@ -163,10 +165,7 @@ function FigPicker({ series, hint, remember: rememberDefault, onPick, onCancel }
   return (
     <div className="space-y-2 rounded-control bg-subtle p-3">
       <label className="block text-sm">Series
-        <select value={themeId ?? ''} onChange={(e) => setThemeId(e.target.value ? Number(e.target.value) : null)} className={field}>
-          <option value="">Pick the series…</option>
-          {series.map((s) => <option key={s.themeId} value={s.themeId}>{s.name}</option>)}
-        </select>
+        <Combobox label="Series" value={themeId === null ? '' : String(themeId)} onChange={(v) => setThemeId(v ? Number(v) : null)} placeholder="Pick the series…" options={series.map((s) => ({ value: String(s.themeId), label: s.name }))} />
       </label>
       {pending && <p className="text-xs text-fg-3">Loading the checklist…</p>}
       {error && <p className="text-xs text-danger">{error}</p>}

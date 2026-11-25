@@ -5,7 +5,7 @@
 import { useMemo, useState, useTransition } from 'react';
 import { encode } from 'uqr';
 import { authClient } from '@/lib/auth-client';
-import { Banner, Button, Chip, field } from '@/components/ui';
+import { Banner, Button, Chip, field, toast } from '@/components/ui';
 
 const h2 = 'text-lg font-extrabold [font-stretch:110%]';
 const section = 'space-y-3 border-t border-line pt-6';
@@ -64,7 +64,8 @@ export function TwoFactorSection() {
     if (r.error) return fail(r.error);
     setCodes(setup!.codes);
     setSetup(null);
-    setNote({ kind: 'ok', text: 'Two-factor sign-in is on.' });
+    setNote(null);
+    toast.success('Two-factor sign-in is on.');
     session.refetch();
   });
   const confirmed = (f: FormData) => start(async () => {
@@ -73,11 +74,13 @@ export function TwoFactorSection() {
       const r = await authClient.twoFactor.generateBackupCodes({ password });
       if (r.error) return fail(r.error);
       setCodes(r.data.backupCodes);
-      setNote({ kind: 'ok', text: 'New backup codes made. The old ones no longer work.' });
+      setNote(null);
+      toast.success('New backup codes made. The old ones no longer work.');
     } else {
       const r = await authClient.twoFactor.disable({ password });
       if (r.error) return fail(r.error);
-      setNote({ kind: 'ok', text: 'Two-factor sign-in is off.' });
+      setNote(null);
+      toast.success('Two-factor sign-in is off.');
       session.refetch();
     }
     setAction(null);

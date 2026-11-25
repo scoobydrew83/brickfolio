@@ -1,4 +1,4 @@
-# Lint, test and build on every push to main and every PR.
+# Lint, test and build (Node and the Cloudflare Worker) on every push to main and every PR.
 # No secrets: pages await connection(), so the build never opens the database.
 name: CI
 
@@ -28,3 +28,17 @@ jobs:
       - run: npm run lint
       - run: npm test
       - run: npm run build
+
+  # The Cloudflare Workers build (OpenNext), which the owner's production runs on. No account or secrets needed: it
+  # only builds the Worker bundle, it doesn't deploy.
+  cloudflare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run cf:build

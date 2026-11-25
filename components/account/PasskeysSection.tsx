@@ -4,11 +4,11 @@
 import { useState, useTransition } from 'react';
 import { KeyRound, Pencil, Trash2 } from 'lucide-react';
 import { authClient } from '@/lib/auth-client';
-import { Banner, Button, IconButton, Skeleton, field } from '@/components/ui';
+import { Banner, Button, Confirm, IconButton, Skeleton, field, toast } from '@/components/ui';
 
 const h2 = 'text-lg font-extrabold [font-stretch:110%]';
 const section = 'space-y-3 border-t border-line pt-6';
-type Note = { kind: 'ok' | 'error'; text: string } | null;
+type Note = { kind: 'error'; text: string } | null;
 type Err = { code?: string; message?: string } | null;
 
 const message = (e: NonNullable<Err>) => e.code === 'SESSION_NOT_FRESH' ? 'Sign out and in again, then add the passkey (it needs a recent sign-in).' : e.message ?? 'That didn’t work.';
@@ -22,7 +22,8 @@ export function PasskeysSection() {
   const run = (fn: () => Promise<{ error: Err }>, ok: string, after?: () => void) => start(async () => {
     const r = await fn();
     if (r.error) { if (r.error.code !== 'ERROR_CEREMONY_ABORTED') setNote({ kind: 'error', text: message(r.error) }); return; }
-    setNote({ kind: 'ok', text: ok });
+    setNote(null);
+    toast.success(ok);
     after?.();
     list.refetch();
   });
@@ -50,8 +51,10 @@ export function PasskeysSection() {
                 </span>
                 <span className="flex shrink-0">
                   <IconButton icon={Pencil} label={`Rename ${p.name || 'passkey'}`} onClick={() => setRenaming(p.id)} disabled={pending} />
-                  <IconButton icon={Trash2} tone="danger" label={`Delete ${p.name || 'passkey'}`} disabled={pending}
-                    onClick={() => { if (confirm(`Delete ${p.name || 'this passkey'}? You won't be able to sign in with it.`)) run(() => authClient.passkey.deletePasskey({ id: p.id }), 'Passkey deleted.'); }} />
+                  <Confirm title={`Delete ${p.name || 'this passkey'}?`} body="You won't be able to sign in with it." confirmLabel="Delete" tone="danger"
+                    onConfirm={() => run(() => authClient.passkey.deletePasskey({ id: p.id }), 'Passkey deleted.')}>
+                    <IconButton icon={Trash2} tone="danger" label={`Delete ${p.name || 'passkey'}`} disabled={pending} />
+                  </Confirm>
                 </span>
               </>}
             </li>

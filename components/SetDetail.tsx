@@ -19,7 +19,7 @@ import { CopyForm } from './board/CopyForm';
 import { retailGain, retirement } from '@/lib/retail';
 import { SetForm } from './board/SetForm';
 import { blLink, moneyIn } from './board/ui';
-import { Banner, Button, Callout, CONDITION_TONE, Chip, EmptyState, FilterChip, buttonClass, cx } from './ui';
+import { Banner, Button, Callout, CONDITION_TONE, Chip, EmptyState, FilterChip, buttonClass, cx, toast } from './ui';
 
 type Props = { set: SetRow; parts: PartRow[]; prices: { date: string; avgSold: number | null }[]; currency: string; locations: string[]; priced: boolean; model: { fileName: string; author: string | null } | null; library: boolean; builds: BuildMatch[]; view?: '3d'; missing: MissingSummary; missingCopyId: number | null; guide: 'N' | 'U' | null; partout: (Partout & { unpriced: number }) | null; partsPriced: boolean; sources: ValueSources; conditions: Conditions; collections?: { id: number; name: string }[]; collection?: number; writable?: 'all' | number[] };
 type Side = { amount: number | null; observedOn: string; sampleSize: number | null } | null;
@@ -43,7 +43,10 @@ export default function SetDetail({ set: s, parts, prices, currency, locations, 
   const act = (fn: () => Promise<Result & { message?: string }>, ok: string, after?: () => void) =>
     start(async () => {
       const r = await fn();
-      setMessage(r.ok ? { kind: 'ok', text: r.message || ok } : { kind: 'error', text: r.error });
+      // Short successes are toasts; a result the server wrote out (e.g. parting out a copy) stays on the page.
+      if (!r.ok) setMessage({ kind: 'error', text: r.error });
+      else if (r.message) setMessage({ kind: 'ok', text: r.message });
+      else { setMessage(null); toast.success(ok); }
       if (r.ok) after?.();
     });
 
@@ -68,7 +71,8 @@ export default function SetDetail({ set: s, parts, prices, currency, locations, 
       const res = await fetch(wantedUrl);
       if (!res.ok) throw new Error(`The server answered ${res.status}.`);
       await navigator.clipboard.writeText(await res.text());
-      setMessage({ kind: 'ok', text: 'Wanted List XML copied. On BrickLink: Want → Upload → paste.' });
+      setMessage(null);
+      toast.success('Wanted List XML copied.', { description: 'On BrickLink: Want → Upload → paste.', duration: 8000 });
     } catch (e) {
       setMessage({ kind: 'error', text: `Couldn't copy the Wanted List: ${e instanceof Error ? e.message : String(e)}` });
     }
@@ -127,7 +131,7 @@ export default function SetDetail({ set: s, parts, prices, currency, locations, 
           <Callout className="px-4 pt-3.5 pb-3">
             <div className="flex items-end justify-between gap-3">
               <div>
-                <p className="text-3xl font-extrabold leading-none tabular-nums [font-stretch:112%]" title={`${s.qty} ${s.qty === 1 ? 'copy' : 'copies'}`}>{s.qty}x</p>
+                <p className="text-3xl font-extrabold leading-none tabular-nums [font-stretch:112%]">{s.qty}x</p>
                 <p className="mt-1 text-xs text-fg-3">{copiesSummary(s.copies)}</p>
               </div>
               <div className="text-right">

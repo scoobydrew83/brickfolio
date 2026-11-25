@@ -1,4 +1,5 @@
 'use client';
+import { useSearchParams } from 'next/navigation';
 import Image from 'next/image';
 import Link from 'next/link';
 import { useEffect, useState, useTransition } from 'react';
@@ -7,17 +8,23 @@ import { addLot, editLot, importLotsFile, removeLot, searchLots, undoLotImport }
 import { itemImage, itemPage } from '@/lib/bricklink/links';
 import type { LotRow } from '@/lib/service/lots';
 import { PageHeader } from './shell/PageHeader';
-import { Banner, Button, Callout, Chip, Count, Dialog, EmptyState, IconButton, SearchInput, Segmented, Select, buttonClass, field } from './ui';
+import { LocationPicker } from './LocationPicker';
+import { Banner, Button, Callout, Chip, Combobox, Count, Dialog, EmptyState, IconButton, SearchInput, Segmented, buttonClass, field, toast } from './ui';
 
 type Import = { id: string; fileName: string | null; location: string | null; mode: 'add' | 'replace'; lots: number; pieces: number; createdAt: string };
-type Props = { first: { lots: LotRow[]; total: number; pieces: number }; locations: string[]; imports: Import[] };
+type Color = { id: number; name: string };
+type Props = { first: { lots: LotRow[]; total: number; pieces: number }; locations: string[]; imports: Import[]; colors?: Color[] };
 
 /** Loose parts in bins and drawers, and parted-out sets: search, add, edit, import and undo. */
-export default function LotsView({ first, locations, imports }: Props) {
-  const [q, setQ] = useState('');
+export default function LotsView({ first, locations, imports, colors = [] }: Props) {
+  // `?q=` (a part picked in the command palette, #107) searches for it, also when this page is already open.
+  const urlQ = useSearchParams().get('q') ?? '';
+  const [seenQ, setSeenQ] = useState(urlQ);
+  const [q, setQ] = useState(urlQ);
   const [location, setLocation] = useState('');
   const [data, setData] = useState(first);
-  const [touched, setTouched] = useState(false);
+  const [touched, setTouched] = useState(!!urlQ);
+  if (urlQ !== seenQ) { setSeenQ(urlQ); setQ(urlQ); setTouched(true); }
   const [pending, start] = useTransition();
   const [editing, setEditing] = useState<LotRow | 'new' | null>(null);
   const [importing, setImporting] = useState(false);
@@ -74,7 +81,7 @@ export default function LotsView({ first, locations, imports }: Props) {
           <div className="space-y-2">
             <div className="flex flex-wrap gap-3">
               <SearchInput value={q} onChange={(e) => { setQ(e.target.value); setTouched(true); }} placeholder="Search part #, name, colour or location…" aria-label="Search loose parts" />
-              <Select aria-label="Location" value={location} onChange={(e) => { setLocation(e.target.value); setTouched(true); }} options={[['', 'All locations'], ['-', 'No location'], ...locations.map((l) => [l, l])]} />
+              <Combobox label="Location" value={location} onChange={(v) => { setLocation(v); setTouched(true); }} options={[{ value: '', label: 'All locations' }, { value: '-', label: 'No location' }, ...locations.map((l) => ({ value: l, label: l }))]} className="mt-0 w-auto min-w-44" />
               {addButton}
               {importButton}
             </div>
@@ -132,14 +139,17 @@ export default function LotsView({ first, locations, imports }: Props) {
         </section>
       )}
 
-      {editing && <LotDialog lot={editing === 'new' ? null : editing} locations={locations} onClose={() => setEditing(null)} onDone={(text) => { setEditing(null); setMessage({ kind: 'ok', text }); }} />}
+      {editing && <LotDialog lot={editing === 'new' ? null : editing} locations={locations} colors={colors} onClose={() => setEditing(null)} onDone={(text) => { setEditing(null); setMessage(null); toast.success(text); }} />}
       {importing && <ImportDialog locations={locations} onClose={() => setImporting(false)} onDone={(text, batch) => { setImporting(false); setMessage({ kind: 'ok', text, batch }); }} />}
     </div>
   );
 }
 
-/** Add or edit one lot; removing a reserved lot asks first. */
-function LotDialog({ lot, locations, onClose, onDone }: { lot: LotRow | null; locations: string[]; onClose: () => void; onDone: (message: string) => void }) {
+/** Add or edit one lot; removing one asks first (inline: a confirmation can't sit on top of this native dialog). */
+/** BrickLink colours to pick from; a number typed in still works (the table is empty without BrickLink keys). */
+const colorOptions = (colors: Color[]) => [{ value: '', label: 'No colour' }, ...colors.map((c) => ({ value: String(c.id), label: c.name, hint: `#${c.id}` }))];
+
+function LotDialog({ lot, locations, colors, onClose, onDone }: { lot: LotRow | null; locations: string[]; colors: Color[]; onClose: () => void; onDone: (message: string) => void }) {
   const [error, setError] = useState<string | null>(null);
   const [confirm, setConfirm] = useState(false);
   const [pending, start] = useTransition();
@@ -149,9 +159,8 @@ function LotDialog({ lot, locations, onClose, onDone }: { lot: LotRow | null; lo
     if (r.ok) onDone(lot ? 'Lot saved.' : 'Lot added.'); else setError(r.error);
   });
   const remove = () => start(async () => {
-    const r = await removeLot(lot!.id, confirm);
+    const r = await removeLot(lot!.id, true);
     if (r.ok) onDone('Lot removed.');
-    else if (lot!.reserved && !confirm) setConfirm(true);
     else setError(r.error);
   });
   return (
@@ -161,13 +170,15 @@ function LotDialog({ lot, locations, onClose, onDone }: { lot: LotRow | null; lo
       onClose={onClose}
       footer={confirm ? (
         <>
-          <span className="mr-auto self-center text-sm text-danger">Its {lot!.reserved}x reserved for {lot!.reservedFor.map((b) => b.name).join(', ')} will be released.</span>
-          <Button onClick={() => setConfirm(false)}>Keep</Button>
-          <Button variant="danger" loading={pending} onClick={remove}>Remove anyway</Button>
+          <span role="alert" className="mr-auto self-center text-sm text-danger">
+            Remove this lot?{lot!.reserved ? ` Its ${lot!.reserved}x reserved for ${lot!.reservedFor.map((b) => b.name).join(', ')} will be released.` : ''}
+          </span>
+          <Button autoFocus onClick={() => setConfirm(false)}>Keep</Button>
+          <Button variant="danger" loading={pending} onClick={remove}>Remove lot</Button>
         </>
       ) : (
         <>
-          {lot && <Button variant="danger-link" className="mr-auto" disabled={pending} onClick={remove}>Remove lot</Button>}
+          {lot && <Button variant="danger-link" className="mr-auto" disabled={pending} onClick={() => setConfirm(true)}>Remove lot</Button>}
           <Button onClick={onClose}>Cancel</Button>
           <Button variant="primary" type="submit" form="lot-form" loading={pending}>Save</Button>
         </>
@@ -180,7 +191,7 @@ function LotDialog({ lot, locations, onClose, onDone }: { lot: LotRow | null; lo
             <input name="partNo" required defaultValue={lot?.partNo} placeholder="3001" autoCapitalize="none" className={field} />
           </label>
           <label className="block text-sm text-fg-2">Colour #
-            <input name="colorId" inputMode="numeric" defaultValue={lot?.colorId ?? ''} placeholder="5 (red)" className={field} />
+            <Combobox name="colorId" label="Colour" defaultValue={String(lot?.colorId ?? '')} placeholder="5 (red)" options={colorOptions(colors)} allowCreate createLabel={(t) => `Colour # ${t}`} />
           </label>
           <label className="block text-sm text-fg-2">Quantity
             <input name="qty" type="number" inputMode="numeric" required min={Math.max(1, lot?.reserved ?? 1)} defaultValue={lot?.qty ?? 1} className={field} />
@@ -192,10 +203,7 @@ function LotDialog({ lot, locations, onClose, onDone }: { lot: LotRow | null; lo
           </label>
         </div>
         <label className="block text-sm text-fg-2">Location
-          <select name="location" defaultValue={lot?.location ?? ''} className={field}>
-            <option value="">No location</option>
-            {locations.map((l) => <option key={l} value={l}>{l}</option>)}
-          </select>
+          <LocationPicker name="location" defaultValue={lot?.location ?? ''} locations={locations} none="No location" />
         </label>
         {lot?.reserved ? <p className="text-xs text-fg-3">{lot.reserved}x reserved for {lot.reservedFor.map((b) => `${b.name} (${b.qty}x)`).join(', ')}: the quantity can&apos;t go below that.</p> : null}
         <label className="flex items-center gap-2 text-sm text-fg-2">
@@ -244,10 +252,7 @@ function ImportDialog({ locations, onClose, onDone }: { locations: string[]; onC
             </select>
           </label>
           <label className="block text-sm text-fg-2">Into
-            <select name="location" defaultValue="" className={field}>
-              <option value="">No location</option>
-              {locations.map((l) => <option key={l} value={l}>{l}</option>)}
-            </select>
+            <LocationPicker name="location" defaultValue="" locations={locations} none="No location" label="Into" />
           </label>
         </div>
         <div className="space-y-1">

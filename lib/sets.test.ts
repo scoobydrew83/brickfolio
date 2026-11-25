@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { conditionGap, copiesSummary, copyGuide, costBasis, dailyHistory, displayNo, estValue, filterSets, groupTotals, parseCopyInput, parseQuickList, parseSetInput, parseSetWithCopy, setGuide, setNo, totals, withCopies, type CopyRow, type SetRow } from './sets';
+import { conditionGap, copiesSummary, copyGuide, costBasis, dailyHistory, displayNo, estValue, filterSets, groupTotals, SORT_KEYS, sortFrom, sortingOf, parseCopyInput, parseQuickList, parseSetInput, parseSetWithCopy, setGuide, setNo, totals, withCopies, type CopyRow, type SetRow } from './sets';
 
 const LOCS = ['Out', 'Storage', 'Sell'];
 const parse = (f: Record<string, unknown>, partial = true) => parseSetInput(f, partial, LOCS);
@@ -65,6 +65,39 @@ describe('filterSets', () => {
   it('searches by name and sorts by value', () => {
     expect(filterSets(sets, { ...all, q: 'castle' })[0].setNo).toBe('43205-1');
     expect(filterSets(sets, { ...all, sort: 'value' })[0].setNo).toBe('43205-1');
+  });
+});
+
+describe('sorting (#106)', () => {
+  const order = (sort: (typeof SORT_KEYS)[number], dir?: 'asc' | 'desc') => filterSets(sets, { ...all, sort, dir }).map((s) => s.setNo).join();
+  it('sorts each key in its natural direction, and reverses with dir', () => {
+    expect(order('value')).toBe('43205-1,10280-1,9999-1');
+    expect(order('value', 'asc')).toBe('9999-1,10280-1,43205-1');
+    expect(order('setNo', 'desc')).toBe('43205-1,10280-1,9999-1');
+    expect(order('name')).toBe('10280-1,9999-1,43205-1');
+    expect(order('condition')).toBe('43205-1,10280-1,9999-1'); // New, Used, Partial
+  });
+  it('puts blanks last in both directions', () => {
+    expect(order('pieces')).toBe('10280-1,43205-1,9999-1');
+    expect(order('pieces', 'asc')).toBe('43205-1,10280-1,9999-1');
+    expect(order('location').split(',').at(-1)).toBe('43205-1');
+    expect(order('location', 'desc').split(',').at(-1)).toBe('43205-1');
+  });
+  it('maps the Sort select to column sorting and back', () => {
+    expect(sortingOf('year')).toEqual([{ id: 'year', desc: true }]);
+    expect(sortingOf('name')).toEqual([{ id: 'name', desc: false }]);
+    expect(sortingOf('year', 'asc')).toEqual([{ id: 'year', desc: false }]);
+    for (const k of SORT_KEYS) for (const dir of ['', 'asc', 'desc'] as const) {
+      const back = sortFrom(sortingOf(k, dir), { sort: 'setNo' });
+      expect(sortingOf(back.sort, back.dir)).toEqual(sortingOf(k, dir));
+    }
+  });
+  it('keeps the natural direction out of the URL, and reverses when a header turns sorting off', () => {
+    expect(sortFrom([{ id: 'value', desc: true }], { sort: 'setNo' })).toEqual({ sort: 'value', dir: '' });
+    expect(sortFrom([{ id: 'value', desc: false }], { sort: 'setNo' })).toEqual({ sort: 'value', dir: 'asc' });
+    expect(sortFrom([], { sort: 'name' })).toEqual({ sort: 'name', dir: 'desc' });
+    expect(sortFrom([], { sort: 'name', dir: 'desc' })).toEqual({ sort: 'name', dir: '' });
+    expect(sortFrom([{ id: 'photo', desc: false }], { sort: 'year' })).toEqual({ sort: 'year', dir: 'asc' });
   });
 });
 

@@ -9,7 +9,7 @@ import { FLAG_LABEL, daysUntil, monthLabel } from '@/lib/radar';
 import { displayNo } from '@/lib/sets';
 import { moneyIn, type Money } from './board/ui';
 import { PageHeader } from './shell/PageHeader';
-import { Chip, EmptyState, Stat, cx } from './ui';
+import { Chip, EmptyState, Stat, Tip, cx } from './ui';
 
 const pct = (v: number) => `${v >= 0 ? '+' : '−'}${Math.abs(v)}%`;
 
@@ -91,20 +91,21 @@ function Row({ i, money, today }: { i: RadarItem; money: Money; today: string })
             ? <span>Retired{i.exitDate ? ` ${i.exitDate}` : ''}</span>
             : days != null && <span className={cx(days <= 60 && 'font-semibold text-warn')}>Retires {i.exitDate} · in {days} day{days === 1 ? '' : 's'}</span>}
           {i.retailPrice != null && <span>· Retail {moneyIn(i.retailCurrency ?? 'USD')(i.retailPrice)}</span>}
-          {i.gapPct != null && <span title="BrickLink new sold average against used">· New over used {pct(i.gapPct)}</span>}
+          {i.gapPct != null && <Tip label="BrickLink new sold average against used"><span>· New over used {pct(i.gapPct)}</span></Tip>}
         </span>
       </span>
       <span className="text-right">
         <span className="block font-extrabold tabular-nums [font-stretch:112%]">{money(i.value)}</span>
         {g ? (
+          <Tip label={`${money(g.from)} on ${g.fromDate} (${g.basis === 'retail' ? 'retail price, Brickset' : 'stored BrickLink sold price'}) → ${money(g.to)} now, over ${g.years} years.${g.thin ? ' From your own price history, which is still short.' : ''}`}>
           <span
             className={cx('block text-xs font-semibold tabular-nums', g.perYear >= 0 ? 'text-ok' : 'text-danger')}
-            title={`${money(g.from)} on ${g.fromDate} (${g.basis === 'retail' ? 'retail price, Brickset' : 'stored BrickLink sold price'}) → ${money(g.to)} now, over ${g.years} years.${g.thin ? ' From your own price history, which is still short.' : ''}`}
           >
             {pct(g.perYear)}/yr{g.thin ? '*' : ''}
           </span>
+          </Tip>
         ) : i.gainPct != null && (
-          <span className={cx('block text-xs font-semibold tabular-nums', i.gainPct >= 0 ? 'text-ok' : 'text-danger')} title="Against retail (Brickset)">{pct(i.gainPct)} vs retail</span>
+          <Tip label="Against retail (Brickset)"><span className={cx('block text-xs font-semibold tabular-nums', i.gainPct >= 0 ? 'text-ok' : 'text-danger')}>{pct(i.gainPct)} vs retail</span></Tip>
         )}
       </span>
     </li>

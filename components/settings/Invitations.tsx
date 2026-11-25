@@ -3,7 +3,7 @@ import { useState, useTransition } from 'react';
 import { cancelInvitation, inviteMember } from '@/app/invite/actions';
 import type { InviteRow } from '@/lib/service/invitations';
 import type { Role } from '@/lib/service/permissions';
-import { Banner, Button, field } from '../ui';
+import { Banner, Button, Confirm, field, toast } from '../ui';
 
 const h2 = 'text-lg font-extrabold [font-stretch:110%]';
 const section = 'space-y-3 border-t border-line pt-6';
@@ -25,7 +25,7 @@ function CopyLink({ url, label }: { url: string; label: string }) {
  */
 export function InvitationsSection({ collections, invites, mail }: { collections: { id: number; name: string }[]; invites: InviteRow[]; mail: boolean }) {
   const [pending, start] = useTransition();
-  const [note, setNote] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
+  const [note, setNote] = useState<{ kind: 'error'; text: string } | null>(null);
   const [link, setLink] = useState<{ email: string; url: string } | null>(null);
   if (!collections.length) return null;
   const day = (iso: string) => iso.slice(0, 10);
@@ -52,7 +52,7 @@ export function InvitationsSection({ collections, invites, mail }: { collections
           const r = await inviteMember(collectionId, email, role);
           if (!r.ok) { setNote({ kind: 'error', text: r.error }); return; }
           f.reset();
-          if (r.sent) setNote({ kind: 'ok', text: `Sent ${email} an invitation to ${name} as ${role}.` });
+          if (r.sent) { setNote(null); toast.success(`Sent ${email} an invitation to ${name} as ${role}.`); }
           else {
             setNote(r.mailError ? { kind: 'error', text: `Invited ${email}, but the email didn't go out (${r.mailError}). Copy the link instead.` } : null);
             if (r.url) setLink({ email, url: r.url });
@@ -76,7 +76,10 @@ export function InvitationsSection({ collections, invites, mail }: { collections
               </span>
               <span className="flex gap-3">
                 <CopyLink url={i.url} label={`Invitation link for ${i.email}`} />
-                <Button variant="danger-link" disabled={pending} onClick={() => start(async () => { const r = await cancelInvitation(i.id); setNote(r.ok ? { kind: 'ok', text: `Cancelled the invitation for ${i.email}.` } : { kind: 'error', text: r.error }); })}>Cancel</Button>
+                <Confirm title={`Cancel the invitation for ${i.email}?`} body="Its link stops working. You can invite them again." confirmLabel="Cancel invitation" cancelLabel="Keep" tone="danger"
+                  onConfirm={() => start(async () => { const r = await cancelInvitation(i.id); if (r.ok) { setNote(null); toast.success(`Cancelled the invitation for ${i.email}.`); } else setNote({ kind: 'error', text: r.error }); })}>
+                  <Button variant="danger-link" disabled={pending}>Cancel</Button>
+                </Confirm>
               </span>
             </li>
           ))}

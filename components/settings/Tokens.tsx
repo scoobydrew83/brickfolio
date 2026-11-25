@@ -1,7 +1,7 @@
 'use client';
 import { useState } from 'react';
 import { createToken, revokeToken, type Result } from '@/app/actions';
-import { Button, Select, field } from '../ui';
+import { Button, Confirm, Select, field } from '../ui';
 
 /** A token row from lib/service/tokens.ts listTokens. `owner` null: no owner, acts as admin. */
 export type Token = { id: string; name: string; prefix: string; createdAt: string; lastUsedAt: string | null; expiresAt: string | null; owner: string | null };
@@ -40,7 +40,9 @@ export function TokensSection({ tokens, me, all, pending, run, intro }: {
               created {day(t.createdAt)} · {t.lastUsedAt ? `used ${day(t.lastUsedAt)}` : 'never used'}
               {t.expiresAt && (t.expiresAt <= now ? <b className="text-danger"> · expired</b> : ` · expires ${day(t.expiresAt)}`)}
             </span>
-            <Button variant="danger-link" onClick={() => run(() => revokeToken(t.id), `Revoked ${t.name}.`)} disabled={pending}>Revoke</Button>
+            <Confirm title={`Revoke ${t.name}?`} body="Anything using this token stops working. A new token has a new value." confirmLabel="Revoke" tone="danger" onConfirm={() => run(() => revokeToken(t.id), `Revoked ${t.name}.`)}>
+              <Button variant="danger-link" disabled={pending}>Revoke</Button>
+            </Confirm>
           </li>
         ))}
       </ul>

@@ -342,7 +342,65 @@ export function parseLocation(raw: unknown): { ok: true; value: string } | { ok:
   return { ok: true, value: v };
 }
 
-export type Filters = { q: string; location: string; condition: string; status?: string; theme?: string; availability?: string; sort: 'setNo' | 'value' | 'name' | 'year' };
+/**
+ * What the Sets page can sort by (#106): the Sort select and the table's column headers share these keys.
+ * Each sorts in its natural direction first (`SORT_DESC_FIRST`: biggest value, newest year, most pieces);
+ * `dir` reverses it. Blanks always sort last.
+ */
+export const SORT_KEYS = ['setNo', 'copies', 'name', 'theme', 'location', 'condition', 'year', 'pieces', 'avgSold', 'value'] as const;
+export type SortKey = (typeof SORT_KEYS)[number];
+export type SortDir = 'asc' | 'desc';
+export const SORT_LABEL: Record<SortKey, string> = { setNo: 'Set #', copies: 'Copies', name: 'Name', theme: 'Theme', location: 'Location', condition: 'Condition', year: 'Year', pieces: 'Pieces', avgSold: 'Avg sold', value: 'Est. Value' };
+export const SORT_DESC_FIRST: Record<SortKey, boolean> = { setNo: false, copies: true, name: false, theme: false, location: false, condition: false, year: true, pieces: true, avgSold: true, value: true };
+export const isSortKey = (v: unknown): v is SortKey => (SORT_KEYS as readonly unknown[]).includes(v);
+/** The direction a sort runs in: `dir` when given, else the key's natural one. */
+export const sortDir = (sort: SortKey, dir?: SortDir | ''): SortDir => dir || (SORT_DESC_FIRST[sort] ? 'desc' : 'asc');
+
+/** Board's sort as a table's sorting state (TanStack's `{ id, desc }[]`; column ids are the sort keys). */
+export const sortingOf = (sort: SortKey, dir?: SortDir | ''): { id: string; desc: boolean }[] => [{ id: sort, desc: sortDir(sort, dir) === 'desc' }];
+
+/**
+ * A table's new sorting state back as Board's sort. `dir` is left blank for the key's natural direction, so the URL
+ * stays short. An empty state (sorting turned off) reverses the current sort instead: the list is always sorted.
+ */
+export function sortFrom(next: readonly { id: string; desc: boolean }[], current: { sort: SortKey; dir?: SortDir | '' }): { sort: SortKey; dir: SortDir | '' } {
+  const first = next[0];
+  if (!first || !isSortKey(first.id)) {
+    const flipped: SortDir = sortDir(current.sort, current.dir) === 'desc' ? 'asc' : 'desc';
+    return { sort: current.sort, dir: flipped === sortDir(current.sort) ? '' : flipped };
+  }
+  return { sort: first.id, dir: first.desc === SORT_DESC_FIRST[first.id] ? '' : first.desc ? 'desc' : 'asc' };
+}
+
+export type Filters = { q: string; location: string; condition: string; status?: string; theme?: string; availability?: string; sort: SortKey; dir?: SortDir | '' };
+
+/** A set's value for a sort key; null (blank) sorts last either way. */
+function sortValue(s: SetRow, k: SortKey): string | number | null {
+  switch (k) {
+    case 'setNo': return s.setNo;
+    case 'copies': return s.qty;
+    case 'name': return s.name;
+    case 'theme': return s.theme || null;
+    case 'location': return s.location || null;
+    case 'condition': return s.condition ? CONDITIONS.indexOf(s.condition) : null;
+    case 'year': return s.year ?? null;
+    case 'pieces': return s.pieces ?? null;
+    case 'avgSold': return s.avgSold ?? null;
+    case 'value': return s.valueTotal ?? null;
+  }
+}
+
+/** Compares two sets by a key and direction: blanks last, ties by set number. */
+export function compareSets(sort: SortKey, dir?: SortDir | ''): (a: SetRow, b: SetRow) => number {
+  const sign = sortDir(sort, dir) === 'desc' ? -1 : 1;
+  const bySetNo = (a: SetRow, b: SetRow) => a.setNo.localeCompare(b.setNo, undefined, { numeric: true });
+  return (a, b) => {
+    const x = sortValue(a, sort), y = sortValue(b, sort);
+    if (x === null || y === null) return x === y ? bySetNo(a, b) : x === null ? 1 : -1;
+    const c = typeof x === 'number' && typeof y === 'number' ? x - y : sort === 'setNo' ? bySetNo(a, b) : String(x).localeCompare(String(y));
+    return c ? sign * c : bySetNo(a, b);
+  };
+}
 
 /** Whether any copy matches a filter value ('(none)' = blank). */
 const anyCopy = (s: SetRow, k: 'location' | 'condition' | 'status', v: string) =>
@@ -357,13 +415,7 @@ export function filterSets(sets: SetRow[], f: Filters): SetRow[] {
     (!f.condition || anyCopy(s, 'condition', f.condition)) &&
     (!f.status || anyCopy(s, 'status', f.status)) &&
     (!f.availability || (availability(s) ?? '(none)') === f.availability);
-  const by: Record<Filters['sort'], (a: SetRow, b: SetRow) => number> = {
-    setNo: (a, b) => a.setNo.localeCompare(b.setNo, undefined, { numeric: true }),
-    value: (a, b) => num(b.valueTotal) - num(a.valueTotal),
-    name: (a, b) => a.name.localeCompare(b.name),
-    year: (a, b) => num(b.year) - num(a.year),
-  };
-  return sets.filter(hit).sort(by[f.sort]);
+  return sets.filter(hit).sort(compareSets(f.sort, f.dir));
 }
 
 /** Collection totals over copies that aren't parted out. A set whose copies are all parted out isn't counted. */

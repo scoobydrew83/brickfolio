@@ -1,4 +1,9 @@
 @import "tailwindcss";
+/* For shadcn components (npx shadcn add): enter/exit animation utilities and Base UI state variants (data-open:, data-checked:, …). Both only emit CSS for classes in use. */
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+/* Agent skills quote class names in their docs; don't generate CSS for them. */
+@source not "../.claude";
 
 /*
  * Color tokens. Components use these names (bg-surface, text-fg-3, border-line, …) instead of raw Tailwind
@@ -49,6 +54,52 @@
   /* Set photo tile. BrickLink photos have white backgrounds, so the tile stays light in both themes. */
   --tile: #f5f7f9;
   --tile-ink: #14212b;
+  --tile-raised: #ffffff; /* a white chip or field on the photo tile, which stays light at night */
+  --scrim: rgb(0 0 0 / 0.5); /* behind dialogs, sheets and the phone menu */
+  --on-danger: #ffffff; /* text on --danger-solid */
+  --on-header-strong: #ffffff; /* the brand, and header text on hover */
+  --header-hover: rgb(255 255 255 / 0.1); /* a header button's hover fill */
+}
+
+/*
+ * shadcn's variable names, pointed at our tokens. Components added with `npx shadcn add` use these
+ * (bg-background, text-muted-foreground, border-border, ring-ring, …). Every value is a reference, so
+ * the dark blocks below need no copies: they change our tokens and these follow, in both dark modes.
+ * --primary and --muted are ours already and mean the same thing in shadcn (brick yellow, muted fill).
+ * Our names are the source of truth: change a colour in the token blocks, never here.
+ */
+:root {
+  --background: var(--canvas);
+  --foreground: var(--fg);
+  --card: var(--surface);
+  --card-foreground: var(--fg);
+  --popover: var(--surface);
+  --popover-foreground: var(--fg);
+  --primary-foreground: var(--on-primary);
+  --secondary: var(--subtle);
+  --secondary-foreground: var(--fg);
+  --muted-foreground: var(--fg-3);
+  --accent: var(--muted);
+  --accent-foreground: var(--fg);
+  --destructive: var(--danger);
+  --border: var(--line);
+  --input: var(--line-strong);
+  --ring: var(--focus);
+  /* Control radius (rounded-control, 8px). Tailwind's rounded-sm…3xl keep their defaults; see the note in @theme. */
+  --radius: 0.5rem;
+  --chart-1: var(--primary);
+  --chart-2: var(--info);
+  --chart-3: var(--ok);
+  --chart-4: var(--warn);
+  --chart-5: var(--danger);
+  --sidebar: var(--surface);
+  --sidebar-foreground: var(--fg);
+  --sidebar-primary: var(--primary);
+  --sidebar-primary-foreground: var(--on-primary);
+  --sidebar-accent: var(--muted);
+  --sidebar-accent-foreground: var(--fg);
+  --sidebar-border: var(--line);
+  --sidebar-ring: var(--focus);
 }
 
 /* Dark: the same booklet at night. Ink-blue ground, callouts a step lighter, yellow unchanged. */
@@ -90,6 +141,7 @@
     --info-soft: #12243a;
     --info-ring: #1f3f63;
     --tile: #edf1f4;
+    --scrim: rgb(0 0 0 / 0.65);
   }
 }
 
@@ -131,6 +183,7 @@
   --info-soft: #12243a;
   --info-ring: #1f3f63;
   --tile: #edf1f4;
+  --scrim: rgb(0 0 0 / 0.65);
 }
 
 /* `dark:` classes follow the same rule as the tokens: system preference unless the toggle overrides it. */
@@ -187,6 +240,11 @@
   --color-info-ring: var(--info-ring);
   --color-tile: var(--tile);
   --color-tile-ink: var(--tile-ink);
+  --color-tile-raised: var(--tile-raised);
+  --color-scrim: var(--scrim);
+  --color-on-danger: var(--on-danger);
+  --color-on-header-strong: var(--on-header-strong);
+  --color-header-hover: var(--header-hover);
 
   /* Type: one size below text-xs for tab labels and fine print. */
   --text-2xs: 0.6875rem;
@@ -199,6 +257,43 @@
   --radius-chip: 0.375rem;
 
   --shadow-raised: 0 10px 30px -12px rgb(0 0 0 / 0.18);
+
+  /*
+   * shadcn utilities (bg-background, text-foreground, border-input, …). They resolve to the mapping above.
+   * Left out on purpose: shadcn's --radius-sm…4xl overrides, which would change rounded-md and friends
+   * across the app (Tailwind's defaults already match: rounded-lg = 8px = --radius), and its @layer base
+   * rules (border colour on *, body colours, html font), which would restyle every page.
+   */
+  --font-heading: var(--font-archivo);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
 }
 
 /* One visible focus ring for every control, keyboard only. */

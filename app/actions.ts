@@ -41,6 +41,7 @@ import { DEMO_ERROR, isDemo } from '@/lib/demo';
 import { rebrickableStats, type RebrickableStats } from '@/lib/service/catalog';
 import { retailStats, syncRetail, type RetailStats } from '@/lib/service/retail';
 import { rebrickableRun, startRebrickableSync, type RebrickableRun } from '@/lib/rebrickable/run';
+import { authMode } from '@/lib/auth';
 
 export type Result = svc.Result<{ token?: string; url?: string; id?: number }>;
 
@@ -206,6 +207,65 @@ export async function setPassword(login: string, password: string) {
 export async function resetLink(login: string) {
   return act('admin', async () => (await import('@/lib/better-auth')).resetLink(await getDb(), login));
 }
+// ---- Settings → People for admins (#102): bans, deletion, sessions, two-factor reset, acting as someone ----
+// Our own access checks (act('admin'): ADMIN_USERS admins too, never while acting as someone), then the work on the
+// server (lib/service/people-admin.ts), so none of it goes through Better Auth's browser client.
+const peopleAdmin = () => import('@/lib/service/people-admin');
+const betterAuth = async () => (authMode() === 'better-auth' ? (await import('@/lib/better-auth')).getAuth(await getDb()) : null);
+const apiError = (e: unknown): Result => ({ ok: false, error: e instanceof Error ? e.message : String(e) });
+
+/** Bans someone: `until` an ISO time, or null for "until unbanned". Their sessions end at once. */
+export async function banPerson(login: string, reason: string, until: string | null) {
+  return act('admin', async (a) => (await peopleAdmin()).banPerson(await getDb(), a, login, { reason, until: until ? new Date(until) : null }));
+}
+export async function unbanPerson(login: string) { return act('admin', async (a) => (await peopleAdmin()).unbanPerson(await getDb(), a, login)); }
+/** Deletes someone with their roles, invitations, API keys and sessions. */
+export async function deletePerson(login: string) { return act('admin', async (a) => (await peopleAdmin()).deletePerson(await getDb(), a, login)); }
+/** Turns someone's two-factor off and signs them out (replaces the SQL docs/install.md had). */
+export async function resetTwoFactor(login: string) { return act('admin', async () => (await peopleAdmin()).resetTwoFactor(await getDb(), login)); }
+
+/** Someone's sessions for the Sessions tab (`current`: the admin's own). None in the proxy modes. */
+export async function personSessions(login: string): Promise<{ ok: true; sessions: import('@/lib/service/people-admin').SessionRow[] } | { ok: false; error: string }> {
+  const a = await allowed('admin');
+  if (!a || a.impersonated) return { ok: false, error: perm.denied('admin') };
+  const auth = await betterAuth();
+  const current = auth ? (await auth.api.getSession({ headers: await headers() }))?.session.id : null;
+  return { ok: true, sessions: await (await peopleAdmin()).listSessions(await getDb(), login, current) };
+}
+/** Ends one of someone's sessions (`id`), or all of them (no `id`). */
+export async function endPersonSessions(login: string, id?: string) {
+  return act('admin', async () => (await peopleAdmin()).endSessions(await getDb(), login, id));
+}
+
+/** Starts acting as someone (AUTH_MODE=better-auth): their rights only, until Stop in the bar under the header. */
+export async function impersonate(login: string) {
+  return act('admin', async () => {
+    const auth = await betterAuth();
+    if (!auth) return { ok: false, error: 'Acting as someone needs AUTH_MODE=better-auth.' };
+    const db = await getDb();
+    const { authUser } = await import('@/lib/db/schema');
+    const { eq } = await import('drizzle-orm');
+    const u = await db.select({ id: authUser.id }).from(authUser).where(eq(authUser.email, perm.normLogin(login))).get();
+    if (!u) return { ok: false, status: 404, error: `${login} isn't in People.` };
+    try { await auth.api.brickfolioImpersonate({ body: { userId: u.id }, headers: await headers() }); } catch (e) { return apiError(e); }
+    return { ok: true };
+  });
+}
+/**
+ * Stops acting as someone and brings back the admin's own session. Allowed whatever rights the person has, even when
+ * Brickfolio no longer lets them in (removed from ALLOWED_USERS): reads Better Auth's session as the bar does, not
+ * currentUser().
+ */
+export async function stopImpersonating(): Promise<Result> {
+  const auth = await betterAuth();
+  const h = await headers();
+  const s = auth && (await auth.api.getSession({ headers: h }).catch(() => null));
+  if (!auth || !(s?.session as { impersonatedBy?: string | null } | undefined)?.impersonatedBy) return { ok: false, error: "You aren't acting as anyone." };
+  try { await auth.api.stopImpersonating({ headers: h }); } catch (e) { return apiError(e); }
+  refresh();
+  return { ok: true };
+}
+
 /** Admins, and the collection's owners, give a login a role there (`null` takes it away). */
 export async function setRole(collectionId: number, login: string, role: perm.Role | null) {
   return act('member', async (a) => perm.setRole(await getDb(), a, Number(collectionId), login, role));

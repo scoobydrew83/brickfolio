@@ -1,11 +1,11 @@
 'use client';
 import Link from 'next/link';
-import { ClipboardList, LayoutGrid, Plus, RefreshCw, Rows3, ScanBarcode } from 'lucide-react';
+import { ArrowDownWideNarrow, ArrowUpNarrowWide, ClipboardList, LayoutGrid, Plus, RefreshCw, Rows3, ScanBarcode } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, useTransition } from 'react';
 import { addSet, editSet, quickAddList, relookupSet, reload, removeSet, runSync, selectCollection, type Result } from '@/app/actions';
 import type { SyncStatus } from '@/lib/service/sets';
-import { dailyHistory, filterSets, groupTotals, STATUSES, STATUS_LABEL, totals, type Filters, type HistoryRow, type SetRow } from '@/lib/sets';
+import { dailyHistory, filterSets, groupTotals, isSortKey, sortDir, SORT_KEYS, SORT_LABEL, STATUSES, STATUS_LABEL, totals, type Filters, type HistoryRow, type SetRow } from '@/lib/sets';
 import { availability, collectionGain, retirement } from '@/lib/retail';
 import { SetCard } from './board/SetCard';
 import { PartsDialog } from './board/PartsDialog';
@@ -14,28 +14,29 @@ import { QuickAdd } from './board/QuickAdd';
 import { SetTable } from './board/SetTable';
 import { ValueChart } from './board/ValueChart';
 import { moneyIn } from './board/ui';
-import { Banner, Button, EmptyState, FilterChip, SearchInput, Segmented, Select, buttonClass } from './ui';
+import { Banner, Button, EmptyState, FilterChip, IconButton, SearchInput, Segmented, Select, Tip, buttonClass, toast } from './ui';
 import { PageHeader } from './shell/PageHeader';
 import { CollectionTabs } from './shell/CollectionTabs';
 
 // Filters and view live in the URL, so a reload or a shared link keeps them. Defaults are left out of the URL.
-const DEFAULTS = { q: '', location: '', condition: '', status: '', theme: '', availability: '', sort: 'setNo', view: 'cards' } as const;
-const SORTS: Filters['sort'][] = ['setNo', 'value', 'name', 'year'];
+// `dir` is blank for a sort's natural direction (Est. Value high to low, Name A to Z) and only set to reverse it.
+const DEFAULTS = { q: '', location: '', condition: '', status: '', theme: '', availability: '', sort: 'setNo', dir: '', view: 'cards' } as const;
 type View = 'cards' | 'table';
 const noop = () => () => {};
 
 /** `collections` (#49): with two or more and All selected, a Collection row shows each one's totals and switches to it. */
-type Props = { sets: SetRow[]; history: HistoryRow[]; sync: SyncStatus; locations: string[]; currency: string; readAt: string; user: string; priced: boolean; collections?: { id: number; name: string }[]; collection?: number | 'all'; writable?: 'all' | number[] };
+type Props = { sets: SetRow[]; history: HistoryRow[]; sync: SyncStatus; locations: string[]; currency: string; readAt: string; priced: boolean; collections?: { id: number; name: string }[]; collection?: number | 'all'; writable?: 'all' | number[] };
 
-export default function Board({ sets, history, sync, locations, currency, readAt, user, priced, collections = [], collection = 'all', writable = 'all' }: Props) {
+export default function Board({ sets, history, sync, locations, currency, readAt, priced, collections = [], collection = 'all', writable = 'all' }: Props) {
   // #50: what the viewer can change. Adding needs a collection they can add to; editing a set, every copy's collection.
   const canAdd = writable === 'all' || writable.length > 0;
   const canEdit = (s: SetRow) => writable === 'all' || s.copies.every((c) => writable.includes(c.collectionId ?? 1));
   const router = useRouter();
   const params = useSearchParams();
   const [filters, setFilters] = useState<Filters>(() => {
-    const sort = params.get('sort') as Filters['sort'];
-    return { q: params.get('q') ?? '', location: params.get('location') ?? '', condition: params.get('condition') ?? '', status: params.get('status') ?? '', theme: params.get('theme') ?? '', availability: params.get('availability') ?? '', sort: SORTS.includes(sort) ? sort : 'setNo' };
+    const sort = params.get('sort');
+    const dir = params.get('dir');
+    return { q: params.get('q') ?? '', location: params.get('location') ?? '', condition: params.get('condition') ?? '', status: params.get('status') ?? '', theme: params.get('theme') ?? '', availability: params.get('availability') ?? '', sort: isSortKey(sort) ? sort : 'setNo', dir: dir === 'asc' || dir === 'desc' ? dir : '' };
   });
   const [view, setView] = useState<View>(() => (params.get('view') === 'table' ? 'table' : 'cards'));
   const [editing, setEditing] = useState<SetRow | 'new' | null>(null);
@@ -45,6 +46,20 @@ export default function Board({ sets, history, sync, locations, currency, readAt
   const [dupe, setDupe] = useState<{ form: Record<string, unknown>; name: string; qty: number } | null>(null);
   const [pending, startTransition] = useTransition();
   const dupeForm = useRef<Record<string, unknown>>({});
+  // `?add=set` / `?add=list` (the command palette's Add set and Paste a list, #107) opens that form once.
+  const add = params.get('add');
+  const [addSeen, setAddSeen] = useState<string | null>(null);
+  if (add !== addSeen) {
+    setAddSeen(add);
+    if (canAdd && add === 'set') setEditing('new');
+    if (canAdd && add === 'list') setPasting(true);
+  }
+  useEffect(() => {
+    if (!add) return;
+    const p = new URLSearchParams(window.location.search);
+    p.delete('add');
+    window.history.replaceState(null, '', p.size ? `?${p}` : window.location.pathname);
+  }, [add]);
 
   const money = useMemo(() => moneyIn(currency), [currency]);
   const shown = useMemo(() => filterSets(sets, filters), [sets, filters]);
@@ -78,7 +93,8 @@ export default function Board({ sets, history, sync, locations, currency, readAt
       const r = await fn();
       if (!r.ok && r.existing && editing === 'new') return setDupe({ form: dupeForm.current, ...r.existing }); // already in stock: ask
       if (!r.ok) return setMessage({ kind: 'error', text: r.error });
-      setMessage({ kind: 'ok', text: okText });
+      setMessage(null);
+      toast.success(okText);
       after?.();
     });
 
@@ -92,6 +108,9 @@ export default function Board({ sets, history, sync, locations, currency, readAt
   const remove = (s: SetRow) => act(() => removeSet(s.setNo), s.copies.length > 1 ? `Removed one ${s.name}. ${Math.max(0, s.qty - 1)} left.` : `Removed ${s.name}.`);
   const retry = (s: SetRow) => act(() => relookupSet(s.setNo), `Lookup worked for ${s.name}.`);
   const rowProps = { onEdit: setEditing, onParts: setPartsOf, onRemove: remove, onRetry: retry, pending, money, currency, canEdit };
+  // One sort for both views (#106): the Sort select and its direction button here, and the table's column headers.
+  const dir = sortDir(filters.sort, filters.dir);
+  const reverse = () => { const d = dir === 'desc' ? 'asc' : 'desc'; setFilters({ ...filters, dir: d === sortDir(filters.sort) ? '' : d }); };
 
   return (
     <div className="space-y-6">
@@ -100,7 +119,7 @@ export default function Board({ sets, history, sync, locations, currency, readAt
         title="Sets"
         badge={<span className="text-sm text-fg-3 tabular-nums">{all.count} sets · {all.copies} copies{all.partedOut ? ` · parted out: ${all.partedOut}` : ''}</span>}
         actions={
-          <span className="flex flex-wrap items-center gap-2" title={`Signed in as ${user}`}>
+          <span className="flex flex-wrap items-center gap-2">
             {priced && (
               <Button icon={RefreshCw} loading={syncing} disabled={pending} onClick={() => act(runSync, 'Sync started. Prices update as it goes.')}>
                 {syncing ? `Syncing… ${sync.processed}/${sync.total}` : 'Sync BrickLink'}
@@ -123,7 +142,7 @@ export default function Board({ sets, history, sync, locations, currency, readAt
       </PageHeader>
 
       {message && <Banner kind={message.kind} onDismiss={() => setMessage(null)}>{message.text}</Banner>}
-      {all.errors > 0 && <Banner kind="error">{all.errors} set{all.errors === 1 ? '' : 's'} could not be found on BrickLink. Use Retry lookup on the card.</Banner>}
+      {all.errors > 0 && <Banner kind="error">{all.errors} set{all.errors === 1 ? '' : 's'} could not be found on BrickLink. Use Retry lookup on the card, or in the ⋯ menu in the table.</Banner>}
       {retiring > 0 && (
         <p role="status" className="rounded-control bg-warn-soft px-4 py-3 text-sm text-warn">
           {retiring} of your sets {retiring === 1 ? 'is' : 'are'} expected to retire within six months (Brickset). <Link href="/radar" className="font-semibold underline">See the Retirement Radar</Link>
@@ -162,7 +181,10 @@ export default function Board({ sets, history, sync, locations, currency, readAt
 
       <div className="flex flex-wrap gap-3">
         <SearchInput value={filters.q} onChange={set('q')} placeholder="Search name, set #, theme, location…" aria-label="Search sets" />
-        <Select label="Sort" value={filters.sort} onChange={set('sort')} options={[['setNo', 'Set #'], ['value', 'Est. Value'], ['name', 'Name'], ['year', 'Year']]} />
+        <span className="flex items-center gap-1">
+          <Select label="Sort" value={filters.sort} onChange={(e) => setFilters({ ...filters, sort: e.target.value as Filters['sort'], dir: '' })} options={SORT_KEYS.map((k) => [k, SORT_LABEL[k]])} />
+          <IconButton icon={dir === 'desc' ? ArrowDownWideNarrow : ArrowUpNarrowWide} label={dir === 'desc' ? 'Descending: reverse the order' : 'Ascending: reverse the order'} onClick={reverse} />
+        </span>
         <Segmented label="View" value={view} onChange={setView} options={[{ value: 'cards', label: 'Cards', icon: LayoutGrid }, { value: 'table', label: 'Table', icon: Rows3 }]} />
       </div>
 
@@ -200,7 +222,7 @@ export default function Board({ sets, history, sync, locations, currency, readAt
         {shown.length < all.count && (
           <p className="text-fg-3">
             Showing <b className="text-fg">{shown.length}</b> of {all.count} sets · <b className="text-fg tabular-nums">{money(view_.estValue)}</b>
-            {' '}<Button variant="link" onClick={() => setFilters({ q: '', location: '', condition: '', status: '', theme: '', availability: '', sort: filters.sort })}>Clear filters</Button>
+            {' '}<Button variant="link" onClick={() => setFilters({ q: '', location: '', condition: '', status: '', theme: '', availability: '', sort: filters.sort, dir: filters.dir })}>Clear filters</Button>
           </p>
         )}
       </section>
@@ -229,11 +251,11 @@ export default function Board({ sets, history, sync, locations, currency, readAt
       )}
 
       {view === 'cards' ? (
-        <section className="grid gap-x-6 gap-y-10 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        <section className="grid grid-cols-1 gap-x-6 gap-y-10 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {shown.map((s) => <SetCard key={s.id} s={s} {...rowProps} />)}
         </section>
       ) : (
-        <SetTable sets={shown} {...rowProps} />
+        <SetTable sets={shown} {...rowProps} sort={filters.sort} dir={filters.dir ?? ''} onSort={(next) => setFilters({ ...filters, ...next })} />
       )}
 
       {partsOf && <PartsDialog set={partsOf} priced={priced} onClose={() => { setPartsOf(null); startTransition(() => reload()); }} />}
@@ -275,9 +297,11 @@ export default function Board({ sets, history, sync, locations, currency, readAt
 function RetailGainLine({ gain, money, className }: { gain: { sets: number; retail: number; value: number; gainPct: number }; money: (v: unknown) => string; className?: string }) {
   const up = gain.gainPct >= 0;
   return (
-    <span className={className} title={`Retail ${money(gain.retail)} → now ${money(gain.value)} (Brickset retail prices, BrickLink values)`}>
+    <Tip label={`Retail ${money(gain.retail)} → now ${money(gain.value)} (Brickset retail prices, BrickLink values)`}>
+    <span className={className}>
       <b className={up ? 'text-ok' : 'text-danger'}>{up ? 'Up' : 'Down'} {Math.abs(gain.gainPct)}%</b>
       <span className="text-fg-3"> on retail across {gain.sets} set{gain.sets === 1 ? '' : 's'} with a known retail price</span>
     </span>
+    </Tip>
   );
 }

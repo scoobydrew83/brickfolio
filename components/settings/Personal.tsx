@@ -1,7 +1,7 @@
 'use client';
 import { useState, useTransition } from 'react';
 import { type Result } from '@/app/actions';
-import { Banner } from '../ui';
+import { Banner, toast } from '../ui';
 import { PageHeader } from '../shell/PageHeader';
 import { ShareSection, type CollectionInfo } from '../Settings';
 import { MembersSection } from './People';
@@ -26,8 +26,14 @@ export default function PersonalSettings({ me, mine, owned, members, shares, tok
   invitations?: { list: InviteRow[]; mail: boolean };
 }) {
   const [pending, start] = useTransition();
-  const [note, setNote] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
-  const run = (fn: () => Promise<Result>, ok: string, after?: (r: Result) => void) => start(async () => { const r = await fn(); setNote(r.ok ? { kind: 'ok', text: ok } : { kind: 'error', text: r.error }); if (r.ok) after?.(r); });
+  const [note, setNote] = useState<{ kind: 'error'; text: string } | null>(null);
+  const run = (fn: () => Promise<Result>, ok: string, after?: (r: Result) => void) => start(async () => {
+    const r = await fn();
+    if (!r.ok) return setNote({ kind: 'error', text: r.error });
+    setNote(null);
+    toast.success(ok);
+    after?.(r);
+  });
   return (
     <div className="space-y-6">
       <PageHeader title="Settings" />

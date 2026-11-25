@@ -35,6 +35,24 @@ npm run build
 - **Schema changes:** edit `lib/db/schema.ts`, run `npm run db:generate`, and commit the new file in `drizzle/`. Never edit a migration that has already been released.
 - **Next.js 16** has breaking changes from earlier versions. Check `node_modules/next/dist/docs/` rather than relying on older examples (see AGENTS.md).
 
+## Adding a component
+
+Shared UI lives in `components/ui` and views import it from `@/components/ui` (see the Components table in [docs/design.md](docs/design.md)). For a new component, use [shadcn/ui](https://ui.shadcn.com) rather than writing it from scratch:
+
+```bash
+npx shadcn add <name>          # e.g. tooltip; writes components/ui/<name>.tsx
+npx shadcn add <name> --dry-run   # see which files it would write first
+```
+
+- The setup is in `components.json` (Base UI primitives, lucide icons, our aliases). Better Auth UI's registry is configured too: `npx shadcn add @better-auth-ui/<name>`.
+- Generated files are lowercase (`components/ui/tooltip.tsx`) and are ours to edit. Our own kit is in `components/ui/kit/`; don't overwrite or rename it.
+- Colours come from the tokens in `app/globals.css`. shadcn's names (`bg-background`, `text-muted-foreground`, `border-input`, …) already map to them, so use those or ours, never raw colours, and remove shadows or effects that `docs/design.md` doesn't allow.
+- Import the new file by path (`@/components/ui/tooltip`), or export it from `components/ui/index.ts` when it replaces or joins the shared kit.
+- Use `cn` from `@/lib/utils` (or `cx` from `@/components/ui`, the same function) to combine classes; the later of two conflicting Tailwind classes wins.
+- Attach phone and desktop screenshots, light and dark, to the pull request.
+
+Using an AI agent? `.mcp.json` starts the shadcn MCP server (`npx shadcn@latest mcp`) for Claude Code, and the shadcn agent skill is committed in `.claude/skills/shadcn` (restore or update it with `npx skills add shadcn/ui`; `skills-lock.json` records the version). For other agents, `npx shadcn@latest mcp init --client <cursor|vscode|codex|opencode>` writes their config.
+
 ## Community barcodes
 
 `lib/barcode/data/community.json` in the [public repository](https://github.com/scoobydrew83/brickfolio) is the shared list of barcodes and Collectible Minifigures box codes every installation downloads (from its `main` branch). It's CC0, so anyone can use it. To add codes:

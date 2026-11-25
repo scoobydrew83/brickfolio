@@ -34,7 +34,7 @@ Keep an accurate record of a physical collection (which sets, how many copies, w
 
 ## Brand Commitments
 - Name: Brickfolio. Not affiliated with the LEGO Group or BrickLink; trademarks are acknowledged in NOTICE and must not be used as the product's identity.
-- Existing mark: the yellow 2×2 brick badge (`components/ui/primitives.tsx` Logo, `app/badge.tsx`).
+- Existing mark: the yellow 2×2 brick badge (`components/ui/kit/primitives.tsx` Logo, `app/badge.tsx`).
 - Voice: plain, collector-to-collector, uses hobby terms without explaining them; numbers always say where they come from.
 
 ## Evidence on Hand

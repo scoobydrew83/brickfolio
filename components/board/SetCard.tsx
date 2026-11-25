@@ -1,11 +1,10 @@
 import Image from 'next/image';
 import Link from 'next/link';
-import { useState } from 'react';
 import { Box, ExternalLink, Pencil, Puzzle, Trash2 } from 'lucide-react';
 import { copiesSummary, displayNo, num, type SetRow } from '@/lib/sets';
 import { retailGain, retirement } from '@/lib/retail';
 import { blLink, type Money } from './ui';
-import { Button, Callout, CONDITION_TONE, Chip, IconButton, buttonClass, cx } from '../ui';
+import { Button, Callout, CONDITION_TONE, Chip, Confirm, IconButton, Tip, buttonClass, cx } from '../ui';
 
 /** `canEdit` (#50): false hides edit and remove for a set the viewer can't change. */
 export type RowActions = { onEdit: (s: SetRow) => void; onParts: (s: SetRow) => void; onRemove: (s: SetRow) => void; onRetry: (s: SetRow) => void; pending: boolean; money: Money; currency: string; canEdit?: (s: SetRow) => boolean };
@@ -20,9 +19,11 @@ export function SetCard({ s, onEdit, onParts, onRemove, onRetry, pending, money,
     <article className="flex h-full flex-col gap-3">
       <div className="relative h-36 overflow-hidden rounded-card bg-tile sm:h-44">
         {s.hasModel && (
-          <Link href={`${href}?view=3d`} aria-label="Has a 3D model: open it" title="Has a 3D model" className="absolute top-2 left-2 z-10 inline-flex items-center gap-1 rounded-chip border border-outline bg-surface px-1.5 py-0.5 text-xs font-bold text-fg hover:bg-primary hover:text-on-primary">
+          <Tip label="Has a 3D model" describe={false}>
+          <Link href={`${href}?view=3d`} aria-label="Has a 3D model: open it" className="absolute top-2 left-2 z-10 inline-flex items-center gap-1 rounded-chip border border-outline bg-surface px-1.5 py-0.5 text-xs font-bold text-fg hover:bg-primary hover:text-on-primary">
             <Box aria-hidden className="size-3.5" />3D
           </Link>
+          </Tip>
         )}
         {s.imageUrl ? (
           <Image src={s.imageUrl} alt="" fill sizes="(min-width: 1280px) 300px, (min-width: 640px) 45vw, 90vw" className="object-contain p-4 mix-blend-multiply" />
@@ -42,9 +43,9 @@ export function SetCard({ s, onEdit, onParts, onRemove, onRetry, pending, money,
           </div>
           {/* Two lines reserved for the name on multi-column layouts, so cards in a row line up. */}
           <h2 className="mt-1 line-clamp-2 sm:min-h-[2lh] text-xl font-extrabold leading-tight tracking-tight [font-stretch:110%]">
-            <Link href={href} title={s.blName && s.blName !== s.name ? `${s.name} (BrickLink: ${s.blName})` : s.name} className="hover:text-link">{s.name}</Link>
+            <Tip label={s.blName && s.blName !== s.name ? `${s.name} (BrickLink: ${s.blName})` : s.name}><Link href={href} className="hover:text-link">{s.name}</Link></Tip>
           </h2>
-          <p className="mt-1 truncate text-xs text-fg-3" title={meta || undefined}>{meta || '\u00a0'}</p>
+          <Tip label={meta} whenCut><p className="mt-1 truncate text-xs text-fg-3">{meta || '\u00a0'}</p></Tip>
         </div>
         {s.blError && (
           <div role="alert" className="flex items-start justify-between gap-2 rounded-control bg-danger-soft px-2 py-1 text-xs text-danger">
@@ -56,7 +57,7 @@ export function SetCard({ s, onEdit, onParts, onRemove, onRetry, pending, money,
         <Callout className="mt-auto px-3 pt-2.5 pb-2">
           <div className="flex items-end justify-between gap-3">
             <div>
-              <p className="text-2xl font-extrabold leading-none tabular-nums [font-stretch:112%]" title={`${s.qty} ${s.qty === 1 ? 'copy' : 'copies'}`}>
+              <p className="text-2xl font-extrabold leading-none tabular-nums [font-stretch:112%]">
                 {s.qty}x
               </p>
               <p className="mt-1 text-xs text-fg-3">{copiesSummary(s.copies)}</p>
@@ -71,23 +72,23 @@ export function SetCard({ s, onEdit, onParts, onRemove, onRetry, pending, money,
             <div><dt className="text-fg-3">Average</dt><dd className="font-semibold">{money(s.avgSold)}</dd></div>
             <div><dt className="text-fg-3">High</dt><dd className="font-semibold">{money(s.maxSold)}</dd></div>
           </dl>
-          <p className="mt-1 text-xs text-fg-3" title={s.qtySold ? `From ${s.qtySold} recent BrickLink sales` : 'No recent BrickLink sales'}>
-            {gain
+          <p className="mt-1 text-xs text-fg-3">
+            <Tip label={gain ? (s.qtySold ? `From ${s.qtySold} recent BrickLink sales` : 'No recent BrickLink sales') : undefined}><span>{gain
               ? <>Retail {money(gain.retail)} · <b className={gain.gainPct >= 0 ? 'text-ok' : 'text-danger'}>{gain.gainPct >= 0 ? '+' : '−'}{Math.abs(gain.gainPct)}%</b></>
-              : s.qtySold ? `From ${s.qtySold} recent BrickLink sales` : 'No recent BrickLink sales'}
-            {s.missingPct ? <span className="font-semibold text-warn" title={s.missingMarked ? `From ${s.missingMarked} marked missing piece${s.missingMarked === 1 ? '' : 's'}` : 'Typed in by hand'}> · {s.missingPct}% missing</span> : null}
+              : s.qtySold ? `From ${s.qtySold} recent BrickLink sales` : 'No recent BrickLink sales'}</span></Tip>
+            {s.missingPct ? <Tip label={s.missingMarked ? `From ${s.missingMarked} marked missing piece${s.missingMarked === 1 ? '' : 's'}` : 'Typed in by hand'}><span className="font-semibold text-warn"> · {s.missingPct}% missing</span></Tip> : null}
           </p>
           {s.gain !== null && (
-            <p className="text-xs text-fg-3" title={s.costCovered < s.qty ? `Cost known for ${s.costCovered} of ${s.qty} copies` : undefined}>
+            <Tip label={s.costCovered < s.qty ? `Cost known for ${s.costCovered} of ${s.qty} copies` : undefined}><p className="text-xs text-fg-3">
               Cost {money(s.costBasis)} · <b className={s.gain >= 0 ? 'text-ok' : 'text-danger'}>{s.gain >= 0 ? '+' : '−'}{money(Math.abs(s.gain))}</b>
               {s.costCovered < s.qty ? ` (${s.costCovered} of ${s.qty})` : ''}
-            </p>
+            </p></Tip>
           )}
         </Callout>
 
         <div className="flex items-center gap-0.5 text-sm">
-          <span className="mr-auto truncate text-xs text-fg-3" title="Location">{locationLabel(s)}</span>
-          <a href={blLink(s.setNo)} target="_blank" rel="noreferrer" aria-label="Open on BrickLink" title="Open on BrickLink" className={cx(buttonClass('ghost', 'sm'), 'size-8 px-0')}><ExternalLink aria-hidden className="size-4" /></a>
+          <Tip label={`Location: ${locationLabel(s)}`}><span className="mr-auto min-w-0 truncate text-xs text-fg-3">{locationLabel(s)}</span></Tip>
+          <Tip label="Open on BrickLink"><a href={blLink(s.setNo)} target="_blank" rel="noreferrer" aria-label="Open on BrickLink" className={cx(buttonClass('ghost', 'sm'), 'size-8 px-0')}><ExternalLink aria-hidden className="size-4" /></a></Tip>
           <IconButton icon={Puzzle} label="Parts list" onClick={() => onParts(s)} />
           {canEdit?.(s) !== false && <IconButton icon={Pencil} label="Edit" onClick={() => onEdit(s)} />}
           {canEdit?.(s) !== false && <RemoveButton s={s} onRemove={() => onRemove(s)} busy={pending} />}
@@ -104,27 +105,28 @@ export function locationLabel(s: Pick<SetRow, 'location' | 'mixed' | 'copies'>):
   return `${new Set(s.copies.filter((c) => c.status !== 'parted_out').map((c) => c.location ?? '')).size} locations`;
 }
 
-/** Two-step remove. With several copies it removes the newest one. */
+/** Remove, after a confirmation. With several copies it removes the newest one. */
 export function RemoveButton({ s, onRemove, busy, compact = true }: { s: SetRow; onRemove: () => void; busy: boolean; compact?: boolean }) {
-  const [confirming, setConfirming] = useState(false);
   const label = s.qty > 1 ? 'Remove one' : 'Remove';
-  if (confirming) {
-    return (
-      <span className="inline-flex gap-1">
-        <Button variant="danger" size="sm" disabled={busy} onClick={() => { setConfirming(false); onRemove(); }}>{label}</Button>
-        <Button variant="ghost" size="sm" onClick={() => setConfirming(false)}>Cancel</Button>
-      </span>
-    );
-  }
-  return compact
-    ? <IconButton icon={Trash2} label={label} tone="danger" disabled={busy} onClick={() => setConfirming(true)} />
-    : <button type="button" disabled={busy} onClick={() => setConfirming(true)} className="inline-flex items-center text-sm font-medium text-danger hover:underline disabled:opacity-50">{label}</button>;
+  return (
+    <Confirm
+      title={s.qty > 1 ? `Remove one copy of ${s.name}?` : `Remove ${s.name}?`}
+      body={s.qty > 1 ? `The newest copy goes, with its details and missing parts. ${s.qty - 1} left.` : 'It leaves your collection with its copies, notes and missing parts. This can’t be undone.'}
+      confirmLabel={label}
+      tone="danger"
+      onConfirm={onRemove}
+    >
+      {compact
+        ? <IconButton icon={Trash2} label={label} tone="danger" disabled={busy} />
+        : <Button variant="danger-link" disabled={busy}>{label}</Button>}
+    </Confirm>
+  );
 }
 
 /** "Retiring 2026" or "Retired", from Brickset's dates. */
 export function RetireChip({ ret }: { ret: { kind: 'retired' | 'retiring'; date: string | null } }) {
   const year = ret.date?.slice(0, 4);
   return ret.kind === 'retiring'
-    ? <Chip tone="warn"><span title={ret.date ? `Expected to retire ${ret.date} (Brickset)` : undefined}>Retiring{year ? ` ${year}` : ''}</span></Chip>
-    : <Chip tone="neutral"><span title={ret.date ? `Retired ${ret.date} (Brickset)` : 'Retired (Brickset)'}>Retired</span></Chip>;
+    ? <Chip tone="warn"><Tip label={ret.date ? `Expected to retire ${ret.date} (Brickset)` : undefined}><span>Retiring{year ? ` ${year}` : ''}</span></Tip></Chip>
+    : <Chip tone="neutral"><Tip label={ret.date ? `Retired ${ret.date} (Brickset)` : 'Retired (Brickset)'}><span>Retired</span></Tip></Chip>;
 }

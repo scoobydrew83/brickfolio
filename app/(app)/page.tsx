@@ -35,5 +35,5 @@ async function Sets() {
   }
   const access = (await currentAccess())!;
   const collections = (await getDb().then(listCollections).catch(() => [])).filter((c) => access.admin || access.roles.has(c.id));
-  return <Board {...data} user={user.user} priced={!!bricklink()} collections={collections} collection={typeof collectionId === 'number' ? collectionId : 'all'} writable={writable(access)} />;
+  return <Board {...data} priced={!!bricklink()} collections={collections} collection={typeof collectionId === 'number' ? collectionId : 'all'} writable={writable(access)} />;
 }

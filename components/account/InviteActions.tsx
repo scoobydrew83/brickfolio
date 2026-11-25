@@ -2,7 +2,7 @@
 import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { acceptInvitation, declineInvitation } from '@/app/invite/actions';
-import { Banner, Button } from '../ui';
+import { Banner, Button, Confirm } from '../ui';
 
 /** Accept / Decline for an invitation addressed to the signed-in person. Accepting goes to the collection. */
 export function InviteActions({ id, collection }: { id: string; collection: string }) {
@@ -20,7 +20,9 @@ export function InviteActions({ id, collection }: { id: string; collection: stri
       {note && <Banner kind="error" onDismiss={() => setNote(null)}>{note.text}</Banner>}
       <div className="flex flex-wrap gap-2">
         <Button variant="primary" loading={pending} onClick={() => go(true)}>Accept</Button>
-        <Button disabled={pending} onClick={() => go(false)}>Decline</Button>
+        <Confirm title={`Decline the invitation to ${collection}?`} body="The invitation is used up. To join later you'd need a new one." confirmLabel="Decline" tone="danger" onConfirm={() => go(false)}>
+          <Button disabled={pending}>Decline</Button>
+        </Confirm>
       </div>
     </div>
   );

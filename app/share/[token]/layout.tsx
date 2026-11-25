@@ -11,7 +11,7 @@ export default function ShareLayout({ children }: LayoutProps<'/share/[token]'>)
       <header className="bg-header text-on-header">
         <div className="mx-auto flex w-full max-w-7xl items-center gap-2.5 px-4 py-2.5 sm:px-6">
           <Logo />
-          <span className="flex-1 text-lg font-bold tracking-tight text-white [font-stretch:110%]">{APP_NAME}</span>
+          <span className="flex-1 text-lg font-bold tracking-tight text-on-header-strong [font-stretch:110%]">{APP_NAME}</span>
           <ThemeToggle />
         </div>
       </header>

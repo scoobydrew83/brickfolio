@@ -8,7 +8,8 @@ import { minifigTotals } from '@/lib/minifigs';
 import { moneyIn, type Money } from './board/ui';
 import { CollectionTabs } from './shell/CollectionTabs';
 import { PageHeader } from './shell/PageHeader';
-import { Banner, Button, CONDITION_TONE, Chip, Dialog, EmptyState, IconButton, buttonClass, cx, field } from './ui';
+import { LocationPicker } from './LocationPicker';
+import { Banner, Button, CONDITION_TONE, Chip, Combobox, Confirm, Dialog, EmptyState, IconButton, Tip, buttonClass, cx, field, toast } from './ui';
 
 const key = (m: Pick<MinifigRow, 'figNo' | 'rbFigNo'>) => (m.figNo ?? m.rbFigNo)!;
 const blFigLink = (no: string) => `https://www.bricklink.com/v2/catalog/catalogitem.page?M=${encodeURIComponent(no)}`;
@@ -33,8 +34,10 @@ export default function MinifigsView({ figs, series, locations, currency, priced
     start(async () => {
       const r = await fn();
       if (!r.ok && r.existing && form) return setDupe({ form, ...r.existing });
-      setMessage(r.ok ? { kind: 'ok', text: ok } : { kind: 'error', text: r.error });
-      if (r.ok) after?.();
+      if (!r.ok) return setMessage({ kind: 'error', text: r.error });
+      setMessage(null);
+      toast.success(ok);
+      after?.();
     });
   const close = () => { setEditing(null); setDupe(null); };
 
@@ -86,9 +89,16 @@ export default function MinifigsView({ figs, series, locations, currency, priced
               <span className="flex flex-col items-end gap-1">
                 <span className="text-lg font-extrabold tabular-nums [font-stretch:112%]">{money(m.estValue)}</span>
                 <span className="flex items-center gap-0.5">
-                  <a href={m.figNo ? blFigLink(m.figNo) : rbFigLink(m.rbFigNo!)} target="_blank" rel="noreferrer" aria-label={m.figNo ? 'Open on BrickLink' : 'Open on Rebrickable'} title={m.figNo ? 'Open on BrickLink' : 'Open on Rebrickable'} className={cx(buttonClass('ghost', 'sm'), 'size-8 px-0')}><ExternalLink aria-hidden className="size-4" /></a>
+                  <Tip label={m.figNo ? 'Open on BrickLink' : 'Open on Rebrickable'}><a href={m.figNo ? blFigLink(m.figNo) : rbFigLink(m.rbFigNo!)} target="_blank" rel="noreferrer" aria-label={m.figNo ? 'Open on BrickLink' : 'Open on Rebrickable'} className={cx(buttonClass('ghost', 'sm'), 'size-8 px-0')}><ExternalLink aria-hidden className="size-4" /></a></Tip>
                   {canFig(m.collectionId) && <IconButton icon={Pencil} label="Edit" onClick={() => setEditing(m)} />}
-                  {canFig(m.collectionId) && <IconButton icon={Trash2} label={m.qty > 1 ? 'Remove one copy' : 'Remove'} tone="danger" disabled={pending} onClick={() => act(() => removeMinifig(key(m), m.collectionId), m.qty > 1 ? `Removed one ${m.name}.` : `Removed ${m.name}.`)} />}
+                  {/* Taking one off a count can be put back with Edit; removing the last copy loses the figure's details, so it asks. */}
+                  {canFig(m.collectionId) && (m.qty > 1
+                    ? <IconButton icon={Trash2} label="Remove one copy" tone="danger" disabled={pending} onClick={() => act(() => removeMinifig(key(m), m.collectionId), `Removed one ${m.name}.`)} />
+                    : (
+                      <Confirm title={`Remove ${m.name}?`} body="It leaves your minifigures with its condition, location and notes. This can’t be undone." confirmLabel="Remove" tone="danger" onConfirm={() => act(() => removeMinifig(key(m), m.collectionId), `Removed ${m.name}.`)}>
+                        <IconButton icon={Trash2} label="Remove" tone="danger" disabled={pending} />
+                      </Confirm>
+                    ))}
                 </span>
               </span>
             </li>
@@ -96,7 +106,7 @@ export default function MinifigsView({ figs, series, locations, currency, priced
         </ul>
       )}
 
-      <CmfChecklist series={series} hasRebrickable={hasRebrickable} onTicked={(name) => setMessage({ kind: 'ok', text: `Added ${name}.` })} />
+      <CmfChecklist series={series} hasRebrickable={hasRebrickable} onTicked={(name) => { setMessage(null); toast.success(`Added ${name}.`); }} />
 
       {editing && (
         <FigForm
@@ -147,10 +157,7 @@ function CmfChecklist({ series, hasRebrickable, onTicked }: { series: CmfSeries[
         {series.length > 0 && (
           <label className="text-sm">
             <span className="sr-only">Series</span>
-            <select value={themeId ?? ''} onChange={(e) => e.target.value && load(Number(e.target.value))} className={cx(field, 'mt-0 w-56')}>
-              <option value="">Pick a series…</option>
-              {series.map((s) => <option key={s.themeId} value={s.themeId}>{s.name}</option>)}
-            </select>
+            <Combobox label="Series" value={themeId === null ? '' : String(themeId)} onChange={(v) => v && load(Number(v))} placeholder="Pick a series…" options={series.map((s) => ({ value: String(s.themeId), label: s.name }))} className="mt-0 w-56" />
           </label>
         )}
       </div>
@@ -210,10 +217,7 @@ function FigForm({ fig, locations, collections, collection, pending, dupe, money
             <select name="condition" defaultValue={fig?.condition ?? 'Used'} className={field}><option>New</option><option>Used</option></select>
           </label>
           <label className="block text-sm">Location
-            <select name="location" defaultValue={fig?.location ?? ''} className={field}>
-              <option value="">(none)</option>
-              {locations.map((l) => <option key={l}>{l}</option>)}
-            </select>
+            <LocationPicker name="location" defaultValue={fig?.location ?? ''} locations={locations} />
           </label>
           {collections.length > 1 && (
             <label className="block text-sm">Collection

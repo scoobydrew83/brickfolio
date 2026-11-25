@@ -9,7 +9,8 @@ import { createRemoteJWKSet, jwtVerify } from 'jose';
 
 export type AuthMode = 'none' | 'tailscale' | 'cloudflare-access' | 'better-auth';
 /** `owner`: for an API token, the login that created it (#50); none for tokens from before, which act as admin. */
-export type Identity = { user: string; via: AuthMode | 'token' | 'cron'; owner?: string | null };
+/** `impersonatedBy` (#102): the Better Auth user id of an admin acting as `user`; they get only `user`'s rights. */
+export type Identity = { user: string; via: AuthMode | 'token' | 'cron'; owner?: string | null; impersonatedBy?: string };
 
 export const authMode = (): AuthMode => {
   const m = process.env.AUTH_MODE || 'none';
@@ -46,7 +47,9 @@ export async function identify(h: Headers): Promise<Identity | null> {
     const [{ getDb }, { getAuth }] = await Promise.all([import('./db'), import('./better-auth')]);
     const s = await getAuth(await getDb()).api.getSession({ headers: h });
     const user = s?.user.email.toLowerCase();
-    return user && s?.user.emailVerified && allowed(user) ? { user, via: 'better-auth' } : null; // verified only (#90)
+    if (!user || !s?.user.emailVerified || !allowed(user)) return null; // verified only (#90)
+    const by = (s.session as { impersonatedBy?: string | null }).impersonatedBy;
+    return by ? { user, via: 'better-auth', impersonatedBy: by } : { user, via: 'better-auth' };
   }
   if (mode === 'tailscale') {
     const user = h.get('tailscale-user-login');

@@ -21,6 +21,8 @@ const eslintConfig = defineConfig([
     ".open-next/**",
     ".wrangler/**",
     "cloudflare-env.d.ts",
+    // Agent skills installed with `npx skills add` (third-party, updated by that tool).
+    ".claude/skills/**",
   ]),
 ]);
 

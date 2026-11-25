@@ -4,6 +4,7 @@ import "./globals.css";
 import { APP_DESCRIPTION, APP_NAME } from "@/lib/brand";
 import { THEME_SCRIPT } from "@/components/shell/ThemeToggle";
 import { InlineScript } from "@/components/shell/InlineScript";
+import { ConfirmHost, ToastHost } from "@/components/ui";
 
 // One workhorse face with weight and width axes: heavy, wide numerals for values, normal width for UI text.
 const archivo = Archivo({
@@ -36,6 +37,9 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       <body className="flex min-h-full flex-col bg-canvas text-fg">
         <InlineScript html={THEME_SCRIPT} />
         {children}
+        {/* Once for every page: confirmAction() dialogs and toasts. */}
+        <ConfirmHost />
+        <ToastHost />
       </body>
     </html>
   );

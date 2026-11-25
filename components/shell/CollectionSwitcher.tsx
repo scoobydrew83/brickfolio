@@ -12,14 +12,14 @@ export function CollectionSwitcher({ collections, current }: { collections: { id
   const router = useRouter();
   const [pending, start] = useTransition();
   return (
-    <label data-switcher className="relative -my-1 flex min-w-0 items-center gap-1.5 rounded-control px-2 py-1.5 text-sm text-on-header hover:bg-white/10 focus-within:bg-white/10 sm:shrink-0">
+    <label data-switcher className="relative -my-1 flex min-w-0 items-center gap-1.5 rounded-control px-2 py-1.5 text-sm text-on-header hover:bg-header-hover focus-within:bg-header-hover sm:shrink-0">
       <Library aria-hidden className="size-4 shrink-0" />
       <span className="sr-only">Collection</span>
       <select
         value={String(current)}
         disabled={pending}
         onChange={(e) => start(async () => { const v = e.target.value; await selectCollection(v === 'all' ? 'all' : Number(v)); router.refresh(); })}
-        className="max-w-[9rem] min-w-0 cursor-pointer truncate bg-transparent font-medium text-white outline-none sm:max-w-[12rem] [&>option]:bg-surface [&>option]:text-fg"
+        className="max-w-[9rem] min-w-0 cursor-pointer truncate bg-transparent font-medium text-on-header-strong outline-none sm:max-w-[12rem] [&>option]:bg-surface [&>option]:text-fg"
       >
         <option value="all">All collections</option>
         {collections.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}

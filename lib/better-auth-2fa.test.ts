@@ -6,7 +6,7 @@ import { createHash, createHmac, generateKeyPairSync, randomBytes, sign, type Ke
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { openNodeDb } from './db/node';
 import type { DB } from './db/types';
-import { authPasskey, authTwoFactor, authUser } from './db/schema';
+import { authPasskey, authSession, authTwoFactor, authUser } from './db/schema';
 import { getAuth } from './better-auth';
 import { identify } from './auth';
 
@@ -219,6 +219,20 @@ describe('passkeys', () => {
     vi.stubEnv('ALLOWED_USERS', '');
     await db.update(authUser).set({ emailVerified: false });
     await expect(passkeySignIn(device)).rejects.toThrow(/don't have access/);
+  });
+});
+
+describe('bans (#102)', () => {
+  it('refuse passkey sign-in too, and an ended ban lets the passkey back in', async () => {
+    const device = new FakeAuthenticator();
+    await addPasskey(device, (await signIn()).headers);
+    const s = await passkeySignIn(device);
+    await db.update(authUser).set({ banned: true, banExpires: new Date(Date.now() + 60_000) });
+    await db.delete(authSession); // what banPerson does with the ban
+    expect(await identify(s)).toBeNull();
+    await expect(passkeySignIn(device)).rejects.toThrow(/banned/);
+    await db.update(authUser).set({ banExpires: new Date(Date.now() - 1000) });
+    expect(await identify(await passkeySignIn(device))).toEqual({ user: 'me@x.test', via: 'better-auth' });
   });
 });
 

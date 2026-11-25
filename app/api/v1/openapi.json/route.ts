@@ -197,6 +197,17 @@ const spec = {
         responses: { 200: ok({ type: 'object', properties: { parts: { type: 'array', items: { allOf: [ref('Part'), { type: 'object', properties: { setNo: { type: 'string' }, setName: { type: 'string' } } }] } }, total: { type: 'integer' } } }) },
       },
     },
+    '/search': {
+      get: {
+        summary: 'Search pages, your sets, minifigures, wishlist items, parts and loose parts (the command palette)',
+        description: 'At most 8 results per group, only from what you may read: sets, minifigures and set parts from your collections (or `collection`), the shared wishlist and loose parts, and Store and Orders for admins only. Under 2 characters returns no results.',
+        parameters: [{ name: 'q', in: 'query', required: true, schema: { type: 'string', maxLength: 64 } }, collectionQ],
+        responses: {
+          200: ok({ type: 'object', properties: { results: { type: 'array', items: { type: 'object', properties: { group: { enum: ['Pages', 'Sets', 'Minifigures', 'Wishlist', 'Parts', 'Loose parts'] }, label: { type: 'string' }, hint: nullable('string'), href: { type: 'string', description: 'App path to open' }, image: nullable('string') } } } } }),
+          400: err, 401: err, 403: err,
+        },
+      },
+    },
     '/sets/{setNo}/model': {
       parameters: [setNo],
       get: { summary: "The set's LDraw model (text)", responses: { 200: { description: 'LDraw file', content: { 'text/plain': {} } }, 404: err } },

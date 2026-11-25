@@ -11,10 +11,11 @@ import { checkToken, sha256Hex } from './service/tokens';
 import { isDemo } from './demo';
 import { resolveAccess, type Access } from './service/permissions';
 
-/** What the signed-in user may see and do (#50), or null when nobody is signed in. */
+/** What the signed-in user may see and do (#50), or null when nobody is signed in (or they're banned, #102). */
 export async function currentAccess(): Promise<Access | null> {
   const id = await currentUser();
-  return id ? resolveAccess(await getDb(), id) : null;
+  const a = id ? await resolveAccess(await getDb(), id) : null;
+  return a && !a.banned ? a : null;
 }
 
 /** The signed-in user for a page or server action, or null. */
@@ -111,7 +112,7 @@ export async function writeCollection(): Promise<number | undefined> {
  */
 export async function pageBlock(need: 'member' | 'admin'): Promise<string | null> {
   const a = await currentAccess();
-  if (!a) return 'Not signed in.';
+  if (!a) return (await currentUser()) ? "You don't have access." : 'Not signed in.'; // banned (#102)
   const { can } = await import('./service/permissions');
   if (can(a, need)) return null;
   if (need === 'admin' && can(a, 'member')) return 'Only admins can see this page.';

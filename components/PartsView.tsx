@@ -1,4 +1,5 @@
 'use client';
+import { useSearchParams } from 'next/navigation';
 import { useEffect, useState, useTransition } from 'react';
 import { searchAllParts } from '@/app/actions';
 import type { PartSearchRow } from '@/lib/service/parts';
@@ -7,11 +8,15 @@ import { Button, Callout, EmptyState, SearchInput, Select } from './ui';
 
 /** Every part of every set, like the sheet's Parts tab. Search runs on the server, 200 rows at a time. */
 export default function PartsView({ types, first }: { types: string[]; first: { parts: PartSearchRow[]; total: number } }) {
-  const [q, setQ] = useState('');
+  // `?q=` (a part picked in the command palette, #107) searches for it, also when this page is already open.
+  const urlQ = useSearchParams().get('q') ?? '';
+  const [seenQ, setSeenQ] = useState(urlQ);
+  const [q, setQ] = useState(urlQ);
   const [type, setType] = useState('');
   const [data, setData] = useState(first);
   const [pending, start] = useTransition();
-  const [touched, setTouched] = useState(false);
+  const [touched, setTouched] = useState(!!urlQ);
+  if (urlQ !== seenQ) { setSeenQ(urlQ); setQ(urlQ); setTouched(true); }
 
   // Search 300 ms after typing stops.
   useEffect(() => {

@@ -5,7 +5,7 @@ import { Copy, Download, PackageCheck } from 'lucide-react';
 import { reserveForLayout } from '@/app/actions';
 import { itemImage, itemPage } from '@/lib/bricklink/links';
 import type { LayoutModule, LayoutNeeds as Needs } from '@/lib/service/layouts';
-import { Banner, Button, Callout, Count, EmptyState, FilterChip, buttonClass } from '../ui';
+import { Banner, Button, Callout, Count, EmptyState, FilterChip, Tip, buttonClass, toast } from '../ui';
 import { moduleName } from './LayoutGrid';
 
 const PAGE = 100;
@@ -27,7 +27,8 @@ export function LayoutNeeds({ layoutId, needs: n, modules }: { layoutId: number;
       const res = await fetch(wantedUrl);
       if (!res.ok) throw new Error(`The server answered ${res.status}.`);
       await navigator.clipboard.writeText(await res.text());
-      setMessage({ kind: 'ok', text: 'Wanted List XML copied. On BrickLink: Want → Upload → paste.' });
+      setMessage(null);
+      toast.success('Wanted List XML copied.', { description: 'On BrickLink: Want → Upload → paste.', duration: 8000 });
     } catch (e) {
       setMessage({ kind: 'error', text: `Couldn't copy the Wanted List: ${e instanceof Error ? e.message : String(e)}` });
     }
@@ -66,10 +67,10 @@ export function LayoutNeeds({ layoutId, needs: n, modules }: { layoutId: number;
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
-            {n.builds > 0 && <Button size="sm" icon={PackageCheck} loading={pending} onClick={reserve} title="Set aside the loose parts each build on the layout still needs">Reserve from loose parts for every build</Button>}
+            {n.builds > 0 && <Tip label="Set aside the loose parts each build on the layout still needs"><Button size="sm" icon={PackageCheck} loading={pending} onClick={reserve}>Reserve from loose parts for every build</Button></Tip>}
             {n.totals.toBuyLots > 0 && (
               <>
-                <a href={wantedUrl} download className={buttonClass('secondary', 'sm')} title="Upload this in BrickLink under Want → Upload"><Download aria-hidden className="size-4" />Wanted List</a>
+                <Tip label="Upload this in BrickLink under Want → Upload"><a href={wantedUrl} download className={buttonClass('secondary', 'sm')}><Download aria-hidden className="size-4" />Wanted List</a></Tip>
                 <Button size="sm" icon={Copy} disabled={pending} onClick={copyWanted}>Copy XML</Button>
               </>
             )}

@@ -4,6 +4,7 @@ import { CONDITIONS, REGISTERED, displayNo, type SetRow } from '@/lib/sets';
 import type { Money } from './ui';
 import { Button, Dialog, field } from '../ui';
 import { CopyFields } from './CopyForm';
+import { LocationPicker } from '../LocationPicker';
 
 type Dupe = { name: string; qty: number } | null;
 type Props = { set: SetRow | null; locations: string[]; pending: boolean; dupe: Dupe; money: Money; onClose: () => void; onAddAnother: () => void; onSubmit: (form: Record<string, unknown>) => void };
@@ -42,10 +43,7 @@ export function SetForm({ set, locations, pending, dupe, money, onClose, onAddAn
         <div className="grid grid-cols-2 gap-3">
           {!several && <>
           <label className="block text-sm">Location
-            <select name="location" defaultValue={set?.location ?? ''} className={field}>
-              <option value="">(none)</option>
-              {locations.map((l) => <option key={l}>{l}</option>)}
-            </select>
+            <LocationPicker name="location" defaultValue={set?.location ?? ''} locations={locations} />
           </label>
           <label className="block text-sm">Condition
             <select name="condition" defaultValue={set?.condition || 'Used'} className={field}>

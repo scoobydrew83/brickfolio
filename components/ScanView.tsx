@@ -13,8 +13,9 @@ import type { Resolution, ScanCandidate } from '@/lib/barcode/resolve';
 import type { OcrPaths } from '@/lib/barcode/ocr';
 import type { CmfSeries } from '@/lib/service/minifigs';
 import { CONDITIONS, displayNo, type Condition } from '@/lib/sets';
-import { Banner, Button, Chip, IconButton, Segmented, cx, field } from './ui';
+import { Banner, Button, Chip, Confirm, IconButton, Segmented, cx, field, toast } from './ui';
 import { PageHeader } from './shell/PageHeader';
+import { LocationPicker } from './LocationPicker';
 import { Scanner } from './scan/Scanner';
 import { useScanNetwork, type SetLookup } from './scan/useScanNetwork';
 import { FigureList, useFigSession } from './scan/FigureList';
@@ -78,7 +79,7 @@ export default function ScanView({ locations, caps, demo, series, ocr }: Props) 
   const video = useRef<HTMLVideoElement | null>(null);
   const [ocrState, setOcrState] = useState<{ reading: boolean; numbers: string[] | null; error?: string }>({ reading: false, numbers: null });
   const net = useScanNetwork({
-    onSent: useCallback((text: string) => setMessage({ kind: 'ok', text: `Sent what was waiting: ${text}` }), []),
+    onSent: useCallback((text: string) => { toast.success(`Sent what was waiting: ${text}`); }, []),
     onRefused: useCallback((error: string) => setMessage({ kind: 'error', text: `A waiting batch was refused: ${error}` }), []),
   });
 
@@ -395,10 +396,7 @@ function Defaults({ locations, value, onChange }: { locations: string[]; value: 
         </select>
       </label>
       <label className="block">Location
-        <select value={value.location} onChange={(e) => onChange({ ...value, location: e.target.value })} className={field}>
-          <option value="">(none)</option>
-          {locations.map((l) => <option key={l}>{l}</option>)}
-        </select>
+        <LocationPicker value={value.location} onChange={(location) => onChange({ ...value, location })} locations={locations} />
       </label>
     </div>
   );
@@ -544,7 +542,9 @@ function BatchList({ rows, pending, summary, onChange, onRemove, onRetry, onReso
       </ul>
       <div className="flex flex-wrap gap-2">
         <Button variant="primary" icon={Check} loading={pending} disabled={!ready} onClick={onSubmit}>Add {ready} {ready === 1 ? 'set' : 'sets'}</Button>
-        <Button variant="ghost" onClick={() => { if (window.confirm('Clear the scanned list?')) onClear(); }}>Clear list</Button>
+        <Confirm title="Clear the scanned list?" body={`The ${rows.length} scanned ${rows.length === 1 ? 'set leaves' : 'sets leave'} the list. Nothing is added.`} confirmLabel="Clear list" tone="danger" onConfirm={onClear}>
+          <Button variant="ghost">Clear list</Button>
+        </Confirm>
       </div>
       {rows.length > ready && <p className="text-xs text-fg-3">Sets still to sort out stay in the list after adding the rest.</p>}
     </section>

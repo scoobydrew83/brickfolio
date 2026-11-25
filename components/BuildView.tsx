@@ -8,7 +8,7 @@ import type { Reservation } from '@/lib/service/allocations';
 import type { BuildMatch } from '@/lib/service/builds';
 import { displayNo } from '@/lib/sets';
 import { PageHeader } from './shell/PageHeader';
-import { Banner, Button, Count, Dialog, EmptyState, FilterChip, Segmented, Skeleton, buttonClass, field } from './ui';
+import { Banner, Button, Count, Dialog, EmptyState, FilterChip, Segmented, Skeleton, Tip, buttonClass, field, toast } from './ui';
 
 type Filter = 'all' | 'ready' | 'close';
 type Kind = 'all' | 'alternate' | 'mine';
@@ -108,7 +108,10 @@ function BuildRow({ b, hasLots, collection, onMessage, onReserved }: { b: BuildM
   const file = useRef<HTMLInputElement>(null);
   const run = (fn: () => Promise<{ ok: true; message?: string } | { ok: false; error: string }>, ok: string) => start(async () => {
     const r = await fn();
-    onMessage(r.ok ? { kind: 'ok', text: r.message || ok } : { kind: 'error', text: r.error });
+    // A report the server wrote (parts list saved, what was reserved) stays on the page; a plain success is a toast.
+    if (!r.ok) onMessage({ kind: 'error', text: r.error });
+    else if (r.message) onMessage({ kind: 'ok', text: r.message });
+    else toast.success(ok);
   });
   const upload = (f: File) => { const form = new FormData(); form.set('file', f); run(() => uploadBuildParts(b.mocNo, form), 'Parts list saved.'); };
   const mine = b.kind !== 'alternate';
@@ -145,13 +148,15 @@ function BuildRow({ b, hasLots, collection, onMessage, onReserved }: { b: BuildM
       </span>
       <span className="col-span-2 flex flex-wrap items-center justify-end gap-1 sm:col-span-1">
         {b.partsKnown && hasLots && b.need - b.reserved > 0 && (
-          <Button size="sm" icon={PackageCheck} loading={pending} onClick={() => run(() => autoReserveParts(b.mocNo), 'Reserved.')} title="Set aside the loose parts this build still needs">Reserve from loose parts</Button>
+          <Tip label="Set aside the loose parts this build still needs"><Button size="sm" icon={PackageCheck} loading={pending} onClick={() => run(() => autoReserveParts(b.mocNo), 'Reserved.')}>Reserve from loose parts</Button></Tip>
         )}
         {b.reserved > 0 && <Button size="sm" variant="ghost" onClick={onReserved}><Count n={b.reserved} /> reserved</Button>}
         {b.partsKnown && b.missingPieces > 0 && (
-          <a href={`/api/v1/builds/${encodeURIComponent(b.mocNo)}/wanted.xml${collection ? `?collection=${collection}` : ''}`} className={buttonClass('secondary', 'sm')} title="Upload this in BrickLink under Wanted → Upload">
+          <Tip label="Upload this in BrickLink under Wanted → Upload">
+          <a href={`/api/v1/builds/${encodeURIComponent(b.mocNo)}/wanted.xml${collection ? `?collection=${collection}` : ''}`} className={buttonClass('secondary', 'sm')}>
             <Download aria-hidden className="size-4" />Wanted List
           </a>
+          </Tip>
         )}
         {b.kind === 'custom' && (
           <>
@@ -234,7 +239,7 @@ function ReservationsDialog({ build: b, onClose, onMessage }: { build: BuildMatc
     if (!r.ok) return onMessage({ kind: 'error', text: r.error });
     const next = await buildReservations(b.mocNo);
     setRows(next);
-    if (!next.length) { onMessage({ kind: 'ok', text: `Released everything reserved for ${b.name}.` }); onClose(); }
+    if (!next.length) { toast.success(`Released everything reserved for ${b.name}.`); onClose(); }
   });
   const total = rows?.reduce((t, r) => t + r.qty, 0) ?? b.reserved;
   return (

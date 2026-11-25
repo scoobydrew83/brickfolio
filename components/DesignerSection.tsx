@@ -6,7 +6,7 @@ import type { ProjectRow } from '@/lib/service/designer';
 import { STAGES, STAGE_LABEL } from '@/lib/designer';
 import { displayNo } from '@/lib/sets';
 import type { Money } from './board/ui';
-import { Banner, Button, Chip, Dialog, IconButton, buttonClass, cx, field, type Tone } from './ui';
+import { Banner, Button, Chip, Confirm, DatePicker, Dialog, IconButton, Tip, buttonClass, cx, field, toast, type Tone } from './ui';
 
 const WINDOW: Record<ProjectRow['window']['state'], Tone> = { open: 'ok', upcoming: 'warn', none: 'neutral', closed: 'neutral' };
 
@@ -26,8 +26,10 @@ export function DesignerSection({ projects, money }: { projects: ProjectRow[]; m
   const [pending, start] = useTransition();
   const act = (fn: () => Promise<Result>, ok: string, after?: () => void) => start(async () => {
     const r = await fn();
-    setMessage(r.ok ? { kind: 'ok', text: ok } : { kind: 'error', text: r.error });
-    if (r.ok) after?.();
+    if (!r.ok) return setMessage({ kind: 'error', text: r.error });
+    setMessage(null);
+    toast.success(ok);
+    after?.();
   });
   const toggle = (p: ProjectRow) => act(() => editDesignerProject(p.id, { watching: p.watching ? 'false' : 'true' }), p.watching ? `Alerts off for ${p.name}.` : `Alerts on for ${p.name}.`);
 
@@ -67,9 +69,11 @@ export function DesignerSection({ projects, money }: { projects: ProjectRow[]; m
                     <IconButton icon={Heart} label="Add to wishlist" disabled={pending} onClick={() => act(() => addWish({ setNo: p.setNo, name: p.name, condition: 'New', target: p.price ?? '' }), `Added ${p.name} to your wishlist.`)} />
                   )}
                   <IconButton icon={p.watching ? BellRing : BellOff} label={p.watching ? 'Alerts on: turn off' : 'Alerts off: turn on'} disabled={pending} onClick={() => toggle(p)} />
-                  {p.url && <a href={p.url} target="_blank" rel="noreferrer" aria-label="Open project page" title="Open project page" className={cx(buttonClass('ghost', 'sm'), 'size-8 px-0')}><ExternalLink aria-hidden className="size-4" /></a>}
+                  {p.url && <Tip label="Open project page"><a href={p.url} target="_blank" rel="noreferrer" aria-label="Open project page" className={cx(buttonClass('ghost', 'sm'), 'size-8 px-0')}><ExternalLink aria-hidden className="size-4" /></a></Tip>}
                   <IconButton icon={Pencil} label="Edit" onClick={() => setEditing(p)} />
-                  <IconButton icon={Trash2} label="Stop following" tone="danger" disabled={pending} onClick={() => act(() => removeDesignerProject(p.id), `Stopped following ${p.name}.`)} />
+                  <Confirm title={`Stop following ${p.name}?`} body="The project leaves the list with its dates, price and notes." confirmLabel="Stop following" tone="danger" onConfirm={() => act(() => removeDesignerProject(p.id), `Stopped following ${p.name}.`)}>
+                    <IconButton icon={Trash2} label="Stop following" tone="danger" disabled={pending} />
+                  </Confirm>
                 </span>
               </span>
             </li>
@@ -116,10 +120,10 @@ function ProjectForm({ p, pending, onClose, onSubmit }: { p: ProjectRow | null; 
             <input name="designer" defaultValue={p?.designer ?? ''} maxLength={80} className={field} />
           </label>
           <label className="block text-sm">Pre-order opens
-            <input name="preorderStart" type="date" defaultValue={p?.preorderStart ?? ''} className={field} />
+            <DatePicker name="preorderStart" label="Pre-order opens" defaultValue={p?.preorderStart ?? ''} />
           </label>
           <label className="block text-sm">Pre-order closes
-            <input name="preorderEnd" type="date" defaultValue={p?.preorderEnd ?? ''} className={field} />
+            <DatePicker name="preorderEnd" label="Pre-order closes" defaultValue={p?.preorderEnd ?? ''} />
           </label>
           <label className="block text-sm">Price
             <input name="price" type="number" min={0} step="0.01" defaultValue={p?.price ?? ''} className={field} />

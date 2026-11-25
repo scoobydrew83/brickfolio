@@ -1,5 +1,6 @@
 import { CONDITIONS, STATUSES, STATUS_LABEL, type CopyRow } from '@/lib/sets';
-import { Button, Dialog, field } from '../ui';
+import { Button, DatePicker, Dialog, field } from '../ui';
+import { LocationPicker } from '../LocationPicker';
 
 /** `collections` (#49): shown as a Collection field when there are two or more; `collection` is a new copy's default. */
 type Collections = { collections?: { id: number; name: string }[]; collection?: number };
@@ -61,10 +62,7 @@ export function CopyFields({ copy, locations, withPlace = true, collections = []
             </select>
           </label>
           <label className="block text-sm">Location
-            <select name="location" defaultValue={copy?.location ?? ''} className={field}>
-              <option value="">(none)</option>
-              {locations.map((l) => <option key={l}>{l}</option>)}
-            </select>
+            <LocationPicker name="location" defaultValue={copy?.location ?? ''} locations={locations} />
           </label>
           <label className="block text-sm">Missing %
             {copy?.missingMarked ? (
@@ -79,10 +77,10 @@ export function CopyFields({ copy, locations, withPlace = true, collections = []
         </>
       )}
       <label className="block text-sm">Acquired
-        <input name="acquiredDate" type="date" defaultValue={copy?.acquiredDate ?? ''} className={field} />
+        <DatePicker name="acquiredDate" label="Acquired" defaultValue={copy?.acquiredDate ?? ''} />
       </label>
       <label className="block text-sm">Built
-        <input name="buildDate" type="date" defaultValue={copy?.buildDate ?? ''} className={field} />
+        <DatePicker name="buildDate" label="Built" defaultValue={copy?.buildDate ?? ''} />
       </label>
       <label className="block text-sm">Price paid
         <input name="pricePaid" type="number" min={0} max={1000000} step="0.01" defaultValue={copy?.pricePaid ?? ''} className={field} />

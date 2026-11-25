@@ -1,0 +1,13 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      { "matcher": "Edit|Write", "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PROJECT_DIR}/.claude/hooks/lint-changed.mjs\"", "timeout": 60 }] }
+    ],
+    "TaskCompleted": [
+      { "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PROJECT_DIR}/.claude/hooks/test-changed.mjs\"", "timeout": 300 }] }
+    ],
+    "Stop": [
+      { "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PROJECT_DIR}/.claude/hooks/test-all.mjs\"", "timeout": 600 }] }
+    ]
+  }
+}

@@ -235,6 +235,11 @@ export async function ensureColors(db: DB, fetchColors: (() => Promise<Color[]>)
   }
 }
 
+/** BrickLink colours by name, for picking a lot's colour (#105). Empty until ensureColors has filled the table. */
+export async function listColors(db: DB): Promise<{ id: number; name: string }[]> {
+  return db.select({ id: colors.id, name: colors.name }).from(colors).orderBy(asc(colors.name)).all();
+}
+
 const partColumns = {
   matchNo: setParts.matchNo, partNo: setParts.partNo, name: setParts.name, type: setParts.type, colorId: setParts.colorId,
   qty: setParts.qty, extra: setParts.extra, alternate: setParts.alternate, counterpart: setParts.counterpart, mapped: setParts.mapped, source: setParts.source,

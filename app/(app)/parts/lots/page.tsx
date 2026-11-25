@@ -4,7 +4,7 @@ import LotsView from '@/components/LotsView';
 import { PageSkeleton } from '@/components/ui';
 import { getDb } from '@/lib/db';
 import { listImports, listLots } from '@/lib/service/lots';
-import { ensureColors } from '@/lib/service/parts';
+import { ensureColors, listColors } from '@/lib/service/parts';
 import { listLocations } from '@/lib/service/sets';
 import { brickColors, pageBlock } from '@/lib/session';
 
@@ -26,6 +26,6 @@ async function Content() {
   if (blocked) return <p className="py-24 text-center text-fg-3">{blocked}</p>;
   const db = await getDb();
   await ensureColors(db, brickColors());
-  const [first, locations, imports] = await Promise.all([listLots(db, { limit: 200 }), listLocations(db), listImports(db)]);
-  return <LotsView first={first} locations={locations} imports={imports} />;
+  const [first, locations, imports, colors] = await Promise.all([listLots(db, { limit: 200 }), listLocations(db), listImports(db), listColors(db)]);
+  return <LotsView first={first} locations={locations} imports={imports} colors={colors} />;
 }

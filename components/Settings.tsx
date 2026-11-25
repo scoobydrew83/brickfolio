@@ -2,7 +2,7 @@
 import { useEffect, useState, useTransition } from 'react';
 import { updateStatus, clearImageCache, imageCacheStatus, type ImageCacheStatus, shareCodes, syncCommunityNow, bricksetStatus, downloadLdrawLibrary, ldrawLibraryStatus, rebrickableStatus, syncBricksetNow, syncRebrickableNow, testBricksetKey, testRebrickableKey, type BricksetStatus, type RebrickableStatus, addLocation, addCollection, renameCollection, deleteCollection, reorderCollections, createShareLink, deleteLocation, revokeShareLink, importFile, renameLocation, setCurrency, setValueSource, type Result } from '@/app/actions';
 import { Copy } from 'lucide-react';
-import { Banner, Button, Select, field } from './ui';
+import { Banner, Button, Confirm, DatePicker, Select, field, toast } from './ui';
 import { PageHeader } from './shell/PageHeader';
 import type { LibraryStatus } from '@/lib/ldraw/download';
 import type { BarcodeCapabilities } from '@/lib/barcode/providers';
@@ -33,7 +33,10 @@ export default function Settings({ people, me, envAdmins, passwords, invitations
   const run = (fn: () => Promise<Result & { message?: string }>, okText: string, after?: (r: Result) => void) =>
     start(async () => {
       const r = await fn();
-      setMessage(r.ok ? { kind: 'ok', text: r.message ?? okText } : { kind: 'error', text: r.error });
+      // A report the server wrote (an import's counts) stays on the page; a plain success is a toast.
+      if (!r.ok) setMessage({ kind: 'error', text: r.error });
+      else if (r.message) setMessage({ kind: 'ok', text: r.message });
+      else { setMessage(null); toast.success(okText); }
       if (r.ok) after?.(r);
     });
 
@@ -58,7 +61,7 @@ export default function Settings({ people, me, envAdmins, passwords, invitations
         </form>
       </section>
 
-      <PeopleSection people={people} collections={collections} me={me} envAdmins={envAdmins} passwords={authMode === 'better-auth' ? 'reset' : passwords ? 'set' : null} />
+      <PeopleSection people={people} collections={collections} me={me} envAdmins={envAdmins} passwords={authMode === 'better-auth' ? 'reset' : passwords ? 'set' : null} authMode={authMode} />
       {invitations && <InvitationsSection collections={collections} invites={invitations.list} mail={invitations.mail} />}
 
       <section className={section}>
@@ -267,7 +270,7 @@ function RebrickableSection({ initial }: { initial: RebrickableStatus }) {
         </Button>
         <Button disabled={pending || running} onClick={() => start(async () => {
           const r = await testRebrickableKey();
-          setNote(r.ok ? { kind: 'ok', text: 'Rebrickable accepted the key.' } : { kind: 'error', text: r.error });
+          if (r.ok) { setNote(null); toast.success('Rebrickable accepted the key.'); } else setNote({ kind: 'error', text: r.error });
         })}>
           Test key
         </Button>
@@ -337,13 +340,13 @@ function BricksetSection({ initial }: { initial: BricksetStatus }) {
       <div className="flex flex-wrap gap-2">
         <Button variant="primary" loading={pending} onClick={() => start(async () => {
           const r = await syncBricksetNow();
-          setNote(r.ok ? { kind: 'ok', text: 'Brickset sync finished.' } : { kind: 'error', text: r.error });
+          if (r.ok) { setNote(null); toast.success('Brickset sync finished.'); } else setNote({ kind: 'error', text: r.error });
           const next = await bricksetStatus();
           if (next) setSt(next);
         })}>Sync Brickset now</Button>
         <Button disabled={pending} onClick={() => start(async () => {
           const r = await testBricksetKey();
-          setNote(r.ok ? { kind: 'ok', text: 'Brickset accepted the key.' } : { kind: 'error', text: r.error });
+          if (r.ok) { setNote(null); toast.success('Brickset accepted the key.'); } else setNote({ kind: 'error', text: r.error });
         })}>Test key</Button>
       </div>
     </section>
@@ -595,7 +598,7 @@ export function ShareSection({ links, collections, allowAll = true }: { links: S
         <div className="space-y-1 rounded-control bg-warn-soft p-3 text-sm text-warn ring-1 ring-warn-ring">
           <p className="font-semibold">Copy this link now. It won&apos;t be shown again.</p>
           <code className="block break-all rounded-chip bg-surface px-2 py-1 font-mono text-xs">{url}</code>
-          <Button size="sm" icon={Copy} onClick={() => navigator.clipboard.writeText(url).then(() => setMessage({ kind: 'ok', text: 'Link copied.' }), () => {})}>Copy</Button>
+          <Button size="sm" icon={Copy} onClick={() => navigator.clipboard.writeText(url).then(() => toast.success('Link copied.'), () => {})}>Copy</Button>
         </div>
       )}
       <ul className="divide-y divide-line text-sm">
@@ -605,10 +608,12 @@ export function ShareSection({ links, collections, allowAll = true }: { links: S
             <span className="text-xs text-fg-3">
               created {day(l.createdAt)} · {l.expiresAt ? (l.expired ? `expired ${day(l.expiresAt)}` : `expires ${day(l.expiresAt)}`) : 'never expires'} · {l.lastViewedAt ? `viewed ${l.views}×, last ${day(l.lastViewedAt)}` : 'not viewed yet'}
             </span>
-            <Button variant="danger-link" disabled={pending} onClick={() => start(async () => {
+            <Confirm title={`Revoke ${l.name}?`} body="The link stops working for anyone who has it. A new link has a new address." confirmLabel="Revoke" tone="danger" onConfirm={() => start(async () => {
               const r = await revokeShareLink(l.id);
-              setMessage(r.ok ? { kind: 'ok', text: `Revoked ${l.name}. The link stopped working.` } : { kind: 'error', text: r.error });
-            })}>Revoke</Button>
+              if (r.ok) { setMessage(null); toast.success(`Revoked ${l.name}. The link stopped working.`); } else setMessage({ kind: 'error', text: r.error });
+            })}>
+              <Button variant="danger-link" disabled={pending}>Revoke</Button>
+            </Confirm>
           </li>
         ))}
       </ul>
@@ -650,7 +655,7 @@ export function ShareSection({ links, collections, allowAll = true }: { links: S
               <option value="never">Never</option><option value="7">In 7 days</option><option value="30">In 30 days</option><option value="date">On a date</option>
             </select>
           </label>
-          {expiry === 'date' && <input type="date" name="expiresOn" required aria-label="Expiry date" className={field} />}
+          {expiry === 'date' && <DatePicker name="expiresOn" required label="Expiry date" className="mt-0 min-w-44" />}
           <Button type="submit" variant="primary" loading={pending}>Create link</Button>
         </div>
       </form>

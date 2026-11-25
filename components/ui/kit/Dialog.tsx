@@ -26,7 +26,7 @@ export function Dialog({ title, subtitle, onClose, size = 'md', tall, footer, ch
       ref={ref}
       onClose={onClose}
       aria-label={typeof title === 'string' ? title : undefined}
-      className={cx('m-auto w-full rounded-card p-0 shadow-raised backdrop:bg-black/50', size === 'md' ? 'max-w-md' : 'max-w-lg', tall && 'h-[85dvh]')}
+      className={cx('m-auto w-full rounded-card p-0 shadow-raised backdrop:bg-scrim', size === 'md' ? 'max-w-md' : 'max-w-lg', tall && 'h-[85dvh]')}
     >
       <div className="flex h-full max-h-[90dvh] flex-col">
         <header className="flex items-start justify-between gap-3 border-b border-line px-5 py-4">

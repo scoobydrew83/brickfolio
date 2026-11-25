@@ -2,6 +2,7 @@
 import { useState } from 'react';
 import { CONDITIONS } from '@/lib/sets';
 import { Button, Dialog, field } from '../ui';
+import { LocationPicker } from '../LocationPicker';
 
 type Props = { locations: string[]; pending: boolean; onClose: () => void; onSubmit: (text: string, location: string, condition: string) => void };
 
@@ -22,10 +23,7 @@ export function QuickAdd({ locations, pending, onClose, onSubmit }: Props) {
         </label>
         <div className="grid grid-cols-2 gap-3">
           <label className="block text-sm">Location for all
-            <select name="location" defaultValue="" className={field}>
-              <option value="">(none)</option>
-              {locations.map((l) => <option key={l}>{l}</option>)}
-            </select>
+            <LocationPicker name="location" defaultValue="" locations={locations} />
           </label>
           <label className="block text-sm">Condition for all
             <select name="condition" defaultValue="Used" className={field}>

@@ -140,12 +140,15 @@ Cool paper and ink, with one warm signal.
 - **Callout White** (#ffffff, night #17222b): callouts, dialogs, inputs, chips.
 - **Ink** (#14212b, night #e8eef3): text and numerals. Ink 2 (#364552) secondary text, Ink 3 (#52626f) captions and labels (4.9:1 or better on every ground), Ink 4 (#8796a3) decoration only, never text.
 - **Ink Outline** (#2b3a46, night #5d7282): the 1.5px callout outline. **Rule** (#c9d4dd) for dividers, **Rule Strong** (#7d8e9c, 3:1) for input and control borders.
-- **Header Ink** (#14212b, night #0a1116): the header band, text on it #e3eaf0.
-- **Photo Tile** (#f5f7f9, night #edf1f4): behind set and part photos. Stays light at night because BrickLink photos have white backgrounds.
+- **Header Ink** (#14212b, night #0a1116): the header band, text on it #e3eaf0 (`on-header`). The brand and hovered header text are white (`on-header-strong`), and a header button's hover fill is 10% white (`header-hover`).
+- **Photo Tile** (#f5f7f9, night #edf1f4): behind set and part photos. Stays light at night because BrickLink photos have white backgrounds. A chip or field on it is white in both themes (`tile-raised`).
+- **Scrim** (black at 50%, night 65%; `scrim`): the dimmed page behind dialogs, sheets and the phone menu (`bg-scrim`, or `backdrop:bg-scrim` on a native `<dialog>`).
+
+**Tokens only.** Views use these tokens (`bg-surface`, `text-fg-3`, `bg-scrim`, `text-on-danger`), never `black`, `white` or a hex value; a colour with a job gets a token in `app/globals.css`, with its night value. A test (`components/ui/kit/tokens.test.ts`) enforces it. The exceptions are colours that mean a physical colour, not a theme role, each listed in that test with its reason: the black scrim and white marks over the live camera picture (`scan/Scanner`), and the hex values the browser's theme colour, the web app manifest and the generated app icon need, where CSS variables don't work.
 
 ### State
 - **Link / Focus Blue** (#1d5aa0, night #8fbdf2): inline links and the keyboard focus ring. On the header band the ring is Brick Yellow.
-- **Ok** (#146c43 on #e1f3e8): New condition, gains. **Warn** (#8a4b00 on #fdf0d9): Partial, missing pieces. **Danger** (#b42318 on #fde8e6; solid #c8321f): lookup errors, losses, confirm-delete.
+- **Ok** (#146c43 on #e1f3e8): New condition, gains. **Warn** (#8a4b00 on #fdf0d9): Partial, missing pieces. **Danger** (#b42318 on #fde8e6; solid #c8321f with white text, `on-danger`): lookup errors, losses, confirm-delete.
 
 ### Named Rules
 **The One Signal Rule.** Brick Yellow marks what you can do next or what is selected, nothing else. If two yellow things compete on a screen, one of them is wrong.
@@ -169,7 +172,8 @@ All numerals are tabular. No uppercase micro-labels; labels are sentence case in
 
 ## Layout
 
-- One shell: the ink header band (badge, name, nav, theme toggle) and a 1280px page with 16px gutters on phones, 24px from 640px. Phones swap the header nav for a bottom tab bar.
+- One shell: the ink header band (badge, name, nav, theme toggle) and a 1280px page with 16px gutters on phones, 24px from 640px. Phones swap the header nav for a menu button that opens a side panel with every page (`components/shell/MobileMenu`, shadcn `sheet` from the right on Base UI: `min(20rem, 85vw)` wide, full height, Scrim backdrop; Escape, a tap outside, a link, a route change or the screen reaching 640px close it); the theme switch and account link move into it. While it is open, ⌘K, Ctrl+K and `/` don't open the command palette (as over a form's dialog); its **Search** row closes the menu and opens the palette.
+- The command palette (`components/shell/CommandPalette`, shadcn `command` in a `dialog`): ⌘K / Ctrl+K, `/`, a search icon in the header from 640px, and **Search** at the top of the phone menu. A callout-white dialog with the one dialog shadow; the highlighted result is Muted (like a hover), not Brick Yellow, since it isn't a selection yet.
 - The Sets page reads top to bottom: title and actions; the value with its history; search, sort and view; filter rows; the set grid.
 - On phones the value collapses to one line with its change, so search is in the first screen; filter rows scroll sideways with a fade at the edge.
 - The set grid has no card chrome: 24px column gap, 40px row gap, so each set is grouped by space, not boxes.
@@ -196,16 +200,43 @@ All shared UI lives in `components/ui` (`import { Button, Callout, … } from '@
 | `Callout` | The signature: what you have and how many (a set's value, a parts list) | `className` | White, 1.5px ink outline, 10px corners. Not a layout container; never inside a bordered card. |
 | `Count` | Quantities | `n` | Renders `2x`, bold, tabular. |
 | `Button` | Every action | `variant` primary · secondary · ghost · danger · link · danger-link; `size` sm · md; `icon`; `loading` | One primary per view. `danger-link` for inline destructive text actions (Remove, Delete, Revoke). Defaults to `type="button"`. |
-| `IconButton` | Icon-only actions on cards and in the header | `tone` default · danger; `label` required | `label` is the accessible name and tooltip. |
+| `IconButton` | Icon-only actions on cards and in the header | `tone` default · danger; `label` required | `label` is the accessible name and its `Tip`. |
+| `Tip` | Naming an icon, or showing a value that's cut off or needs its source | `label`, `side`, `describe`, `whenCut` (only while the child overflows) | `<Tip label="…">{child}</Tip>`; shadcn `tooltip` (Base UI). The tooltip mounts on first hover, focus or tap, so long lists stay fast. Inverse ink with On-inverse text, Chip radius, no shadow: ink in light, light ink at night, so it stands out on either page. Hover, keyboard focus and a tap (the tap still acts); hides on the next tap, Escape or scroll. Never the HTML `title` attribute, which phones never show (a test enforces it). A plain element child is made focusable. |
 | `FilterChip` | Toggling a filter | `active` | Selected = Brick Yellow; shows count and value. |
-| `Segmented` | 2–4 exclusive views (Cards/Table, Sold/Bought) | `options`, `label` | Selected = Brick Yellow. |
+| `Segmented` | 2–4 exclusive views (Cards/Table, Sold/Bought) | `options`, `label` | Selected = Brick Yellow. shadcn `toggle-group` (Base UI): one Tab stop, arrow keys between the options, `aria-pressed`; pressing the selected option keeps it. |
 | `SearchInput`, `Select`, `field` | Inputs | — | Rule Strong border, white fill. |
+| `Combobox` | A list that can run past about 12 entries or needs typing (locations, themes and series, colours) | `options` (`value`, `label`, `hint`), `value` / `defaultValue`, `onChange`, `label`, `name`, `placeholder`, `allowCreate`, `onCreate` | A `field`-look button opens a popup with a search box (Base UI combobox): type to filter, arrows, Enter, Escape. Callout white, 1.5px ink outline, Control radius, the dialog shadow; the highlighted row is Muted. `name` posts the value through a hidden input. `allowCreate` offers what was typed (`onCreate` can save it first, as `LocationPicker` adds a location). Inside a native `Dialog` it renders in that dialog. Short lists keep the native `Select`: phones show the system picker. |
+| `DatePicker` | Dates | `value` / `defaultValue` (YYYY-MM-DD), `onChange`, `label`, `name`, `required`, `min` | From 640px a `field`-look button opens a calendar popover (shadcn `calendar`, loaded on first open); the week starts on the browser locale's first day; a clear button empties it. Below 640px it is the native date input. Posts the same YYYY-MM-DD string. The chosen day is Brick Yellow. |
 | `Chip` | Read-only status | `tone` ok · warn · danger · info · neutral · primary | Text must make sense without the colour. |
-| `Banner` | Results and persistent errors | `kind` ok · error | `role="status"` / `role="alert"`. |
+| `Banner` | Errors, warnings, persistent state, and results to read or copy (a reset link, a new token, an import's counts) | `kind` ok · error | `role="status"` / `role="alert"`. A short "it worked" is a toast instead. |
+| `toast` | Short successes: Saved, Added …, Removed …, Copied | `toast.success(text)`, `{ description, duration }` | Sonner, mounted once (`ToastHost` in the root layout). Callout white, 1.5px ink outline, Control radius, the dialog shadow; Brick Yellow only for an action button. Bottom-centre on phones, bottom-right from 640px, clear of safe areas, in the top layer above the phone menu. A polite live region: read out, never takes focus. |
+| `Confirm`, `confirmAction` | Asking before anything that loses data and can't be undone | `title`, `body`, `confirmLabel`, `cancelLabel`, `tone` danger · default, `onConfirm` | `<Confirm …>{trigger}</Confirm>` wraps a button; `await confirmAction({…})` returns true or false in an event handler (`ConfirmHost` in the root layout). Base UI alert dialog; `danger` gives a red button and starts focus on Cancel. Never the browser's `confirm()`. Not for actions that can be undone. Inside a native `Dialog` it renders in that dialog; a two-step footer (Keep / Remove) works there too. |
 | `EmptyState`, `Skeleton`, `PageSkeleton` | Nothing yet, loading | — | Empty states name the next step. |
 | `Dialog` | Forms and the parts list | `title`, `size`, `tall`, `footer` | Native `<dialog>`. |
+| `DataTable` | Lists people and sets with search, sorting and paging | `columns` (TanStack `ColumnDef`s; a string `header` sorts; `meta`: `className`, `label`, `sticky`), `data`, `rowId`, `label`, `search`, `initialSort`, `pageSize` (0 = no paging), `empty`, `stickyFirst`, `toolbar`, `sorting` + `onSortingChange` (controlled: the caller sorts), `columnsMenu` (`storageKey`), `stickyHeader` | shadcn's data-table pattern on `./table`. In a white card with a rule border; on phones it scrolls sideways with the first column (or `meta.sticky` ones) pinned. **Columns** hides columns, saved in localStorage. `stickyHeader` scrolls it in a screen-high frame with the header row fixed. |
+| `Menu`, `MenuTrigger`, `useMenuHandle` | A row's actions behind one ⋯ button; a short list of choices (Columns) | `label`, `items` (actions with `icon`, `tone: 'danger'`, `disabled`; checkboxes; `'separator'`), `heading`, `trigger` | shadcn's `dropdown-menu` (Base UI): callout white, 1.5px ink outline, no shadow; the focused item is Muted, Remove is Danger. A long table shares one menu (`useMenuHandle`, a `MenuTrigger` per row). Remove still asks with `confirmAction`. |
 | `Stat` | A single labelled figure inside a callout | `label`, `value`, `note`, `tone` | Never in a row of tiles. |
 | `LayoutGrid` (`components/layouts`) | The MILS layout editor | `cols`, `rows`, `modules`, `selectedId`, `moving`, `needs` | An SVG in studs (a module is 32), so sizes are true to scale; 64px a module at least, scrolling in its own frame. Empty squares are dashed Rule Strong on Subtle; modules are callouts (Surface, 1.5px Ink Outline); roads are Muted with a dashed Ink 4 centre line; only the selection is Brick Yellow. One square or module is in the tab order at a time (arrow keys move it). |
+
+### shadcn and Base UI underneath
+
+New components come from [shadcn/ui](https://ui.shadcn.com) (`npx shadcn add <name>`, configured in `components.json`: style `base-nova`, so the behaviour comes from [Base UI](https://base-ui.com)). shadcn copies the source into `components/ui/<name>.tsx` (lowercase), where we own and restyle it; our hand-written kit above lives in `components/ui/kit/` (PascalCase) and `@/components/ui` stays the one import for views. shadcn's variable names are pointed at our tokens in `app/globals.css`, never given colours of their own: `--background` → paper (`--canvas`), `--foreground` → ink (`--fg`), `--card` and `--popover` → callout white (`--surface`), `--primary` → Brick Yellow with `--primary-foreground` → `--on-primary`, `--secondary` → `--subtle`, `--muted` and `--accent` → `--muted`, `--muted-foreground` → Ink 3, `--destructive` → `--danger`, `--border` → rule (`--line`), `--input` → rule strong, `--ring` → focus blue, `--radius` → Control (8px), and the chart and sidebar variables likewise. They are references, so both dark modes follow automatically. shadcn's base layer (border colour on every element, body colours, font) and its radius scale are left out, so nothing changes until a component is used. Everything in this file still applies to shadcn components: flat print (remove their shadows except on dialogs), Brick Yellow only for the primary action and the selection, Archivo, and our radii; restyle a generated component rather than accept its defaults.
+
+Which `@/components/ui` exports run on shadcn / Base UI, and which stay ours (#108). Views import the same names either way.
+
+| Export | Decision | Why |
+| --- | --- | --- |
+| `Button`, `buttonClass` | Keep | Our six variants and padding sizes differ from shadcn's height-based sizes, and Base UI's button adds nothing to a native `<button>`. `buttonClass` also styles links. |
+| `IconButton` | Keep | Already Base UI underneath, through `Tip`. |
+| `Card`, `Chip`, `FilterChip`, `Banner`, `Callout`, `Count`, `Stat`, `Logo`, `EmptyState` | Keep | Our design, static markup. `FilterChip` is a native `aria-pressed` button. |
+| `Skeleton`, `PageSkeleton` | Keep | The same as shadcn's skeleton, already without motion when reduced motion is asked for. |
+| `SearchInput`, `field` | Keep | Native inputs; `field` is a class string used across forms. `input-group` would change the markup for nothing. |
+| `Select` | Keep | The native select stays for short lists: phones show the system picker. |
+| `Segmented` | shadcn `toggle-group` (Base UI) | One Tab stop with arrow keys (roving focus, the WAI-ARIA toolbar pattern). Same props, `role="group"`, `aria-label`, `aria-pressed` and look (screenshots identical); `toggle.tsx` and `toggle-group.tsx` restyled to our tokens. |
+| `Dialog` | Keep (native `<dialog>`) | `Tip`, `Combobox`, `DatePicker` and `Confirm` render inside the open `<dialog>`, `ToastHost` re-raises over it, and the command palette's shortcuts check for it. Moving 20+ forms to a Base UI dialog would change focus, Escape and stacking for all of them. |
+| `Tip`, `Confirm`, `confirmAction`, `toast`, `Menu`, `Combobox`, `DatePicker`, `DataTable` | Already shadcn (Base UI or Sonner) | Stage 1 (#103 to #106). |
+| `cx` | Keep, as an alias of `cn` | About 20 files use it; it is already `cn` inside. |
+| `MobileMenu` (shell) | shadcn `sheet`, `side="right"` | Base UI's focus trap, Escape and outside press, and the trigger's `aria-expanded` / `aria-controls`. Looks the same as the old `<dialog>` (screenshots identical). |
 
 ## Do's and Don'ts
 
