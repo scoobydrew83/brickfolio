@@ -372,7 +372,10 @@ export function sortFrom(next: readonly { id: string; desc: boolean }[], current
   return { sort: first.id, dir: first.desc === SORT_DESC_FIRST[first.id] ? '' : first.desc ? 'desc' : 'asc' };
 }
 
-export type Filters = { q: string; location: string; condition: string; status?: string; theme?: string; availability?: string; sort: SortKey; dir?: SortDir | '' };
+/** The Sets page's facets: each holds the chosen values (any of them matches); empty or missing means no filter. */
+export const FACETS = ['location', 'condition', 'theme', 'availability', 'status'] as const;
+export type Facet = (typeof FACETS)[number];
+export type Filters = { q: string; sort: SortKey; dir?: SortDir | '' } & { [K in Facet]?: string[] };
 
 /** A set's value for a sort key; null (blank) sorts last either way. */
 function sortValue(s: SetRow, k: SortKey): string | number | null {
@@ -403,18 +406,18 @@ export function compareSets(sort: SortKey, dir?: SortDir | ''): (a: SetRow, b: S
 }
 
 /** Whether any copy matches a filter value ('(none)' = blank). */
-const anyCopy = (s: SetRow, k: 'location' | 'condition' | 'status', v: string) =>
-  s.copies.some((c) => (v === '(none)' ? !c[k] : c[k] === v));
+const anyCopy = (s: SetRow, k: 'location' | 'condition' | 'status', vs: string[]) =>
+  s.copies.some((c) => vs.some((v) => (v === '(none)' ? !c[k] : c[k] === v)));
 
 export function filterSets(sets: SetRow[], f: Filters): SetRow[] {
   const q = f.q.trim().toLowerCase();
   const hit = (s: SetRow) =>
-    (!f.theme || (f.theme === '(none)' ? !s.theme : s.theme === f.theme)) &&
+    (!f.theme?.length || f.theme.includes(s.theme || '(none)')) &&
     (!q || s.copies.some((c) => c.location?.toLowerCase().includes(q) || c.notes?.toLowerCase().includes(q)) || [s.setNo, s.name, s.blName, s.year, s.theme, s.subtheme].some((v) => String(v ?? '').toLowerCase().includes(q))) &&
-    (!f.location || anyCopy(s, 'location', f.location)) &&
-    (!f.condition || anyCopy(s, 'condition', f.condition)) &&
-    (!f.status || anyCopy(s, 'status', f.status)) &&
-    (!f.availability || (availability(s) ?? '(none)') === f.availability);
+    (!f.location?.length || anyCopy(s, 'location', f.location)) &&
+    (!f.condition?.length || anyCopy(s, 'condition', f.condition)) &&
+    (!f.status?.length || anyCopy(s, 'status', f.status)) &&
+    (!f.availability?.length || f.availability.includes(availability(s) ?? '(none)'));
   return sets.filter(hit).sort(compareSets(f.sort, f.dir));
 }
 

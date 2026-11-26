@@ -4,6 +4,27 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-11-26
+
+**Before upgrading, back up your database**, as always. This release has no database migrations (the latest is still 0036 from 0.19.0). New settings, all optional: `ALERT_EMAIL_TO`, `ALERT_TELEGRAM_BOT_TOKEN`, `ALERT_TELEGRAM_CHAT_ID`, `ALERT_PUSHOVER_TOKEN`, `ALERT_PUSHOVER_USER`, `ALERT_GOTIFY_URL`, `ALERT_GOTIFY_TOKEN` and `SYNC_ALERT` (see `.env.example` and docs/install.md → Optional: alerts).
+
+**Coolify users:** redeploy so Coolify reads the updated `compose.coolify-tailscale.yml`. If you added `IMAGE_CACHE_DIR=/data/images` as a workaround for the image cache error, you can keep it or remove it.
+
+Fixes the image cache error on Coolify installs ("EACCES: permission denied, mkdir '/app/data'") and names the sets behind failed new/used price lookups. The Sets page filters take several values per group, with a Filters sheet on phones. Alerts can now go to email, Telegram, Pushover and Gotify as well as the webhook, a sync that fails or finishes with problems sends an alert, and Settings → Alerts and sync shows the channels, a test button and the last ten syncs.
+
+### Added
+- **More alert channels:** besides the webhook (ntfy, Discord, or JSON for n8n and Home Assistant), alerts can go to email (`ALERT_EMAIL_TO`, through the sign-in email provider), Telegram (`ALERT_TELEGRAM_BOT_TOKEN`, `ALERT_TELEGRAM_CHAT_ID`), Pushover (`ALERT_PUSHOVER_TOKEN`, `ALERT_PUSHOVER_USER`) and Gotify (`ALERT_GOTIFY_URL`, `ALERT_GOTIFY_TOKEN`). Set any number: each alert goes to all of them, and counts as sent when one takes it; a channel that fails is named in the sync message instead of making the working ones repeat the alert. No migration.
+- **Sync problem alerts:** when a sync fails or finishes with problems (failed set lookups, a step's error, an alert that didn't go through), the alert channels get one message saying what went wrong, and one when a sync is clean again. The same problem isn't repeated every night. `SYNC_ALERT=off` turns it off. No migration.
+- **Settings → Alerts and sync:** the channels in use, **Send a test alert**, and the last ten syncs with their messages. No migration.
+
+### Changed
+- **Sets page filters:** pick several values in a group (e.g. Harry Potter and LEGO Ideas, or New and Used): a set matches any of them, and groups still combine. On phones the five chip rows that ran off the screen are one **Filters (n)** button that opens a sheet from the bottom with every group wrapped, **Clear all** and **Show N sets**. From 640px the rows stay inline and wrap. The chosen filters show as removable chips ("Theme: Harry Potter ×") with **Clear all**. Links keep working: a group with several values repeats its parameter (`?theme=Harry+Potter&theme=Ideas`), and the MCP `list_sets` tool still takes one value per filter. No migration.
+
+### Fixed
+- The Coolify compose file now passes `PRICE_SWING_PCT`, `RETIRE_ALERT_DAYS`, `DESIGNER_ALERT_DAYS`, `OFFER_MAX_AGE_DAYS` and the email settings through (Coolify has no `.env` file, so they were ignored there).
+- **Coolify installs: "Image cache: EACCES: permission denied, mkdir '/app/data'" after every sync.** `compose.coolify-tailscale.yml` had fallen behind `docker-compose.yml` and left out `IMAGE_CACHE`, `IMAGE_CACHE_DIR`, `IMAGE_CACHE_WARM` and `SHARE_BASE_URL`, so photos went to `/app/data`, which the app can't write to. The file has them again, a test fails when it falls behind the other two compose files, and without `IMAGE_CACHE_DIR` the cache now sits in an `images` folder next to the database (`/data/images` on Docker) instead of `./data/images`. Redeploy in Coolify (or add `IMAGE_CACHE_DIR=/data/images` to its environment variables). No migration.
+- **"N new/used price lookups failed" now names the sets.** The sync message lists the first two (e.g. `10280 used: BrickLink: …`) and the server log has one line per failed lookup, with BrickLink's reason. No migration.
+
 ## [0.20.0] - 2026-11-25
 
 **Before upgrading, back up your database**, as always. This release has no database migrations (the latest is still 0036 from 0.19.0), and no new settings.

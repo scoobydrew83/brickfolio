@@ -1,5 +1,5 @@
-// Where cached set and minifigure photos are kept: a folder on Docker (IMAGE_CACHE_DIR, default ./data/images, which
-// is /data/images in the Docker volume) or an R2 bucket on Cloudflare (binding IMAGE_CACHE). IMAGE_CACHE=off turns it
+// Where cached set and minifigure photos are kept: a folder on Docker (IMAGE_CACHE_DIR, default an `images` folder next
+// to the SQLite database, which is /data/images in the Docker volume) or an R2 bucket on Cloudflare (binding IMAGE_CACHE). IMAGE_CACHE=off turns it
 // off; the image routes then pass photos through without keeping them.
 import 'server-only';
 import { hasDisk } from '../hosting';
@@ -25,7 +25,23 @@ export async function imageStore(): Promise<ImageStore | null> {
   }
   // Vercel: no writable, kept disk (unless IMAGE_CACHE_DIR points somewhere, e.g. /tmp): pass photos through.
   if (!hasDisk(process.env)) return null;
-  return diskStore(process.env.IMAGE_CACHE_DIR || './data/images');
+  return diskStore(imageCacheDir(process.env));
+}
+
+/**
+ * The image cache folder: IMAGE_CACHE_DIR, else `images` beside the SQLite database (DATABASE_PATH), else ./data/images.
+ * Beside the database so a compose file that forgets IMAGE_CACHE_DIR still writes into the data volume, not the
+ * read-only app folder (EACCES on mkdir '/app/data').
+ */
+export function imageCacheDir(env: Record<string, string | undefined>): string {
+  if (env.IMAGE_CACHE_DIR) return env.IMAGE_CACHE_DIR;
+  const db = env.DATABASE_PATH;
+  if (db) {
+    const slash = Math.max(db.lastIndexOf('/'), db.lastIndexOf('\\'));
+    const dir = slash >= 0 ? db.slice(0, slash) : '.';
+    return `${dir}/images`; // '/app.db' → '/images'
+  }
+  return './data/images';
 }
 
 // ---- disk ----

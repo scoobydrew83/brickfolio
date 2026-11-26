@@ -53,14 +53,20 @@ const sets = [
   row({ setNo: '43205-1', name: 'Ultimate Adventure Castle', condition: 'New', estValue: 81.84, avgSold: 81.84, pieces: 749 }),
   row({ setNo: '9999-1', name: 'Partial thing', location: 'Out', condition: 'Partial', estValue: 9, avgSold: 10, blError: 'item: not found' }),
 ];
-const all = { q: '', location: '', condition: '', sort: 'setNo' as const };
+const all = { q: '', sort: 'setNo' as const };
 
 describe('filterSets', () => {
   it('sorts set numbers numerically', () => expect(filterSets(sets, all).map((s) => s.setNo).join()).toBe('9999-1,10280-1,43205-1'));
   it('filters by location, blank location and condition', () => {
-    expect(filterSets(sets, { ...all, location: 'Out' })).toHaveLength(2);
-    expect(filterSets(sets, { ...all, location: '(none)' })).toHaveLength(1);
-    expect(filterSets(sets, { ...all, condition: 'Partial' })).toHaveLength(1);
+    expect(filterSets(sets, { ...all, location: ['Out'] })).toHaveLength(2);
+    expect(filterSets(sets, { ...all, location: ['(none)'] })).toHaveLength(1);
+    expect(filterSets(sets, { ...all, condition: ['Partial'] })).toHaveLength(1);
+  });
+  it('matches any value within a facet and every facet across them', () => {
+    expect(filterSets(sets, { ...all, location: ['Out', '(none)'] })).toHaveLength(3);
+    expect(filterSets(sets, { ...all, condition: ['Partial', 'New'] }).map((s) => s.setNo).join()).toBe('9999-1,43205-1');
+    expect(filterSets(sets, { ...all, location: ['Out'], condition: ['Partial', 'New'] }).map((s) => s.setNo).join()).toBe('9999-1');
+    expect(filterSets(sets, { ...all, location: [] })).toHaveLength(3);
   });
   it('searches by name and sorts by value', () => {
     expect(filterSets(sets, { ...all, q: 'castle' })[0].setNo).toBe('43205-1');
@@ -168,10 +174,10 @@ describe('copies', () => {
   });
   it('filters and groups by copies: any copy matches, and a set in two places counts in both', () => {
     const s = row({ setNo: '1-1', copies: [copy({ location: 'Out', estValue: 10 }), copy({ location: 'Storage', status: 'sealed', condition: 'New', estValue: 30 })] });
-    expect(filterSets([s], { ...all, location: 'Storage' })).toHaveLength(1);
-    expect(filterSets([s], { ...all, condition: 'New' })).toHaveLength(1);
-    expect(filterSets([s], { ...all, status: 'sealed' })).toHaveLength(1);
-    expect(filterSets([s], { ...all, status: 'in_progress' })).toHaveLength(0);
+    expect(filterSets([s], { ...all, location: ['Storage'] })).toHaveLength(1);
+    expect(filterSets([s], { ...all, condition: ['New'] })).toHaveLength(1);
+    expect(filterSets([s], { ...all, status: ['sealed'] })).toHaveLength(1);
+    expect(filterSets([s], { ...all, status: ['in_progress'] })).toHaveLength(0);
     const g = groupTotals([s], 'location');
     expect(g.map((x) => `${x.label}:${x.copies}:${x.estValue}`)).toEqual(['Storage:1:30', 'Out:1:10']);
   });

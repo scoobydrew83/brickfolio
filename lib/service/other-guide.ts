@@ -4,7 +4,7 @@
 import type { PriceLookup } from '../bricklink/client';
 import { sets } from '../db/schema';
 import type { DB } from '../db/types';
-import { isActive, setGuide } from '../sets';
+import { displayNo, isActive, setGuide } from '../sets';
 import { repriceCopies } from './copies';
 import { brickLinkGuidesMany, recordPrice } from './prices';
 import { copiesBySet, today } from './sets';
@@ -13,10 +13,11 @@ const REFRESH_DAYS = 7;
 
 /**
  * Fetches the other guide for sets whose newest price in it is missing or older than a week, oldest first, using at
- * most `maxCalls` calls, and re-values their copies. Never throws.
+ * most `maxCalls` calls, and re-values their copies. Never throws. `failed` names each failed lookup and why
+ * (e.g. "10280 used: BrickLink: resource not found"), so the sync message can say which sets to look at.
  */
-export async function refreshOtherGuide(db: DB, price: PriceLookup, currency: string, opts: { maxCalls: number; deadline?: number }): Promise<{ fetched: number; errors: number; remaining: number }> {
-  if (opts.maxCalls <= 0) return { fetched: 0, errors: 0, remaining: 0 };
+export async function refreshOtherGuide(db: DB, price: PriceLookup, currency: string, opts: { maxCalls: number; deadline?: number }): Promise<{ fetched: number; errors: number; remaining: number; failed: string[] }> {
+  if (opts.maxCalls <= 0) return { fetched: 0, errors: 0, remaining: 0, failed: [] };
   const copies = await copiesBySet(db);
   const owned = (await db.select({ id: sets.id, setNo: sets.setNo }).from(sets).all())
     .map((s) => ({ ...s, active: (copies.get(s.id) ?? []).filter(isActive) }))
@@ -28,6 +29,7 @@ export async function refreshOtherGuide(db: DB, price: PriceLookup, currency: st
   const due = owned.filter((s) => last(s) <= stale).sort((a, b) => last(a).localeCompare(last(b)) || a.setNo.localeCompare(b.setNo));
 
   let fetched = 0, errors = 0, failedInARow = 0;
+  const failed: string[] = [];
   for (const s of due) {
     if (opts.deadline !== undefined && Date.now() >= opts.deadline) break; // the sync's time limit (Vercel)
     if (fetched + errors >= opts.maxCalls || failedInARow >= 3) break;
@@ -37,10 +39,11 @@ export async function refreshOtherGuide(db: DB, price: PriceLookup, currency: st
       await repriceCopies(db, s.id);
       fetched++;
       failedInARow = 0;
-    } catch {
+    } catch (e) {
       errors++;
+      failed.push(`${displayNo(s.setNo)} ${s.other === 'N' ? 'new' : 'used'}: ${(e instanceof Error ? e.message : String(e)).slice(0, 120)}`);
       failedInARow++;
     }
   }
-  return { fetched, errors, remaining: Math.max(0, due.length - fetched - errors) };
+  return { fetched, errors, remaining: Math.max(0, due.length - fetched - errors), failed };
 }

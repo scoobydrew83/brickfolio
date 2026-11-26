@@ -22,6 +22,14 @@ services:
       - BRICKSET_API_KEY
       - ALERT_WEBHOOK_URL
       - ALERT_WEBHOOK_FORMAT
+      - ALERT_EMAIL_TO
+      - ALERT_TELEGRAM_BOT_TOKEN
+      - ALERT_TELEGRAM_CHAT_ID
+      - ALERT_PUSHOVER_TOKEN
+      - ALERT_PUSHOVER_USER
+      - ALERT_GOTIFY_URL
+      - ALERT_GOTIFY_TOKEN
+      - SYNC_ALERT
       - APP_URL
       - SHARE_BASE_URL
       # Cached set and minifigure photos (share pages, offline scanning), in the data volume.

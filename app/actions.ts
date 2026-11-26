@@ -1026,3 +1026,27 @@ export async function shareCodes(opts: { minifigNumbers?: boolean } = {}): Promi
   const figNumbersAvailable = file.minifigNumbers?.length ?? (await community.shareableFigNumbers(db)).length;
   return { ok: true, file, issueUrl: community.shareIssueUrl(file), figNumbersAvailable };
 }
+
+export type AlertsInfo = { channels: string[]; syncAlert: boolean; syncs: svc.SyncRunRow[] };
+/** Settings → Alerts and sync: the configured channels and the last ten syncs (admins only). */
+export async function alertsInfo(): Promise<AlertsInfo | null> {
+  if (!(await allowed('admin'))) return null;
+  const { alertsFromEnv, syncAlertOn } = await import('@/lib/service/alerts');
+  return { channels: alertsFromEnv()?.channels ?? [], syncAlert: syncAlertOn(), syncs: await svc.recentSyncs(await getDb(), 10) };
+}
+
+/** Settings → sends a test message to every alert channel and says which ones failed. */
+export async function sendTestAlert(): Promise<Result> {
+  return act('admin', async () => {
+    const { alertsFromEnv } = await import('@/lib/service/alerts');
+    const send = alertsFromEnv();
+    if (!send) return { ok: false, error: 'No alert channel is set.' };
+    const base = process.env.APP_URL?.replace(/\/$/, '');
+    try {
+      await send({ title: 'Brickfolio test alert', message: 'Alerts reach you here.', url: base ? `${base}/settings` : null, items: [] });
+    } catch (e) {
+      return { ok: false, error: `Not sent: ${e instanceof Error ? e.message : String(e)}` };
+    }
+    return send.problems.length ? { ok: false, error: `Sent, but not to ${send.problems.join('; ')}` } : { ok: true };
+  });
+}

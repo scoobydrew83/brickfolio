@@ -122,7 +122,7 @@ To contribute, use **Settings → Barcode scanning → Share my codes**. It expo
 
 A set's page shows what it would fetch sold as parts. With a Rebrickable key, parts lists cost no BrickLink calls (see above), which leaves more for part prices. Each part's price is one BrickLink call, kept for 30 days and shared by every set that uses the part. The daily sync shares BrickLink's 5,000 calls a day, keeping 500 spare, in this order: sets, minifigs and the wishlist (2 calls each), your store, then the other condition's price guide for each set (1 call each, about weekly; at most `OTHER_GUIDE_DAILY_CALLS`, by default your number of sets ÷ 7 plus 10, up to 1,000; `0` turns it off), then part prices with what's left (at most `PARTOUT_DAILY_CALLS`, default 1,500; `0` turns it off). The other guide gives each set's page and the Radar BrickLink's new and used prices side by side, and values a built copy of a mostly sealed set (or the other way round) from its own condition. Most valuable sets go first. **Price parts now** on a set's page prices that set straight away.
 
-### Optional: wishlist alerts
+### Optional: alerts
 
 After each sync Brickfolio can send one message listing wishlist sets whose average sold price dropped under your target. It alerts once per drop; a set that goes back above target alerts again the next time it drops.
 
@@ -130,7 +130,15 @@ It also alerts on **price swings**: when a wish's BrickLink average sold price h
 
 - **Phone push with [ntfy](https://ntfy.sh):** install the ntfy app, subscribe to a long random topic name, and set `ALERT_WEBHOOK_URL=https://ntfy.sh/<that-topic>` (or your own ntfy server).
 - **Discord:** create a webhook in a channel's settings and use its URL.
-- **Anything else:** any URL that accepts a JSON POST (`{title, message, url, items}`); Home Assistant, n8n and Zapier all do.
+- **Anything else:** any URL that accepts a JSON POST (`{title, message, url, items}`); Home Assistant, n8n and Zapier all do. The `docs/n8n` folder has ready-made n8n workflows.
+- **Email:** `ALERT_EMAIL_TO=you@example.com` (comma-separate several), sent through the email provider set up for sign-in mail (`EMAIL_PROVIDER` and `EMAIL_FROM`, see below).
+- **Telegram:** create a bot with @BotFather and set `ALERT_TELEGRAM_BOT_TOKEN` to its token and `ALERT_TELEGRAM_CHAT_ID` to your chat's ID (message the bot, then open `https://api.telegram.org/bot<token>/getUpdates` to find it).
+- **Pushover:** `ALERT_PUSHOVER_TOKEN` (an application's API token) and `ALERT_PUSHOVER_USER` (your user key).
+- **Gotify:** `ALERT_GOTIFY_URL` (your server, e.g. `https://gotify.example`) and `ALERT_GOTIFY_TOKEN` (an application token).
+
+Set as many as you like: every alert goes to all of them. It counts as sent when at least one channel takes it; a channel that fails is named in the sync message. **Settings → Alerts and sync** lists the channels, has **Send a test alert**, and shows the last ten syncs and their messages.
+
+**Sync problems.** When a sync fails, or finishes with problems (set lookups that failed, a step that reported an error, an alert that didn't go through), the same channels get one message saying what went wrong, and one more when a sync is clean again. The same problem isn't repeated every night; a different one alerts. The daily limit and time-limit notes don't count as problems. `SYNC_ALERT=off` turns this off.
 
 With a Brickset key, the same webhook also warns once when a wishlist set will retire within `RETIRE_ALERT_DAYS` days (default 60; `0` turns it off), and again if its date moves away and back.
 
@@ -468,7 +476,7 @@ The setups above work in Docker GUIs too. Enter the variables from the setup's *
 
 Turn on **GitOps updates** if you want Portainer to redeploy when the repo changes.
 
-**Coolify with Tailscale**: Coolify takes a single compose file, so the repo ships a ready-merged one, `compose.coolify-tailscale.yml`. Create a Git-based Docker Compose resource and set its compose location to `/compose.coolify-tailscale.yml`. It runs the published image `ghcr.io/scoobydrew83/brickfolio:latest`, so deploys only pull and restart; set `BRICKFOLIO_IMAGE` to pin a release (for example `ghcr.io/scoobydrew83/brickfolio:0.2`), or replace `image:` and `pull_policy:` under `app` with `build: .` and `pull_policy: build` to build from source. The file also works pasted into a **Docker Compose Empty** resource. Add `TS_AUTHKEY`, `ALLOWED_USERS` and the four `BRICKLINK_*` values under Environment Variables, plus any optional ones (`REBRICKABLE_API_KEY`, `ALERT_WEBHOOK_URL`, `APP_URL`, `TZ`). To update, redeploy in Coolify: it pulls the newest image. Don't assign a domain in Coolify: the app is only served at `https://brickfolio.<your-tailnet>.ts.net`.
+**Coolify with Tailscale**: Coolify takes a single compose file, so the repo ships a ready-merged one, `compose.coolify-tailscale.yml`. Create a Git-based Docker Compose resource and set its compose location to `/compose.coolify-tailscale.yml`. It runs the published image `ghcr.io/scoobydrew83/brickfolio:latest`, so deploys only pull and restart; set `BRICKFOLIO_IMAGE` to pin a release (for example `ghcr.io/scoobydrew83/brickfolio:0.2`), or replace `image:` and `pull_policy:` under `app` with `build: .` and `pull_policy: build` to build from source. The file also works pasted into a **Docker Compose Empty** resource. Add `TS_AUTHKEY`, `ALLOWED_USERS` and the four `BRICKLINK_*` values under Environment Variables, plus any optional ones (`REBRICKABLE_API_KEY`, `ALERT_WEBHOOK_URL` or another alert channel, `APP_URL`, `TZ`). Coolify passes only the variables the compose file lists; if one you set seems ignored, check it's under `environment:` in that file. To update, redeploy in Coolify: it pulls the newest image. Don't assign a domain in Coolify: the app is only served at `https://brickfolio.<your-tailnet>.ts.net`.
 
 **Other tools that take a single compose file** (Dockge, Synology Container Manager, Coolify with Cloudflare, …): on any machine with Docker, merge the base file and the overlay into one file:
 

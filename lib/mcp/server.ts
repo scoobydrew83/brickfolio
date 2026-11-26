@@ -109,7 +109,8 @@ export const TOOLS: Tool[] = [
     },
     async run(db, a, access) {
       const sorts = ['setNo', 'value', 'name', 'year'];
-      const f: Filters = { q: str(a.query), location: str(a.location), condition: str(a.condition), status: str(a.status), theme: str(a.theme), availability: str(a.availability), sort: (sorts.includes(str(a.sort)) ? str(a.sort) : 'value') as Filters['sort'] };
+      const one = (v: unknown) => (str(v) ? [str(v)] : []);
+      const f: Filters = { q: str(a.query), location: one(a.location), condition: one(a.condition), status: one(a.status), theme: one(a.theme), availability: one(a.availability), sort: (sorts.includes(str(a.sort)) ? str(a.sort) : 'value') as Filters['sort'] };
       const all = filterSets(await listSets(db, { collectionId: await scopeFor(db, a, access) }), f);
       return { currency: await getCurrency(db), matched: all.length, sets: all.slice(0, int(a.limit, 25, 1, 200)).map(brief) };
     },

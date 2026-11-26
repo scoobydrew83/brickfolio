@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { diskStore, r2Store, validKey } from './cache';
+import { diskStore, imageCacheDir, r2Store, validKey } from './cache';
 
 vi.mock('server-only', () => ({}));
 
@@ -66,4 +66,12 @@ it('r2: put, get, stats and clear over paged listings', async () => {
   expect(await s.stats()).toEqual({ count: 3, bytes: 6 });
   await s.clear();
   expect(m.size).toBe(0);
+});
+
+it('keeps photos beside the database unless IMAGE_CACHE_DIR is set', () => {
+  expect(imageCacheDir({ IMAGE_CACHE_DIR: '/srv/img', DATABASE_PATH: '/data/app.db' })).toBe('/srv/img');
+  // Docker: a compose file without IMAGE_CACHE_DIR still lands in the /data volume, not /app/data (EACCES).
+  expect(imageCacheDir({ DATABASE_PATH: '/data/app.db' })).toBe('/data/images');
+  expect(imageCacheDir({ DATABASE_PATH: 'app.db' })).toBe('./images');
+  expect(imageCacheDir({})).toBe('./data/images');
 });

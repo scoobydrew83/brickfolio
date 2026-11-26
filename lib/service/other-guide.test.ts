@@ -25,23 +25,23 @@ beforeEach(async () => {
 it('fetches the other guide for each set, oldest first, and values copies in their own guide', async () => {
   await recordPrice(db, { itemKind: 'set', itemId: '10497-1', source: 'bricklink', type: 'sold_avg', condition: 'N', currency: 'USD', amount: 60, observedOn: daysAgo(20) });
   await recordPrice(db, { itemKind: 'set', itemId: '21325-1', source: 'bricklink', type: 'sold_avg', condition: 'N', currency: 'USD', amount: 60, observedOn: daysAgo(10) });
-  expect(await refreshOtherGuide(db, price, 'USD', { maxCalls: 10 })).toEqual({ fetched: 3, errors: 0, remaining: 0 });
+  expect(await refreshOtherGuide(db, price, 'USD', { maxCalls: 10 })).toEqual({ fetched: 3, errors: 0, remaining: 0, failed: [] });
   expect(calls).toEqual(['10280-1:U', '10497-1:N', '21325-1:N']); // never asked first, then the oldest
   // Fresh now: nothing to do within the week.
-  expect(await refreshOtherGuide(db, price, 'USD', { maxCalls: 10 })).toEqual({ fetched: 0, errors: 0, remaining: 0 });
+  expect(await refreshOtherGuide(db, price, 'USD', { maxCalls: 10 })).toEqual({ fetched: 0, errors: 0, remaining: 0, failed: [] });
   // A built copy added to the sealed set is valued from its own (used) guide, fetched just now.
   await addCopy(db, '10280-1', { status: 'built', condition: 'Used' });
   expect((await svc.getSet(db, '10280-1'))!.copies.map((c) => [c.estValue, c.estGuide])).toEqual([[50, 'N'], [22, 'U']]);
 });
 
 it('respects maxCalls and counts what is left', async () => {
-  expect(await refreshOtherGuide(db, price, 'USD', { maxCalls: 2 })).toEqual({ fetched: 2, errors: 0, remaining: 1 });
-  expect(await refreshOtherGuide(db, price, 'USD', { maxCalls: 0 })).toEqual({ fetched: 0, errors: 0, remaining: 0 });
+  expect(await refreshOtherGuide(db, price, 'USD', { maxCalls: 2 })).toEqual({ fetched: 2, errors: 0, remaining: 1, failed: [] });
+  expect(await refreshOtherGuide(db, price, 'USD', { maxCalls: 0 })).toEqual({ fetched: 0, errors: 0, remaining: 0, failed: [] });
   expect(calls).toHaveLength(2);
 });
 
 it('records failures without throwing, and stops after three in a row', async () => {
   const failing: PriceLookup = async () => { throw new Error('down'); };
-  expect(await refreshOtherGuide(db, failing, 'USD', { maxCalls: 10 })).toEqual({ fetched: 0, errors: 3, remaining: 0 });
+  expect(await refreshOtherGuide(db, failing, 'USD', { maxCalls: 10 })).toEqual({ fetched: 0, errors: 3, remaining: 0, failed: ['10280 used: down', '10497 new: down', '21325 new: down'] });
   expect((await db.select().from(priceObservations).all()).filter((r) => r.observedOn === svc.today())).toHaveLength(3); // only the primary lookups
 });

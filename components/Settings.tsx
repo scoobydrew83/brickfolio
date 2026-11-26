@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useState, useTransition } from 'react';
-import { updateStatus, clearImageCache, imageCacheStatus, type ImageCacheStatus, shareCodes, syncCommunityNow, bricksetStatus, downloadLdrawLibrary, ldrawLibraryStatus, rebrickableStatus, syncBricksetNow, syncRebrickableNow, testBricksetKey, testRebrickableKey, type BricksetStatus, type RebrickableStatus, addLocation, addCollection, renameCollection, deleteCollection, reorderCollections, createShareLink, deleteLocation, revokeShareLink, importFile, renameLocation, setCurrency, setValueSource, type Result } from '@/app/actions';
+import { alertsInfo, sendTestAlert, type AlertsInfo, updateStatus, clearImageCache, imageCacheStatus, type ImageCacheStatus, shareCodes, syncCommunityNow, bricksetStatus, downloadLdrawLibrary, ldrawLibraryStatus, rebrickableStatus, syncBricksetNow, syncRebrickableNow, testBricksetKey, testRebrickableKey, type BricksetStatus, type RebrickableStatus, addLocation, addCollection, renameCollection, deleteCollection, reorderCollections, createShareLink, deleteLocation, revokeShareLink, importFile, renameLocation, setCurrency, setValueSource, type Result } from '@/app/actions';
 import { Copy } from 'lucide-react';
 import { Banner, Button, Confirm, DatePicker, Select, field, toast } from './ui';
 import { PageHeader } from './shell/PageHeader';
@@ -155,12 +155,12 @@ export default function Settings({ people, me, envAdmins, passwords, invitations
 
       <LdrawSection initial={ldraw} />
       <ImageCacheSection />
+      <AlertsSection />
 
       <section className={`${section} text-sm text-fg-2`}>
         <h2 className={`${h2} text-fg`}>About this server</h2>
         <VersionInfo initial={version} />
-        <p>Signed in as <b>{user}</b> · Auth mode <b>{authMode}</b> · BrickLink keys <b>{priced ? 'set' : 'not set'}</b> · Rebrickable key <b>{rebrickable.key ? 'set' : 'not set'}</b> · Brickset key <b>{brickset.key ? 'set' : 'not set'}</b> · Wishlist alerts <b>{alerts ? 'on' : 'off'}</b></p>
-        {!alerts && <p>To get a message when a wishlist set drops under your target or its price swings, set <code className="rounded-chip bg-muted px-1">ALERT_WEBHOOK_URL</code> to an ntfy topic, a Discord webhook or any URL that accepts JSON.</p>}
+        <p>Signed in as <b>{user}</b> · Auth mode <b>{authMode}</b> · BrickLink keys <b>{priced ? 'set' : 'not set'}</b> · Rebrickable key <b>{rebrickable.key ? 'set' : 'not set'}</b> · Brickset key <b>{brickset.key ? 'set' : 'not set'}</b> · Alerts <b>{alerts ? 'on' : 'off'}</b></p>
       </section>
 
       <Credits />
@@ -536,6 +536,63 @@ function ImageCacheSection() {
           </p>
           {error && <Banner kind="error">{error}</Banner>}
           <Button variant="secondary" loading={clearing} disabled={!st.count} onClick={clear}>Clear the cache</Button>
+        </>
+      )}
+    </section>
+  );
+}
+
+const ENV = (name: string) => <code className="rounded-chip bg-muted px-1">{name}</code>;
+
+/** Where alerts go (wishlist prices, retirements, sync problems), a test button, and the last ten syncs. */
+function AlertsSection() {
+  const [info, setInfo] = useState<AlertsInfo | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [testing, startTest] = useTransition();
+  useEffect(() => { alertsInfo().then(setInfo, () => setError('Couldn’t read the alert settings.')); }, []);
+  const test = () => startTest(async () => {
+    setError(null);
+    const r = await sendTestAlert();
+    if (!r.ok) return setError(r.error);
+    toast.success('Test alert sent.');
+  });
+  const when = (iso: string) => new Date(iso).toLocaleString();
+  if (!info) return <section className={section}><h2 className={h2}>Alerts and sync</h2><p className="text-sm text-fg-3">{error ?? 'Reading…'}</p></section>;
+  return (
+    <section className={section} aria-live="polite">
+      <h2 className={h2}>Alerts and sync</h2>
+      {info.channels.length ? (
+        <>
+          <p className="text-sm text-fg-3">
+            Alerts go to <b className="text-fg">{info.channels.join(', ')}</b>: wishlist sets under your target or swinging in price, retirements, Designer Program dates
+            {info.syncAlert ? ', and syncs that fail or finish with problems (once per problem, and once when it clears)' : ''}.
+            {!info.syncAlert && <> Sync problem alerts are off ({ENV('SYNC_ALERT=off')}).</>}
+          </p>
+          {error && <Banner kind="error">{error}</Banner>}
+          <Button variant="secondary" loading={testing} onClick={test}>Send a test alert</Button>
+        </>
+      ) : (
+        <p className="text-sm text-fg-3">
+          Off. Set one or more: {ENV('ALERT_WEBHOOK_URL')} (ntfy, Discord, or JSON for n8n and Home Assistant), {ENV('ALERT_EMAIL_TO')} (with email set up),{' '}
+          {ENV('ALERT_TELEGRAM_BOT_TOKEN')} + {ENV('ALERT_TELEGRAM_CHAT_ID')}, {ENV('ALERT_PUSHOVER_TOKEN')} + {ENV('ALERT_PUSHOVER_USER')}, or {ENV('ALERT_GOTIFY_URL')} + {ENV('ALERT_GOTIFY_TOKEN')}. See docs/install.md.
+        </p>
+      )}
+      {info.syncs.length > 0 && (
+        <>
+          <h3 className="pt-2 text-sm font-semibold text-fg">Recent syncs</h3>
+          <ul className="divide-y divide-line text-sm">
+            {info.syncs.map((r) => (
+              <li key={r.id} className="py-2">
+                <p className="flex flex-wrap items-baseline gap-x-2">
+                  <span className="tabular-nums text-fg">{when(r.startedAt)}</span>
+                  <span className={r.status === 'failed' ? 'font-semibold text-danger' : r.status === 'running' ? 'text-fg-3' : r.errors || r.message ? 'text-warn' : 'text-ok'}>
+                    {r.status === 'running' ? `Running ${r.processed}/${r.total}` : r.status === 'failed' ? 'Failed' : r.errors ? `${r.total - r.errors} of ${r.total} sets looked up` : `${r.total} sets looked up`}
+                  </span>
+                </p>
+                {r.message && <p className="mt-0.5 break-words text-fg-3">{r.message}</p>}
+              </li>
+            ))}
+          </ul>
         </>
       )}
     </section>

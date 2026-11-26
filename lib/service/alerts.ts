@@ -1,5 +1,6 @@
-// Wishlist alerts: one message when sets drop under your target price, sent to a webhook you configure.
-// ntfy (push to your phone), Discord, or any URL that accepts JSON. Off unless ALERT_WEBHOOK_URL is set.
+// Alerts: one message when wishlist sets drop under your target price (and price swings, retirements, sync problems),
+// sent to every channel you configure: a webhook (ntfy, Discord, or JSON for n8n and the like), email, Telegram,
+// Pushover or Gotify. Off unless one is set (see alertChannels).
 import { and, eq, isNotNull, isNull, lte, or, gt } from 'drizzle-orm';
 import type { DB } from '../db/types';
 import { wishlist } from '../db/schema';
@@ -39,16 +40,75 @@ export function alertRequest(format: AlertFormat, a: Alert): { headers: Record<s
   return { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(a) };
 }
 
-/** A sender built from ALERT_WEBHOOK_URL (and ALERT_WEBHOOK_FORMAT), or null when alerts are off. */
-export function alertsFromEnv(fetchImpl: typeof fetch = fetch): Send | null {
-  const url = process.env.ALERT_WEBHOOK_URL;
-  if (isDemo() || !url || !/^https?:\/\//.test(url)) return null;
-  const format = alertFormat(url, process.env.ALERT_WEBHOOK_FORMAT);
-  return async (a) => {
-    const { headers, body } = alertRequest(format, a);
-    const res = await fetchImpl(url, { method: 'POST', headers, body, signal: AbortSignal.timeout(15_000) });
-    if (!res.ok) throw new Error(`Alert webhook answered ${res.status} ${res.statusText}`.trim());
-  };
+/** One place alerts go. `send` throws on failure; `name` labels it in errors and Settings. */
+export type Channel = { name: string; send: (a: Alert) => Promise<void> };
+/** Every configured channel at once. An alert counts as sent when at least one channel took it; the others' errors
+ * are kept in `problems` (the sync shows them) so a broken channel can't make a working one repeat the alert. */
+export type MultiSend = Send & { channels: string[]; problems: string[] };
+type Env = Record<string, string | undefined>;
+
+const post = async (fetchImpl: typeof fetch, url: string, headers: Record<string, string>, body: string, what: string) => {
+  const res = await fetchImpl(url, { method: 'POST', headers, body, signal: AbortSignal.timeout(15_000) });
+  if (!res.ok) throw new Error(`${what} answered ${res.status} ${res.statusText}`.trim());
+};
+const plain = (a: Alert) => `${a.message}${a.url ? `\n${a.url}` : ''}`;
+const httpUrl = (u: string | undefined) => !!u && /^https?:\/\//.test(u);
+
+/**
+ * The alert channels set in the environment:
+ * - ALERT_WEBHOOK_URL (ntfy, Discord, or JSON to any URL: n8n, Home Assistant, a script), ALERT_WEBHOOK_FORMAT
+ * - ALERT_EMAIL_TO (comma-separated), through the email provider set for sign-in mail (EMAIL_PROVIDER, EMAIL_FROM)
+ * - ALERT_TELEGRAM_BOT_TOKEN and ALERT_TELEGRAM_CHAT_ID
+ * - ALERT_PUSHOVER_TOKEN and ALERT_PUSHOVER_USER
+ * - ALERT_GOTIFY_URL and ALERT_GOTIFY_TOKEN
+ */
+export function alertChannels(env: Env = process.env, fetchImpl: typeof fetch = fetch): Channel[] {
+  const out: Channel[] = [];
+  const hook = env.ALERT_WEBHOOK_URL;
+  if (httpUrl(hook)) {
+    const format = alertFormat(hook!, env.ALERT_WEBHOOK_FORMAT);
+    out.push({ name: format === 'json' ? 'Webhook' : format === 'ntfy' ? 'ntfy' : 'Discord', send: (a) => { const r = alertRequest(format, a); return post(fetchImpl, hook!, r.headers, r.body, 'Alert webhook'); } });
+  }
+  const to = (env.ALERT_EMAIL_TO ?? '').split(',').map((x) => x.trim()).filter(Boolean);
+  if (to.length) {
+    out.push({ name: 'Email', send: async (a) => {
+      const { sendEmail, emailConfigured } = await import('../email');
+      if (!emailConfigured(env)) throw new Error('ALERT_EMAIL_TO is set but email isn\u2019t (EMAIL_PROVIDER and EMAIL_FROM)');
+      const esc = (t: string) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      const html = `<p><b>${esc(a.title)}</b></p><p>${esc(a.message).replace(/\n/g, '<br>')}</p>${a.url ? `<p><a href="${esc(a.url)}">${esc(a.url)}</a></p>` : ''}`;
+      for (const addr of to) await sendEmail({ to: addr, subject: a.title, text: plain(a), html }, env);
+    } });
+  }
+  if (env.ALERT_TELEGRAM_BOT_TOKEN && env.ALERT_TELEGRAM_CHAT_ID) {
+    const url = `https://api.telegram.org/bot${env.ALERT_TELEGRAM_BOT_TOKEN}/sendMessage`;
+    out.push({ name: 'Telegram', send: (a) => post(fetchImpl, url, { 'Content-Type': 'application/json' }, JSON.stringify({ chat_id: env.ALERT_TELEGRAM_CHAT_ID, text: `${a.title}\n${plain(a)}`.slice(0, 4096), disable_web_page_preview: true }), 'Telegram') });
+  }
+  if (env.ALERT_PUSHOVER_TOKEN && env.ALERT_PUSHOVER_USER) {
+    out.push({ name: 'Pushover', send: (a) => post(fetchImpl, 'https://api.pushover.net/1/messages.json', { 'Content-Type': 'application/json' },
+      JSON.stringify({ token: env.ALERT_PUSHOVER_TOKEN, user: env.ALERT_PUSHOVER_USER, title: a.title.slice(0, 250), message: a.message.slice(0, 1024), ...(a.url ? { url: a.url.slice(0, 512) } : {}) }), 'Pushover') });
+  }
+  if (httpUrl(env.ALERT_GOTIFY_URL) && env.ALERT_GOTIFY_TOKEN) {
+    const url = `${env.ALERT_GOTIFY_URL!.replace(/\/$/, '')}/message`;
+    out.push({ name: 'Gotify', send: (a) => post(fetchImpl, url, { 'Content-Type': 'application/json', 'X-Gotify-Key': env.ALERT_GOTIFY_TOKEN! },
+      JSON.stringify({ title: a.title, message: plain(a), priority: 5, ...(a.url ? { extras: { 'client::notification': { click: { url: a.url } } } } : {}) }), 'Gotify') });
+  }
+  return out;
+}
+
+/** A sender for every configured channel, or null when none is set (or in the demo). */
+export function alertsFromEnv(fetchImpl: typeof fetch = fetch, env: Env = process.env): MultiSend | null {
+  const channels = isDemo() ? [] : alertChannels(env, fetchImpl);
+  if (!channels.length) return null;
+  const problems: string[] = [];
+  const send = (async (a: Alert) => {
+    const results = await Promise.allSettled(channels.map((c) => c.send(a)));
+    const failed = results.flatMap((r, i) => (r.status === 'rejected' ? [`${channels[i].name}: ${r.reason instanceof Error ? r.reason.message : String(r.reason)}`.slice(0, 200)] : []));
+    if (failed.length === channels.length) throw new Error(failed.join('; '));
+    for (const f of failed) if (!problems.includes(f)) problems.push(f);
+  }) as MultiSend;
+  send.channels = channels.map((c) => c.name);
+  send.problems = problems;
+  return send;
 }
 
 const under = and(isNotNull(wishlist.target), isNotNull(wishlist.avgSold), isNull(wishlist.blError), lte(wishlist.avgSold, wishlist.target));
@@ -174,5 +234,35 @@ export async function notifyPriceSwings(db: DB, send: Send, pct = priceSwingPct(
     return `Price swing alert not sent: ${e instanceof Error ? e.message : String(e)}`;
   }
   for (const { w } of swung) await db.update(wishlist).set({ swingBase: w.avgSold, swingCurrency: currency, swingBaseAt: at }).where(eq(wishlist.id, w.id));
+  return null;
+}
+
+/** SYNC_ALERT=off turns off the sync-problem alert (on whenever an alert channel is set). */
+export const syncAlertOn = (env: Env = process.env) => env.SYNC_ALERT !== 'off';
+const SYNC_ALERT_KEY = 'syncAlertLast';
+
+/**
+ * One alert when a sync fails or finishes with problems (set lookups that failed, steps that reported errors), and
+ * one when the next sync is clean again. The same problem isn't repeated every night: the last alert's text is kept in
+ * settings and only a change alerts. `problems` are the sync message's parts minus plain notes (daily limit, time limit).
+ * Returns an error message instead of throwing.
+ */
+export async function notifySyncHealth(db: DB, send: Send, run: { failed: boolean; total: number; errors: number; problems: string[] }, env: Env = process.env): Promise<string | null> {
+  if (!syncAlertOn(env)) return null;
+  const { settings } = await import('../db/schema');
+  const lines = [...(run.errors ? [`${run.errors} of ${run.total} set lookup${run.errors === 1 ? '' : 's'} failed`] : []), ...run.problems];
+  const key = lines.length ? `${run.failed ? 'failed' : 'problems'}: ${lines.join('; ')}` : '';
+  const last = (await db.select().from(settings).where(eq(settings.key, SYNC_ALERT_KEY)).get())?.value ?? '';
+  if (key === last) return null;
+  const base = env.APP_URL?.replace(/\/$/, '');
+  const alert: Alert = key
+    ? { title: run.failed ? 'Brickfolio sync failed' : 'Brickfolio sync finished with problems', message: lines.join('\n'), url: base ? `${base}/settings` : null, items: [] }
+    : { title: 'Brickfolio sync is working again', message: 'The last sync finished without problems.', url: base ? `${base}/` : null, items: [] };
+  try {
+    await send(alert);
+  } catch (e) {
+    return `Sync alert not sent: ${e instanceof Error ? e.message : String(e)}`;
+  }
+  await db.insert(settings).values({ key: SYNC_ALERT_KEY, value: key }).onConflictDoUpdate({ target: settings.key, set: { value: key } });
   return null;
 }

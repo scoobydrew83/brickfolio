@@ -20,7 +20,7 @@ import { Budget, otherGuideDailyCalls } from './budget';
 import { refreshOtherGuide } from './other-guide';
 import type { RetailSource } from '../brickset/client';
 import { syncOmrModels } from './models';
-import { alertsFromEnv, notifyPriceSwings, notifyUnderTarget } from './alerts';
+import { alertsFromEnv, notifyPriceSwings, notifySyncHealth, notifyUnderTarget } from './alerts';
 import { notifyRetiring } from './radar';
 import { catalogMode, syncRbCatalog } from './rbcatalog';
 import { notifyDesigner } from './designer';
@@ -143,6 +143,12 @@ export async function syncStatus(db: DB): Promise<SyncStatus> {
   const r = await db.select().from(syncRuns).orderBy(desc(syncRuns.id)).limit(1).get();
   if (!r) return null;
   return { running: r.status === 'running', startedAt: r.startedAt, finishedAt: r.finishedAt, total: r.total, processed: r.processed, errors: r.errors, message: r.message };
+}
+
+export type SyncRunRow = { id: number; status: 'running' | 'done' | 'failed'; startedAt: string; finishedAt: string | null; total: number; processed: number; errors: number; message: string | null };
+/** The last `n` syncs, newest first (Settings → Alerts and sync). */
+export async function recentSyncs(db: DB, n = 10): Promise<SyncRunRow[]> {
+  return db.select().from(syncRuns).orderBy(desc(syncRuns.id)).limit(n).all();
 }
 
 /** Everything the dashboard page needs, in one call, for every collection or one (#49). */
@@ -503,7 +509,10 @@ export async function runSync(db: DB, runId: number, lookup: Lookup, store?: Sto
     if (extras.price && blMore()) {
       const r = await refreshOtherGuide(db, extras.price, currency, { maxCalls: Math.min(otherGuideDailyCalls(all.length), budget.left()), deadline: extras.deadline });
       budget.spend(r.fetched + r.errors);
-      if (r.errors) catalogErrors.push(`${r.errors} new/used price lookup${r.errors === 1 ? '' : 's'} failed`);
+      if (r.errors) {
+        catalogErrors.push(`${r.errors} new/used price lookup${r.errors === 1 ? '' : 's'} failed (${r.failed.slice(0, 2).join('; ')}${r.failed.length > 2 ? '; …' : ''})`);
+        for (const f of r.failed) console.warn(`  New/used price lookup failed: ${f}`);
+      }
     }
     // Part prices for part-out value, with whatever is left of today's BrickLink budget.
     if (extras.partPrice && blMore()) {
@@ -513,7 +522,10 @@ export async function runSync(db: DB, runId: number, lookup: Lookup, store?: Sto
     }
     const quotaNote = bl ? '' : `${stopReason} ${stopAt} of ${all.length} sets were looked up first.`;
     const lateNote = bl && skippedLate ? 'Time limit reached; some optional steps were skipped and run at the next sync.' : '';
-    const message = [quotaNote, lateNote, ...storeErrors, alertError ?? '', swingError ?? '', wishErrors ? `${wishErrors} wishlist lookup${wishErrors === 1 ? '' : 's'} failed` : '', figErrors ? `${figErrors} minifig lookup${figErrors === 1 ? '' : 's'} failed` : '', ...catalogErrors.slice(0, 3), catalogErrors.length > 3 ? `and ${catalogErrors.length - 3} more errors` : ''].filter(Boolean).join('; ');
+    // Problems worth an alert (the quota and time-limit notes aren't: the rest runs at the next sync).
+    const problems = [...storeErrors, alertError ?? '', swingError ?? '', wishErrors ? `${wishErrors} wishlist lookup${wishErrors === 1 ? '' : 's'} failed` : '', figErrors ? `${figErrors} minifig lookup${figErrors === 1 ? '' : 's'} failed` : '', ...catalogErrors.slice(0, 3), catalogErrors.length > 3 ? `and ${catalogErrors.length - 3} more errors` : '', ...(send?.problems ?? []).map((p) => `Alert not sent to ${p}`)].filter(Boolean);
+    const healthError = send ? await notifySyncHealth(db, send, { failed: false, total: all.length, errors, problems }) : null;
+    const message = [quotaNote, lateNote, ...problems, healthError ?? ''].filter(Boolean).join('; ');
     await db.update(syncRuns).set({ status: 'done', finishedAt: nowIso(), message: message || null }).where(eq(syncRuns.id, runId));
     logSync(all.length, processed, errors, failures, message);
     if (counts.bricklink + counts.rebrickable) console.log(`  Parts lists: ${counts.rebrickable} from Rebrickable (${counts.rebrickableCalls} Rebrickable calls), ${counts.bricklink} BrickLink parts calls, ${counts.figsLearned} minifigure numbers learned`);
@@ -521,6 +533,8 @@ export async function runSync(db: DB, runId: number, lookup: Lookup, store?: Sto
     const message = e instanceof Error ? e.message : String(e);
     await db.update(syncRuns).set({ status: 'failed', finishedAt: nowIso(), message }).where(eq(syncRuns.id, runId));
     console.error('Sync failed:', e);
+    const send = alertsFromEnv();
+    if (send) await notifySyncHealth(db, send, { failed: true, total: 0, errors: 0, problems: [message] }).catch(() => null);
   }
 }
 

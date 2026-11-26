@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, useTransition } from 'react';
 import { addSet, editSet, quickAddList, relookupSet, reload, removeSet, runSync, selectCollection, type Result } from '@/app/actions';
 import type { SyncStatus } from '@/lib/service/sets';
-import { dailyHistory, filterSets, groupTotals, isSortKey, sortDir, SORT_KEYS, SORT_LABEL, STATUSES, STATUS_LABEL, totals, type Filters, type HistoryRow, type SetRow } from '@/lib/sets';
+import { dailyHistory, FACETS, filterSets, groupTotals, isSortKey, sortDir, SORT_KEYS, SORT_LABEL, STATUSES, STATUS_LABEL, totals, type Facet, type Filters, type HistoryRow, type SetRow } from '@/lib/sets';
 import { availability, collectionGain, retirement } from '@/lib/retail';
 import { SetCard } from './board/SetCard';
 import { PartsDialog } from './board/PartsDialog';
@@ -13,14 +13,18 @@ import { SetForm } from './board/SetForm';
 import { QuickAdd } from './board/QuickAdd';
 import { SetTable } from './board/SetTable';
 import { ValueChart } from './board/ValueChart';
+import { FilterPanel, type FilterGroup } from './board/FilterPanel';
 import { moneyIn } from './board/ui';
-import { Banner, Button, EmptyState, FilterChip, IconButton, SearchInput, Segmented, Select, Tip, buttonClass, toast } from './ui';
+import { Banner, Button, EmptyState, IconButton, SearchInput, Segmented, Select, Tip, buttonClass, toast } from './ui';
 import { PageHeader } from './shell/PageHeader';
 import { CollectionTabs } from './shell/CollectionTabs';
 
 // Filters and view live in the URL, so a reload or a shared link keeps them. Defaults are left out of the URL.
 // `dir` is blank for a sort's natural direction (Est. Value high to low, Name A to Z) and only set to reverse it.
-const DEFAULTS = { q: '', location: '', condition: '', status: '', theme: '', availability: '', sort: 'setNo', dir: '', view: 'cards' } as const;
+// A facet with several values repeats its parameter (?theme=Harry+Potter&theme=LEGO+Ideas), so older one-value links work.
+const DEFAULTS = { q: '', sort: 'setNo', dir: '', view: 'cards' } as const;
+const FACET_LABEL: Record<Facet, string> = { location: 'Location', condition: 'Condition', theme: 'Theme', availability: 'Availability', status: 'Status' };
+const noFacets = Object.fromEntries(FACETS.map((k) => [k, []])) as unknown as Record<Facet, string[]>;
 type View = 'cards' | 'table';
 const noop = () => () => {};
 
@@ -36,7 +40,8 @@ export default function Board({ sets, history, sync, locations, currency, readAt
   const [filters, setFilters] = useState<Filters>(() => {
     const sort = params.get('sort');
     const dir = params.get('dir');
-    return { q: params.get('q') ?? '', location: params.get('location') ?? '', condition: params.get('condition') ?? '', status: params.get('status') ?? '', theme: params.get('theme') ?? '', availability: params.get('availability') ?? '', sort: isSortKey(sort) ? sort : 'setNo', dir: dir === 'asc' || dir === 'desc' ? dir : '' };
+    const facets = Object.fromEntries(FACETS.map((k) => [k, [...new Set(params.getAll(k).filter(Boolean))]]));
+    return { q: params.get('q') ?? '', ...facets, sort: isSortKey(sort) ? sort : 'setNo', dir: dir === 'asc' || dir === 'desc' ? dir : '' };
   });
   const [view, setView] = useState<View>(() => (params.get('view') === 'table' ? 'table' : 'cards'));
   const [editing, setEditing] = useState<SetRow | 'new' | null>(null);
@@ -76,7 +81,10 @@ export default function Board({ sets, history, sync, locations, currency, readAt
 
   useEffect(() => {
     const p = new URLSearchParams();
-    for (const [k, v] of Object.entries({ ...filters, view })) if (v !== DEFAULTS[k as keyof typeof DEFAULTS]) p.set(k, v);
+    for (const [k, v] of Object.entries({ ...filters, view })) {
+      if (Array.isArray(v)) for (const x of v) p.append(k, x);
+      else if (v !== undefined && v !== DEFAULTS[k as keyof typeof DEFAULTS]) p.set(k, v);
+    }
     window.history.replaceState(null, '', p.size ? `?${p}` : window.location.pathname);
   }, [filters, view]);
 
@@ -99,7 +107,8 @@ export default function Board({ sets, history, sync, locations, currency, readAt
     });
 
   const set = (k: keyof Filters) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setFilters({ ...filters, [k]: e.target.value });
-  const toggle = (k: 'location' | 'condition' | 'status' | 'theme' | 'availability', v: string) => setFilters({ ...filters, [k]: filters[k] === v ? '' : v });
+  const toggle = (k: Facet, v: string) => { const on = filters[k] ?? []; setFilters({ ...filters, [k]: on.includes(v) ? on.filter((x) => x !== v) : [...on, v] }); };
+  const clearFilters = () => setFilters({ ...filters, ...noFacets });
   const statusCounts = useMemo(() => STATUSES.map((st) => ({ status: st, n: sets.reduce((t, s) => t + s.copies.filter((c) => c.status === st).length, 0) })).filter((x) => x.n), [sets]);
   const themed = sets.some((s) => s.theme);
   const dated = sets.some((s) => availability(s));
@@ -111,6 +120,23 @@ export default function Board({ sets, history, sync, locations, currency, readAt
   // One sort for both views (#106): the Sort select and its direction button here, and the table's column headers.
   const dir = sortDir(filters.sort, filters.dir);
   const reverse = () => { const d = dir === 'desc' ? 'asc' : 'desc'; setFilters({ ...filters, dir: d === sortDir(filters.sort) ? '' : d }); };
+
+  const filterGroups = useMemo<FilterGroup[]>(() => {
+    const detail = (count: number, estValue?: number) => <> · <span className="tabular-nums">{count}</span>{estValue !== undefined && <> · <span className="tabular-nums">{money(estValue)}</span></>}</>;
+    const groups: FilterGroup[] = [];
+    if (collections.length > 1 && collection === 'all') {
+      groups.push({
+        key: 'collection', label: 'Collection',
+        options: groupTotals(sets, 'collection', new Map(collections.map((c) => [c.id, c.name]))).map((g) => ({ value: g.label, label: g.label, detail: detail(g.count, g.estValue) })),
+        onPick: (name) => { const c = collections.find((x) => x.name === name); if (c) void selectCollection(c.id).then(() => router.refresh()); },
+      });
+    }
+    for (const k of ['location', 'condition', ...(themed ? ['theme'] as const : []), ...(dated ? ['availability'] as const : [])] as const) {
+      groups.push({ key: k, label: FACET_LABEL[k], options: groupTotals(sets, k).filter((g) => k !== 'availability' || g.label !== '(none)').map((g) => ({ value: g.label, label: g.label, detail: detail(g.count, g.estValue) })) });
+    }
+    if (statusCounts.length > 1) groups.push({ key: 'status', label: FACET_LABEL.status, options: statusCounts.map((x) => ({ value: x.status, label: STATUS_LABEL[x.status], detail: detail(x.n) })) });
+    return groups;
+  }, [sets, collections, collection, themed, dated, statusCounts, money, router]);
 
   return (
     <div className="space-y-6">
@@ -188,46 +214,14 @@ export default function Board({ sets, history, sync, locations, currency, readAt
         <Segmented label="View" value={view} onChange={setView} options={[{ value: 'cards', label: 'Cards', icon: LayoutGrid }, { value: 'table', label: 'Table', icon: Rows3 }]} />
       </div>
 
-      <section aria-label="Filters" className="space-y-2 text-sm">
-        {collections.length > 1 && collection === 'all' && (
-          <div className="-mx-4 flex items-center gap-2 overflow-x-auto px-4 pb-1 sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0 sm:pb-0">
-            <span className="w-20 shrink-0 text-sm text-fg-3">Collection</span>
-            {groupTotals(sets, 'collection', new Map(collections.map((c) => [c.id, c.name]))).map((g) => (
-              <FilterChip key={g.label} active={false} onClick={() => { const c = collections.find((x) => x.name === g.label); if (c) void selectCollection(c.id).then(() => router.refresh()); }}>
-                {g.label} · {g.count} · <span className="tabular-nums">{money(g.estValue)}</span>
-              </FilterChip>
-            ))}
-          </div>
-        )}
-        {(['location', 'condition', ...(themed ? ['theme'] as const : []), ...(dated ? ['availability'] as const : [])] as const).map((k) => (
-          <div key={k} className="-mx-4 flex items-center gap-2 overflow-x-auto px-4 pb-1 [mask-image:linear-gradient(to_right,black_85%,transparent)] sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0 sm:pb-0 sm:[mask-image:none]">
-            <span className="w-20 shrink-0 text-sm capitalize text-fg-3">{k}</span>
-            {groupTotals(sets, k).filter((g) => k !== 'availability' || g.label !== '(none)').map((g) => (
-              <FilterChip key={g.label} active={filters[k] === g.label} onClick={() => toggle(k, g.label)}>
-                {g.label} · {g.count} · <span className="tabular-nums">{money(g.estValue)}</span>
-              </FilterChip>
-            ))}
-          </div>
-        ))}
-        {statusCounts.length > 1 && (
-          <div className="-mx-4 flex items-center gap-2 overflow-x-auto px-4 pb-1 sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0 sm:pb-0">
-            <span className="w-20 shrink-0 text-sm text-fg-3">Status</span>
-            {statusCounts.map((x) => (
-              <FilterChip key={x.status} active={filters.status === x.status} onClick={() => toggle('status', x.status)}>
-                {STATUS_LABEL[x.status]} · <span className="tabular-nums">{x.n}</span>
-              </FilterChip>
-            ))}
-          </div>
-        )}
-        {shown.length < all.count && (
-          <p className="text-fg-3">
-            Showing <b className="text-fg">{shown.length}</b> of {all.count} sets · <b className="text-fg tabular-nums">{money(view_.estValue)}</b>
-            {' '}<Button variant="link" onClick={() => setFilters({ q: '', location: '', condition: '', status: '', theme: '', availability: '', sort: filters.sort, dir: filters.dir })}>Clear filters</Button>
-          </p>
-        )}
-      </section>
+      <FilterPanel groups={filterGroups} selected={filters} onToggle={toggle} onClear={clearFilters} shown={shown.length} />
+      {shown.length < all.count && (
+        <p className="text-sm text-fg-3">
+          Showing <b className="text-fg">{shown.length}</b> of {all.count} sets · <b className="text-fg tabular-nums">{money(view_.estValue)}</b>
+        </p>
+      )}
 
-      {filters.location === 'Sell' && (
+      {filters.location?.length === 1 && filters.location[0] === 'Sell' && (
         <section className="rounded-card border border-warn-ring bg-warn-soft p-4 text-sm text-warn">
           <p className="font-semibold">Sell list: {view_.count} sets, {view_.copies} copies</p>
           <dl className="mt-2 grid grid-cols-2 gap-2 tabular-nums sm:grid-cols-4">
