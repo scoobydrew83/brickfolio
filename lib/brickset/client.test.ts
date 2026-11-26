@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { createBrickset, toBsSet, type ApiSet } from './client';
+import { createBrickset, instructionLinks, toBsSet, type ApiSet } from './client';
 
 const galaxy: ApiSet = {
   setID: 32069, number: '10497', numberVariant: 1, availability: 'Retail', launchDate: '2022-08-01T00:00:00Z', exitDate: '2026-12-31T00:00:00Z',
@@ -48,4 +48,23 @@ it('reports Brickset errors and an unreachable server plainly', async () => {
   await expect(bad.check()).rejects.toThrow('Brickset: Invalid API key');
   const down = createBrickset('key', async () => { throw new TypeError('fetch failed', { cause: new Error('getaddrinfo ENOTFOUND brickset.com') }); });
   await expect(down.check()).rejects.toThrow("Couldn't reach brickset.com from the server (getaddrinfo ENOTFOUND brickset.com)");
+});
+
+it('lists building instructions from getInstructions2, keeping only LEGO and Brickset https links', async () => {
+  const urls: string[] = [];
+  const bs = createBrickset('key', async (url) => {
+    urls.push(String(url));
+    return Response.json({ status: 'success', matches: 3, instructions: [
+      { URL: 'https://www.lego.com/cdn/product-assets/product.bi.core.pdf/6362469.pdf', description: 'BI 3004, 160/65+4 - 10280 V39 1/2' },
+      { URL: 'http://www.lego.com/old.pdf', description: 'plain http' },
+      { URL: 'https://example.com/x.pdf', description: 'elsewhere' },
+      { URL: 'https://www.lego.com/cdn/product-assets/product.bi.core.pdf/6362469.pdf', description: 'duplicate' },
+    ] });
+  });
+  expect(await bs.instructions!('10280-1')).toEqual([{ url: 'https://www.lego.com/cdn/product-assets/product.bi.core.pdf/6362469.pdf', description: 'BI 3004, 160/65+4 - 10280 V39 1/2' }]);
+  expect(new URL(urls[0]).pathname).toBe('/api/v3.asmx/getInstructions2');
+  expect(new URL(urls[0]).searchParams.get('setNumber')).toBe('10280-1');
+  expect(instructionLinks(undefined)).toEqual([]);
+  expect(instructionLinks([{ URL: 'https://lego.com.evil.example/x.pdf', description: '' }])).toEqual([]);
+  expect(instructionLinks([{ URL: 'https://brickset.com/x.pdf', description: '' }])).toEqual([{ url: 'https://brickset.com/x.pdf', description: 'Instructions' }]);
 });

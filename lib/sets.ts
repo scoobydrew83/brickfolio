@@ -25,6 +25,9 @@ export type CopyRow = {
   acquiredDate: string | null; // YYYY-MM-DD
   buildDate: string | null; // YYYY-MM-DD
   pricePaid: number | null;
+  /** Set when the price was paid in another currency: the amount and currency paid; pricePaid is it converted. */
+  paidAmount?: number | null;
+  paidCurrency?: string | null;
   tax: number | null;
   shipping: number | null;
   gwp: boolean; // gift with purchase: cost basis 0
@@ -43,6 +46,10 @@ export type CopyInput = {
   acquiredDate?: string | null;
   buildDate?: string | null;
   pricePaid?: number | null;
+  /** The currency `pricePaid` was typed in, when not the collection's; the server converts it (lib/service/fx.ts). */
+  paidCurrency?: string | null;
+  /** Set by the server with the conversion: the amount as typed. */
+  paidAmount?: number | null;
   tax?: number | null;
   shipping?: number | null;
   gwp?: boolean;
@@ -266,6 +273,11 @@ export function parseCopyInput(
     const n = Number(v);
     if (!Number.isFinite(n) || n < 0 || n > MONEY_MAX) return { ok: false, error: `${label} must be 0–1,000,000` };
     value[k] = Math.round(n * 100) / 100;
+  }
+  const cur = str('paidCurrency');
+  if (cur !== undefined) {
+    if (cur && !/^[A-Za-z]{3}$/.test(cur)) return { ok: false, error: 'Currency must be a 3-letter code like EUR' };
+    value.paidCurrency = cur ? cur.toUpperCase() : null;
   }
   if (form.gwp !== undefined && form.gwp !== null && form.gwp !== '') value.gwp = truthy(form.gwp);
   else if (!partial) value.gwp = false;

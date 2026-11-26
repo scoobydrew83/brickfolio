@@ -3,6 +3,8 @@
 // Free key from brickset.com (Account → API key). Only getSets counts against the key's daily limit, so set numbers
 // are asked for in batches.
 
+import { safeHttpsUrl } from '../safe-url';
+
 const BASE = 'https://brickset.com/api/v3.asmx';
 const BATCH = 50;
 
@@ -20,7 +22,12 @@ export type RetailSource = {
    * an answer for (found or not), so the caller can tell unknown sets from ones it ran out of calls for.
    */
   sets(setNos: string[], opts?: { maxCalls?: number }): Promise<{ found: BsSet[]; asked: string[] }>;
+  /** LEGO's building instruction PDFs for one set (getInstructions2, which doesn't count against the daily limit). */
+  instructions?(setNo: string): Promise<Instruction[]>;
 };
+
+/** One building instructions PDF: a lego.com (or brickset.com) https link and Brickset's description of it. */
+export type Instruction = { url: string; description: string };
 
 const REGIONS = { US: 'USD', UK: 'GBP', CA: 'CAD', DE: 'EUR' } as const;
 type Region = { retailPrice?: number | null; dateFirstAvailable?: string | null; dateLastAvailable?: string | null };
@@ -30,7 +37,20 @@ export type ApiSet = {
   LEGOCom?: Partial<Record<keyof typeof REGIONS, Region>>;
   barcode?: { EAN?: string | null; UPC?: string | null } | null; // the box's barcodes, saved for the scanner
 };
-type ApiReply = { status: string; message?: string; sets?: ApiSet[] };
+type ApiReply = { status: string; message?: string; sets?: ApiSet[]; instructions?: { URL?: string | null; description?: string | null }[] };
+
+/** Only https links to LEGO's or Brickset's own servers are shown. */
+export function instructionLinks(list: ApiReply['instructions']): Instruction[] {
+  const out: Instruction[] = [];
+  for (const i of list ?? []) {
+    const url = safeHttpsUrl(i.URL);
+    if (!url) continue;
+    const host = new URL(url).hostname.toLowerCase();
+    if (!/(^|\.)(lego\.com|brickset\.com)$/.test(host) || out.some((o) => o.url === url)) continue;
+    out.push({ url, description: (i.description ?? '').trim().slice(0, 200) || 'Instructions' });
+  }
+  return out;
+}
 
 /** A barcode as Brickset sent it, digits only, or null. Checked properly when saved (lib/barcode/gtin.ts). */
 const code = (v?: string | null) => (v && /^\d{8,14}$/.test(v.trim()) ? v.trim() : null);
@@ -83,6 +103,9 @@ export function createBrickset(key: string, fetchImpl: typeof fetch = fetch): Re
   return {
     async check() {
       await call('checkKey', {});
+    },
+    async instructions(setNo) {
+      return instructionLinks((await call('getInstructions2', { setNumber: setNo })).instructions);
     },
     async sets(setNos, opts = {}) {
       let calls = opts.maxCalls ?? Infinity;

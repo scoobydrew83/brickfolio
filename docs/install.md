@@ -10,7 +10,18 @@ Step-by-step instructions for each setup. Pick one:
 | [Cloudflare Workers + D1](cloudflare.md) | No server at all (free plan works) | The whole repo (you deploy from it) | Cloudflare Access |
 | [Vercel, Railway or Render](hosting.md) | A hosted app without managing a server | The whole repo (you deploy from it) | Brickfolio accounts (Better Auth) |
 
-Using Portainer, Dockge, Synology or similar? Read [Before you start](#before-you-start), pick a setup above, then see [Docker GUIs](#portainer-dockge-synology-and-other-docker-guis).
+Using Portainer, Dockge, Synology or similar? Read [Before you start](#before-you-start), pick a setup above, then see [Docker GUIs](#portainer-dockge-synology-and-other-docker-guis). Coolify has its own guide: [coolify.md](coolify.md).
+
+**Guides:**
+
+- [Coolify](coolify.md): the single-file compose resource, variables, volumes and image tags
+- [Back up and restore](backup-restore.md): daily backups, restoring, D1 and Turso, testing a restore
+- [Troubleshooting](troubleshooting.md): sync and API messages with their causes and fixes
+- [Alerts](alerts.md): every alert and channel, the JSON payload, n8n and Home Assistant
+- [Upgrading](upgrading.md): each setup, pinning a version, migrations and rolling back
+- [REST API and MCP](api.md): tokens, every route and every MCP tool
+- [Architecture](architecture.md): how the code is laid out, for contributors
+- [FAQ](faq.md): prices, privacy, hosts, Home Assistant and Grafana
 
 - [Before you start](#before-you-start)
 - [Local only](#local-only)
@@ -83,6 +94,7 @@ Rebrickable doesn't share every build's parts list through its API: designers ca
 - each set's retail price and how much it has gained (or lost) since, and the whole collection's gain over retail;
 - a **Retiring** chip on sets and wishlist items expected to retire within about six months, and **Retired** once they have;
 - an **Availability** filter on the Sets page (Available, Retiring soon, Retired).
+- **Building instructions** on each set's page: links to LEGO's instruction PDFs (Brickset's `getInstructions2`, which doesn't use the key's daily limit; kept for a week per server).
 
 1. Sign in to Brickset, open your account's **API** page, and request a key (free for personal use).
 2. Set it as `BRICKSET_API_KEY` and restart (in Coolify, add it under Environment Variables and redeploy).
@@ -124,41 +136,11 @@ A set's page shows what it would fetch sold as parts. With a Rebrickable key, pa
 
 ### Optional: alerts
 
-After each sync Brickfolio can send one message listing wishlist sets whose average sold price dropped under your target. It alerts once per drop; a set that goes back above target alerts again the next time it drops.
+After each sync Brickfolio can send one message when wishlist sets drop under your target, when a wish's price swings `PRICE_SWING_PCT` percent (default 10), when a wish retires within `RETIRE_ALERT_DAYS` days, when a followed Designer Program pre-order opens or closes, and when a sync fails or finishes with problems. Your own flows can also post retailer offers to `POST /api/v1/prices` for deal alerts.
 
-It also alerts on **price swings**: when a wish's BrickLink average sold price has moved `PRICE_SWING_PCT` percent or more (default 10; `0` turns it off), up or down, with or without a target. The first price Brickfolio sees for a wish is where it measures from; after each swing alert it measures from the new price, so a slow drift alerts once it adds up and each swing alerts once. The message gives the old and new price, the change and the date it's measured from. Changing your currency starts over.
+Set at least one channel: `ALERT_WEBHOOK_URL` (ntfy, Discord, or JSON for n8n, Home Assistant and the like), `ALERT_EMAIL_TO`, Telegram, Pushover or Gotify. Set `APP_URL` so alerts link back to the app. **Settings → Alerts and sync** has **Send a test alert** and shows the last ten syncs.
 
-- **Phone push with [ntfy](https://ntfy.sh):** install the ntfy app, subscribe to a long random topic name, and set `ALERT_WEBHOOK_URL=https://ntfy.sh/<that-topic>` (or your own ntfy server).
-- **Discord:** create a webhook in a channel's settings and use its URL.
-- **Anything else:** any URL that accepts a JSON POST (`{title, message, url, items}`); Home Assistant, n8n and Zapier all do. The `docs/n8n` folder has ready-made n8n workflows.
-- **Email:** `ALERT_EMAIL_TO=you@example.com` (comma-separate several), sent through the email provider set up for sign-in mail (`EMAIL_PROVIDER` and `EMAIL_FROM`, see below).
-- **Telegram:** create a bot with @BotFather and set `ALERT_TELEGRAM_BOT_TOKEN` to its token and `ALERT_TELEGRAM_CHAT_ID` to your chat's ID (message the bot, then open `https://api.telegram.org/bot<token>/getUpdates` to find it).
-- **Pushover:** `ALERT_PUSHOVER_TOKEN` (an application's API token) and `ALERT_PUSHOVER_USER` (your user key).
-- **Gotify:** `ALERT_GOTIFY_URL` (your server, e.g. `https://gotify.example`) and `ALERT_GOTIFY_TOKEN` (an application token).
-
-Set as many as you like: every alert goes to all of them. It counts as sent when at least one channel takes it; a channel that fails is named in the sync message. **Settings → Alerts and sync** lists the channels, has **Send a test alert**, and shows the last ten syncs and their messages.
-
-**Sync problems.** When a sync fails, or finishes with problems (set lookups that failed, a step that reported an error, an alert that didn't go through), the same channels get one message saying what went wrong, and one more when a sync is clean again. The same problem isn't repeated every night; a different one alerts. The daily limit and time-limit notes don't count as problems. `SYNC_ALERT=off` turns this off.
-
-With a Brickset key, the same webhook also warns once when a wishlist set will retire within `RETIRE_ALERT_DAYS` days (default 60; `0` turns it off), and again if its date moves away and back.
-
-Watched BrickLink Designer Program projects (Radar → Designer Program) alert `DESIGNER_ALERT_DAYS` days before their pre-order opens (default 7; `0` turns it off) and 3 days before it closes.
-
-**Deal alerts from retailer offers.** Your own flow (n8n, a script, a spreadsheet) can post offers it finds to `POST /api/v1/prices`. When the lowest recent offer for a wish, in its condition and your currency, is at or under your target, the same webhook alerts once, naming the retailer and linking to the offer. The Wishlist page shows the best offer next to the BrickLink price. Offers count for `OFFER_MAX_AGE_DAYS` (default 3) and never change Est. Value. Brickfolio doesn't scrape stores; feed it only from sources you're allowed to use.
-
-1. Create a token in **Settings → API tokens**.
-2. Post a batch (at most 200) with an `Idempotency-Key` header, so a retried run doesn't post twice:
-   ```bash
-   curl -X POST https://your-host/api/v1/prices -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-     -H "Idempotency-Key: deals-2026-11-06-12" \
-     -d '{"observations":[{"id":"75192","source":"retailer:lego","type":"offer","condition":"N","currency":"USD","amount":599.99,"url":"https://www.lego.com/…"}]}'
-   ```
-   `id` can be a set number (`75192` or `75192-1`) or the box barcode. `source` is `retailer:<name>` or `manual`; the sources the app syncs itself (BrickLink, Brickset and so on) are refused. The answer lists ids it couldn't match in `unresolved`.
-3. For n8n, import `docs/examples/n8n-retailer-offers.json`: a schedule, a placeholder for your deals source, a step that maps rows to observations, and the post. Add a Header Auth credential (`Authorization`, `Bearer <token>`) to the last step.
-
-`GET /api/v1/prices?id=75192&type=offer&days=14` lists what was stored, to check a flow.
-
-Set `APP_URL` to your Brickfolio address so alerts link back to the wishlist. Settings → About this server shows whether alerts are on.
+[alerts.md](alerts.md) has every alert, every channel, the JSON payload and examples for n8n and Home Assistant.
 
 ### Optional: email
 
@@ -476,7 +458,7 @@ The setups above work in Docker GUIs too. Enter the variables from the setup's *
 
 Turn on **GitOps updates** if you want Portainer to redeploy when the repo changes.
 
-**Coolify with Tailscale**: Coolify takes a single compose file, so the repo ships a ready-merged one, `compose.coolify-tailscale.yml`. Create a Git-based Docker Compose resource and set its compose location to `/compose.coolify-tailscale.yml`. It runs the published image `ghcr.io/scoobydrew83/brickfolio:latest`, so deploys only pull and restart; set `BRICKFOLIO_IMAGE` to pin a release (for example `ghcr.io/scoobydrew83/brickfolio:0.2`), or replace `image:` and `pull_policy:` under `app` with `build: .` and `pull_policy: build` to build from source. The file also works pasted into a **Docker Compose Empty** resource. Add `TS_AUTHKEY`, `ALLOWED_USERS` and the four `BRICKLINK_*` values under Environment Variables, plus any optional ones (`REBRICKABLE_API_KEY`, `ALERT_WEBHOOK_URL` or another alert channel, `APP_URL`, `TZ`). Coolify passes only the variables the compose file lists; if one you set seems ignored, check it's under `environment:` in that file. To update, redeploy in Coolify: it pulls the newest image. Don't assign a domain in Coolify: the app is only served at `https://brickfolio.<your-tailnet>.ts.net`.
+**Coolify with Tailscale** (full guide: [coolify.md](coolify.md)): Coolify takes a single compose file, so the repo ships a ready-merged one, `compose.coolify-tailscale.yml`. Create a Git-based Docker Compose resource and set its compose location to `/compose.coolify-tailscale.yml`. It runs the published image `ghcr.io/scoobydrew83/brickfolio:latest`, so deploys only pull and restart; set `BRICKFOLIO_IMAGE` to pin a release (for example `ghcr.io/scoobydrew83/brickfolio:0.2`), or replace `image:` and `pull_policy:` under `app` with `build: .` and `pull_policy: build` to build from source. The file also works pasted into a **Docker Compose Empty** resource. Add `TS_AUTHKEY`, `ALLOWED_USERS` and the four `BRICKLINK_*` values under Environment Variables, plus any optional ones (`REBRICKABLE_API_KEY`, `ALERT_WEBHOOK_URL` or another alert channel, `APP_URL`, `TZ`). Coolify passes only the variables the compose file lists; if one you set seems ignored, check it's under `environment:` in that file. To update, redeploy in Coolify: it pulls the newest image. Don't assign a domain in Coolify: the app is only served at `https://brickfolio.<your-tailnet>.ts.net`.
 
 **Other tools that take a single compose file** (Dockge, Synology Container Manager, Coolify with Cloudflare, …): on any machine with Docker, merge the base file and the overlay into one file:
 
@@ -504,21 +486,15 @@ Don't turn demo mode on for your own collection: it stops all changes and syncs.
 
 ## Updating
 
-**Settings → About this server** shows the version you're running and, once a day, checks GitHub for a newer release; a dot on the Settings tab means one is out. Only GitHub's public releases list is fetched (nothing about your collection is sent); set `UPDATE_CHECK=off` to turn it off.
+**Settings → About this server** shows the version you're running and, once a day, checks GitHub for a newer release (`UPDATE_CHECK=off` turns it off). On Docker, back up your database, then:
 
 ```bash
 docker compose pull
 docker compose up -d
 ```
 
-Database changes are applied automatically when the app starts. Your data lives in the `data` volume and is kept. The app also backs it up daily to `/data/backups`, so you can roll back. See [Data and backups](../README.md#data-and-backups).
-
-For Cloudflare Workers set up with the **Deploy to Cloudflare** button, open your copy of the repo on GitHub and click **Sync fork**; Workers Builds deploys it, migrations included. Deployed from the CLI instead: pull the latest code and run `npm run cf:deploy` again.
+[upgrading.md](upgrading.md) has the steps for every setup (Coolify, Docker GUIs, Cloudflare Workers, Vercel, Railway and Render), pinning a version with `BRICKFOLIO_IMAGE`, and how to roll back. Backups are in [backup-restore.md](backup-restore.md).
 
 ## Troubleshooting
 
-- **"Not signed in. This app only accepts requests through Tailscale or Cloudflare Access."** The request didn't come through the expected proxy. With Tailscale, open the `https://….ts.net` address from a device signed in as a user; a tagged device or the server's own IP won't send the login header. With Cloudflare, check that `CF_ACCESS_AUD` and `CF_ACCESS_TEAM_DOMAIN` match the Access application, and that the Access application covers the exact hostname.
-- **`manifest unknown` or `not found` when pulling the image.** The tag doesn't exist yet. Set `BRICKFOLIO_IMAGE=ghcr.io/scoobydrew83/brickfolio:main` in `.env`, or build from a clone with `docker compose up -d --build`.
-- **`!reset` or `env_file` errors from Compose.** Your Compose is older than v2.24. Update Docker.
-- **No prices or photos.** Check the four `BRICKLINK_*` values and that the BrickLink access token was registered for IP `0.0.0.0`. Run **Sync BrickLink** and check `docker compose logs app` (in Coolify or Portainer, the app container's logs): each sync logs how many sets were looked up and, for each different error, how many sets it hit and BrickLink's answer. A set's own error also shows on its card.
-- **Is it running?** `curl http://127.0.0.1:3000/api/health` returns `{"ok":true}` (local setup). In every setup, `docker compose ps` shows the container as `healthy`.
+Messages from installing, signing in, the sync, the other services and alerts, with their causes and fixes, are in [troubleshooting.md](troubleshooting.md).

@@ -11,7 +11,9 @@ export async function ImpersonationBar() {
   await connection();
   if (authMode() !== 'better-auth') return null;
   const [{ getDb }, { getAuth }] = await Promise.all([import('@/lib/db'), import('@/lib/better-auth')]);
-  const s = await getAuth(await getDb()).api.getSession({ headers: await headers() }).catch(() => null);
+  const db = await getDb().catch(() => null); // a broken database must not take the header down
+  if (!db) return null;
+  const s = await getAuth(db).api.getSession({ headers: await headers() }).catch(() => null);
   if (!(s?.session as { impersonatedBy?: string | null } | undefined)?.impersonatedBy) return null;
   const name = s!.user.name && s!.user.name !== s!.user.email ? s!.user.name : null;
   return (

@@ -7,9 +7,9 @@ import { CopyFields } from './CopyForm';
 import { LocationPicker } from '../LocationPicker';
 
 type Dupe = { name: string; qty: number } | null;
-type Props = { set: SetRow | null; locations: string[]; pending: boolean; dupe: Dupe; money: Money; onClose: () => void; onAddAnother: () => void; onSubmit: (form: Record<string, unknown>) => void };
+type Props = { set: SetRow | null; locations: string[]; pending: boolean; dupe: Dupe; money: Money; currency?: string; onClose: () => void; onAddAnother: () => void; onSubmit: (form: Record<string, unknown>) => void };
 
-export function SetForm({ set, locations, pending, dupe, money, onClose, onAddAnother, onSubmit }: Props) {
+export function SetForm({ set, locations, pending, dupe, money, currency, onClose, onAddAnother, onSubmit }: Props) {
   // With several copies, condition, location and Missing % are per copy: they're edited on the set page.
   const several = !!set && set.copies.length > 1;
   const footer = dupe ? (
@@ -78,7 +78,7 @@ export function SetForm({ set, locations, pending, dupe, money, onClose, onAddAn
             This set has {set!.copies.length} copies. Change their condition, location and Missing % under Copies on the set page.
           </p>
         )}
-        {!set && <CopyFields copy={null} locations={locations} withPlace={false} />}
+        {!set && <CopyFields copy={null} locations={locations} withPlace={false} currency={currency} />}
         <label className="block text-sm">Notes
           <textarea name="notes" defaultValue={set?.notes ?? ''} maxLength={2000} rows={2} className={field} />
         </label>

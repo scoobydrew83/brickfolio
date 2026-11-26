@@ -11,6 +11,7 @@ import type { Partout } from '@/lib/service/partout';
 import { partKey } from '@/lib/bricklink/wanted';
 import type { PartRow } from '@/lib/service/parts';
 import type { ValueSources } from '@/lib/service/prices';
+import type { Instruction } from '@/lib/brickset/client';
 import { copiesSummary, copyGuide, costBasis, displayNo, num, setGuide, STATUS_LABEL, type ConditionGap, type CopyRow, type SetRow } from '@/lib/sets';
 import { ModelViewer } from './ModelViewer';
 import { PartList, PartsSource } from './board/PartsDialog';
@@ -21,12 +22,12 @@ import { SetForm } from './board/SetForm';
 import { blLink, moneyIn } from './board/ui';
 import { Banner, Button, Callout, CONDITION_TONE, Chip, EmptyState, FilterChip, buttonClass, cx, toast } from './ui';
 
-type Props = { set: SetRow; parts: PartRow[]; prices: { date: string; avgSold: number | null }[]; currency: string; locations: string[]; priced: boolean; model: { fileName: string; author: string | null } | null; library: boolean; builds: BuildMatch[]; view?: '3d'; missing: MissingSummary; missingCopyId: number | null; guide: 'N' | 'U' | null; partout: (Partout & { unpriced: number }) | null; partsPriced: boolean; sources: ValueSources; conditions: Conditions; collections?: { id: number; name: string }[]; collection?: number; writable?: 'all' | number[] };
+type Props = { set: SetRow; parts: PartRow[]; prices: { date: string; avgSold: number | null }[]; currency: string; locations: string[]; priced: boolean; model: { fileName: string; author: string | null } | null; library: boolean; builds: BuildMatch[]; view?: '3d'; missing: MissingSummary; missingCopyId: number | null; guide: 'N' | 'U' | null; partout: (Partout & { unpriced: number }) | null; partsPriced: boolean; sources: ValueSources; conditions: Conditions; collections?: { id: number; name: string }[]; collection?: number; writable?: 'all' | number[]; instructions?: Instruction[] };
 type Side = { amount: number | null; observedOn: string; sampleSize: number | null } | null;
 type Conditions = { n: Side; u: Side; gap: ConditionGap | null };
 
 /** One set: its photo, value and price history, parts list and copies. */
-export default function SetDetail({ set: s, parts, prices, currency, locations, priced, model, library, builds, view, missing, missingCopyId, guide, partout, partsPriced, sources, conditions, collections = [], collection, writable = 'all' }: Props) {
+export default function SetDetail({ set: s, parts, prices, currency, locations, priced, model, library, builds, view, missing, missingCopyId, guide, partout, partsPriced, sources, conditions, collections = [], collection, writable = 'all', instructions = [] }: Props) {
   // #50: what the viewer may change. Set-wide edits need every copy's collection; set facts (parts, model, price
   // lookups) at least one; a copy its own; a new copy a collection they can add to.
   const canCopy = (c: { collectionId: number | null }) => writable === 'all' || writable.includes(c.collectionId ?? 1);
@@ -220,6 +221,21 @@ export default function SetDetail({ set: s, parts, prices, currency, locations, 
             </section>
           )}
 
+          {instructions.length > 0 && (
+            <section aria-labelledby="instructions-title">
+              <h2 id="instructions-title" className="text-sm font-semibold">Building instructions</h2>
+              <Callout className="mt-2 divide-y divide-line">
+                {instructions.map((i) => (
+                  <a key={i.url} href={i.url} target="_blank" rel="noreferrer" className="flex items-center gap-3 px-3 py-2 text-sm hover:bg-subtle">
+                    <Download aria-hidden className="size-4 shrink-0 text-fg-3" />
+                    <span className="min-w-0 flex-1 truncate">{i.description}</span>
+                    <span className="shrink-0 text-xs text-fg-3">PDF, LEGO</span>
+                  </a>
+                ))}
+              </Callout>
+            </section>
+          )}
+
           {s.notes && (
             <section aria-label="Notes">
               <h2 className="text-sm font-semibold">Notes</h2>
@@ -301,6 +317,7 @@ export default function SetDetail({ set: s, parts, prices, currency, locations, 
           locations={locations}
           collections={addTo}
           collection={collection}
+          currency={currency}
           pending={pending}
           onClose={() => setCopyForm(null)}
           onSubmit={(form) => act(() => (copyForm === 'new' ? addCopy(s.setNo, form) : editCopy(copyForm.id, form)), 'Saved.', () => setCopyForm(null))}

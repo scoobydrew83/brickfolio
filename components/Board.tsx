@@ -274,6 +274,7 @@ export default function Board({ sets, history, sync, locations, currency, readAt
           pending={pending}
           dupe={dupe}
           money={money}
+          currency={currency}
           onClose={closeForm}
           onAddAnother={() => dupe && act(() => addSet(dupe.form, true), `Added another. You now have ${dupe.qty + 1} of ${dupe.name}.`, closeForm)}
           onSubmit={(form) => {

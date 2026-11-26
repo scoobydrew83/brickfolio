@@ -68,6 +68,10 @@ export const setCopies = sqliteTable(
     acquiredDate: text('acquired_date'), // YYYY-MM-DD
     buildDate: text('build_date'), // YYYY-MM-DD
     pricePaid: real('price_paid'), // in the collection currency
+    // When the price was paid in another currency: what was paid and in which (ISO 4217); price_paid holds it
+    // converted at the ECB rate for the acquired date (lib/service/fx.ts), so cost basis and gain work as before.
+    paidAmount: real('paid_amount'),
+    paidCurrency: text('paid_currency'),
     tax: real('tax'),
     shipping: real('shipping'),
     gwp: integer('gwp', { mode: 'boolean' }).notNull().default(false), // gift with purchase: cost basis 0

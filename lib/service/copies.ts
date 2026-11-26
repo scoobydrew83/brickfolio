@@ -10,6 +10,7 @@ import { copiesBySet, getCurrency, getSet, lookupInto, today, type Result } from
 import { hasMissing } from './missing';
 import { partOutCopy, unPartCopy } from './lots';
 import { latestGuide, primarySource, recentAmount } from './prices';
+import { FxError, rateOn } from './fx';
 
 /** A BrickLink price in the other guide is used for a copy's value when it's at most this old. */
 const SNAPSHOT_DAYS = 90;
@@ -27,15 +28,45 @@ export async function needsRelookup(db: DB, setNo: string, copies: Pick<CopyRow,
   return !(await recentAmount(db, 'set', setNo, { source: 'bricklink', condition: setGuide(copies), currency: await getCurrency(db), since: daysAgo(FRESH_DAYS), withEmpty: true }));
 }
 
+/**
+ * A price typed in another currency, converted to the collection currency at the ECB rate for the acquired date
+ * (today without one): `pricePaid` becomes the converted amount, with what was typed kept in `paidAmount` and
+ * `paidCurrency`. A price in the collection currency (or a gift with purchase) clears those two. Tax and shipping are
+ * always in the collection currency. `prev` is the copy being edited. Throws FxError when there's no rate.
+ */
+export async function convertPaid(db: DB, input: CopyInput, prev?: Pick<CopyRow, 'acquiredDate' | 'pricePaid' | 'paidAmount' | 'paidCurrency' | 'gwp'>, fetchImpl: typeof fetch = fetch): Promise<CopyInput> {
+  const out: CopyInput = { ...input };
+  delete out.paidAmount; // only ever set here
+  const clear = () => { out.paidAmount = null; out.paidCurrency = null; return out; };
+  if (input.gwp ?? prev?.gwp) return clear();
+  const currency = await getCurrency(db);
+  let cur = input.paidCurrency;
+  if (cur === undefined) {
+    if (input.pricePaid !== undefined) return clear(); // a price with no currency is in the collection currency
+    if (input.acquiredDate === undefined || !prev?.paidCurrency) return out; // nothing to convert again
+    cur = prev.paidCurrency; // a new acquired date: the same amount at that day's rate
+  }
+  if (!cur || cur === currency) return clear();
+  const amount = input.pricePaid !== undefined ? input.pricePaid : prev?.paidCurrency === cur ? prev.paidAmount : prev?.pricePaid;
+  if (amount == null) return clear();
+  const date = (input.acquiredDate !== undefined ? input.acquiredDate : prev?.acquiredDate) || today();
+  const { rate } = await rateOn(db, date, cur, currency, fetchImpl);
+  out.pricePaid = Math.round(amount * rate * 100) / 100;
+  out.paidAmount = amount;
+  out.paidCurrency = cur;
+  return out;
+}
+
 /** Inserts `n` copies of a set with the same fields. Sealed means New; a gift with purchase costs 0. */
-export async function insertCopies(db: DB, setId: number, c: CopyInput, n: number): Promise<number[]> {
+export async function insertCopies(db: DB, setId: number, input: CopyInput, n: number): Promise<number[]> {
   if (n < 1) return [];
+  const c = await convertPaid(db, input);
   const status = c.status ?? (c.condition === 'New' ? 'sealed' : 'built');
   const col = await targetCollection(db, c.collectionId);
   if (!col.ok) throw new Error(col.error);
   const row = {
     setId, status, collectionId: col.id, condition: status === 'sealed' ? 'New' as const : (c.condition ?? 'Used'), missingPct: c.missingPct ?? null, location: c.location ?? null,
-    acquiredDate: c.acquiredDate ?? null, buildDate: c.buildDate ?? null, pricePaid: c.gwp ? 0 : (c.pricePaid ?? null), tax: c.tax ?? null,
+    acquiredDate: c.acquiredDate ?? null, buildDate: c.buildDate ?? null, pricePaid: c.gwp ? 0 : (c.pricePaid ?? null), paidAmount: c.gwp ? null : (c.paidAmount ?? null), paidCurrency: c.gwp ? null : (c.paidCurrency ?? null), tax: c.tax ?? null,
     shipping: c.shipping ?? null, gwp: c.gwp ?? false, notes: c.notes ?? null,
   };
   const ids = await db.insert(setCopies).values(Array.from({ length: n }, () => row)).returning({ id: setCopies.id }).all();
@@ -106,7 +137,13 @@ export async function getCopy(db: DB, copyId: number): Promise<(CopyRow & { setN
 export async function addCopy(db: DB, no: string, input: CopyInput, lookup: Lookup | null = null): Promise<Result<{ set: SetRow; copyId: number }>> {
   const s = await getSet(db, no);
   if (!s) return { ok: false, status: 404, error: `#${displayNo(no)} isn't in the collection.` };
-  const [id] = await insertCopies(db, s.id, input, 1);
+  let id: number;
+  try {
+    [id] = await insertCopies(db, s.id, input, 1);
+  } catch (e) {
+    if (e instanceof FxError) return { ok: false, status: 400, error: e.message };
+    throw e;
+  }
   await touch(db, s.id);
   await reprice(db, (await getSet(db, no))!, lookup);
   return { ok: true, set: (await getSet(db, no))!, copyId: id };
@@ -119,7 +156,13 @@ export async function addCopy(db: DB, no: string, input: CopyInput, lookup: Look
 export async function editCopy(db: DB, copyId: number, input: CopyInput, lookup: Lookup | null = null): Promise<Result<{ set: SetRow; lots?: number }>> {
   const c = await getCopy(db, copyId);
   if (!c) return { ok: false, status: 404, error: `Copy ${copyId} doesn't exist.` };
-  const fields: CopyInput = { ...input };
+  let fields: CopyInput;
+  try {
+    fields = await convertPaid(db, input, c);
+  } catch (e) {
+    if (e instanceof FxError) return { ok: false, status: 400, error: e.message };
+    throw e;
+  }
   if (fields.missingPct !== undefined && (await hasMissing(db, c.setId, c.id))) delete fields.missingPct;
   const after = { ...c, ...fields };
   if (after.status === 'sealed') {

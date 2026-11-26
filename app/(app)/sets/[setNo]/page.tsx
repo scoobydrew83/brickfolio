@@ -9,6 +9,7 @@ import { getDb } from '@/lib/db';
 import { librarySource } from '@/lib/ldraw/library';
 import { buildMatches } from '@/lib/service/builds';
 import { getModel } from '@/lib/service/models';
+import { setInstructions } from '@/lib/service/instructions';
 import { listMissing, pickCopy } from '@/lib/service/missing';
 import { partout, unpricedLots } from '@/lib/service/partout';
 import { modelAuthor } from '@/lib/ldraw/omr';
@@ -46,7 +47,7 @@ async function Content({ params, searchParams }: Pick<PageProps<'/sets/[setNo]'>
   const cond = copy ? (copyGuide(copy) === 'N' ? 'New' : 'Used') : null;
   const [parts, prices, currency, locations, all, model, alternates, missing] = await Promise.all([listSetParts(db, s.id), priceHistory(db, s.setNo), getCurrency(db), listLocations(db), listSets(db, { collectionId: readable(access) }), getModel(db, s.id), buildMatches(db, { sourceSetNo: s.setNo, collectionId: readable(access) }), listMissing(db, s.id, copy?.id ?? null)]);
   const [po, unpriced, sources, guides] = await Promise.all([partout(db, s.id, cond, currency, copy?.id ?? null), unpricedLots(db, s.id, cond, currency), valueSourcesFor(db, 'set', s.setNo, currency), brickLinkGuides(db, 'set', s.setNo, currency)]);
-  const [collections, scope] = await Promise.all([listCollections(db), currentCollection()]);
+  const [collections, scope, instructions] = await Promise.all([listCollections(db), currentCollection(), setInstructions(s.setNo)]);
   const main = setGuide(s.copies); // the guide the set's lookups use; the other one is fetched weekly
   const inUse = all.flatMap((x) => x.copies.map((c) => c.location)).filter((l): l is string => !!l);
   return (
@@ -72,6 +73,7 @@ async function Content({ params, searchParams }: Pick<PageProps<'/sets/[setNo]'>
       partout={po.lots ? { ...po, unpriced } : null}
       partsPriced={!!brickPartPrice()}
       sources={sources}
+      instructions={instructions}
     />
   );
 }

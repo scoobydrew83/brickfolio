@@ -63,7 +63,7 @@ type BaseRow = { [K in keyof typeof columns]: K extends 'hasModel' | 'missingMar
 const copyColumns = {
   id: setCopies.id, setId: setCopies.setId, collectionId: setCopies.collectionId, status: setCopies.status, condition: setCopies.condition,
   missingPct: setCopies.missingPct, location: setCopies.location, acquiredDate: setCopies.acquiredDate, buildDate: setCopies.buildDate,
-  pricePaid: setCopies.pricePaid, tax: setCopies.tax, shipping: setCopies.shipping, gwp: setCopies.gwp, estValue: setCopies.estValue,
+  pricePaid: setCopies.pricePaid, paidAmount: setCopies.paidAmount, paidCurrency: setCopies.paidCurrency, tax: setCopies.tax, shipping: setCopies.shipping, gwp: setCopies.gwp, estValue: setCopies.estValue,
   estGuide: setCopies.estGuide, notes: setCopies.notes,
   missingMarked: sql<number>`(select coalesce(sum(mp."qty"), 0) from "set_missing_parts" mp where mp."copy_id" = "set_copies"."id")`,
 };

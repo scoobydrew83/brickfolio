@@ -19,6 +19,7 @@ import { MobileMenu } from './MobileMenu';
 import { CommandPaletteMount } from './CommandPaletteMount';
 import { authMode } from '@/lib/auth';
 import { ImpersonationBar } from './ImpersonationBar';
+import { DbCheck } from './DbCheck';
 
 /** Shell shared by every page: brand, page links, theme toggle. */
 export function AppShell({ children }: { children: React.ReactNode }) {
@@ -48,6 +49,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <Suspense fallback={<MobileMenu />}><NavWithAlerts variant="menu" /></Suspense>
         </div>
       </header>
+      <Suspense fallback={null}><DbCheck /></Suspense>
       <Suspense fallback={null}><ImpersonationBar /></Suspense>
       <Suspense fallback={null}><DemoNotice /></Suspense>
       <main className="mx-auto w-full max-w-7xl flex-1 px-4 pt-6 pb-10 sm:px-6">{children}</main>
@@ -57,7 +59,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
 /** The nav (header row from 640px, or the phone menu) with the count of wishlist sets under target. Never blocks or breaks the page. */
 async function NavWithAlerts({ variant = 'top' }: { variant?: 'top' | 'menu' }) {
-  const user = await currentUser();
+  const user = await currentUser().catch(() => null); // a broken database must not take the header down (DbCheck explains it)
   const alerts = user ? await getDb().then(underTargetCount).catch(() => 0) : 0;
   // Only the stored answer: the nav never waits on GitHub.
   const access = user ? await currentAccess().catch(() => null) : null;
@@ -74,12 +76,12 @@ async function NavWithAlerts({ variant = 'top' }: { variant?: 'top' | 'menu' }) 
 /** The collection switcher (#49), only once there are two or more collections. Never breaks the page. */
 async function Switcher() {
   await connection();
-  const access = await currentAccess();
+  const access = await currentAccess().catch(() => null);
   if (!access) return null;
   // Only the collections this person can see (#50); "All" means all of those.
   const collections = (await getDb().then(listCollections).catch(() => [])).filter((c) => access.admin || access.roles.has(c.id));
   if (collections.length < 2) return null;
-  const sel = await currentSelection();
+  const sel = await currentSelection().catch(() => 'all' as const);
   return <CollectionSwitcher collections={collections} current={sel !== 'all' && collections.some((c) => c.id === sel) ? sel : 'all'} />;
 }
 

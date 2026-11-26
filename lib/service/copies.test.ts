@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { eq } from 'drizzle-orm';
 import type { Lookup } from '../bricklink/client';
 import { openNodeDb } from '../db/node';
-import { priceObservations } from '../db/schema';
+import { priceObservations, settings as settingsTable } from '../db/schema';
 import { recordPrice } from './prices';
 import type { DB } from '../db/types';
 import { addCopy, editCopy, ownedSummary, removeCopy, repriceCopies } from './copies';
@@ -106,5 +106,36 @@ describe('copies', () => {
     expect(await svc.deleteLocation(db, 'Storage')).toMatchObject({ ok: false, error: '2 copies still use Storage. Move them first.' });
     expect(await svc.renameLocation(db, 'Storage', 'Vault')).toEqual({ ok: true });
     expect((await get()).copies.map((c) => c.location)).toEqual(['Vault', 'Vault', 'Display']);
+  });
+});
+
+describe('prices paid in another currency', () => {
+  // The ECB rate kept from an earlier lookup, so these tests make no network call.
+  const keepRate = (date: string, rate: number) => db.insert(settingsTable).values({ key: `fx:${date}:EUR:USD`, value: `${rate}|${date}` }).run();
+  const copy = async (id: number) => (await get()).copies.find((c) => c.id === id)!;
+
+  it('converts at the acquired date’s rate, keeps what was typed, and clears it when the price is in the collection currency', async () => {
+    await svc.addSet(db, { setNo: '10280-1', name: 'Flower Bouquet', condition: 'Used' }, { lookup });
+    await keepRate('2026-01-10', 1.1);
+    await keepRate('2026-03-02', 1.2);
+    const r = await addCopy(db, '10280-1', { status: 'sealed', pricePaid: 80, paidCurrency: 'EUR', acquiredDate: '2026-01-10' });
+    if (!r.ok) throw new Error(r.error);
+    expect(await copy(r.copyId)).toMatchObject({ pricePaid: 88, paidAmount: 80, paidCurrency: 'EUR' });
+    // A new acquired date converts the same 80 EUR at that day's rate.
+    await editCopy(db, r.copyId, { acquiredDate: '2026-03-02' });
+    expect(await copy(r.copyId)).toMatchObject({ pricePaid: 96, paidAmount: 80, paidCurrency: 'EUR' });
+    // A price with no currency (e.g. from the API) is in the collection currency.
+    await editCopy(db, r.copyId, { pricePaid: 70 });
+    expect(await copy(r.copyId)).toMatchObject({ pricePaid: 70, paidAmount: null, paidCurrency: null });
+    await editCopy(db, r.copyId, { pricePaid: 50, paidCurrency: 'USD' });
+    expect(await copy(r.copyId)).toMatchObject({ pricePaid: 50, paidAmount: null, paidCurrency: null });
+  });
+
+  it('refuses to save when there is no rate, instead of keeping an unconverted price', async () => {
+    await svc.addSet(db, { setNo: '10280-1', name: 'Flower Bouquet', condition: 'Used' }, { lookup });
+    const r = await addCopy(db, '10280-1', { pricePaid: 80, paidCurrency: 'ARS', acquiredDate: '2026-01-10' });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toMatch(/No exchange rate for ARS/);
+    expect((await get()).copies).toHaveLength(1);
   });
 });

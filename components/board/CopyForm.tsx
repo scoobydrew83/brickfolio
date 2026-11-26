@@ -1,13 +1,14 @@
 import { CONDITIONS, STATUSES, STATUS_LABEL, type CopyRow } from '@/lib/sets';
-import { Button, DatePicker, Dialog, field } from '../ui';
+import { Button, Combobox, DatePicker, Dialog, field } from '../ui';
+import { FX_CURRENCIES } from '@/lib/currencies';
 import { LocationPicker } from '../LocationPicker';
 
 /** `collections` (#49): shown as a Collection field when there are two or more; `collection` is a new copy's default. */
-type Collections = { collections?: { id: number; name: string }[]; collection?: number };
+type Collections = { collections?: { id: number; name: string }[]; collection?: number; /** The collection currency: prices paid in another one are converted on save. */ currency?: string };
 type Props = { copy: CopyRow | null; title: string; locations: string[]; pending: boolean; onClose: () => void; onSubmit: (form: Record<string, unknown>) => void } & Collections;
 
 /** Add or edit one copy of a set: status, condition, location, dates, what it cost, and notes. */
-export function CopyForm({ copy, title, locations, pending, onClose, onSubmit, collections, collection }: Props) {
+export function CopyForm({ copy, title, locations, pending, onClose, onSubmit, collections, collection, currency }: Props) {
   const footer = (
     <>
       <Button variant="ghost" onClick={onClose}>Cancel</Button>
@@ -25,7 +26,7 @@ export function CopyForm({ copy, title, locations, pending, onClose, onSubmit, c
           onSubmit({ ...f, gwp: f.gwp === 'on' });
         }}
       >
-        <CopyFields copy={copy} locations={locations} collections={collections} collection={collection} />
+        <CopyFields copy={copy} locations={locations} collections={collections} collection={collection} currency={currency} />
         <label className="block text-sm">Notes about this copy
           <textarea name="notes" defaultValue={copy?.notes ?? ''} maxLength={2000} rows={2} className={field} />
         </label>
@@ -38,7 +39,10 @@ export function CopyForm({ copy, title, locations, pending, onClose, onSubmit, c
  * The copy fields, shared by the copy form and the add-a-set form. `withPlace` shows condition, location and
  * Missing % (the add-a-set form has its own).
  */
-export function CopyFields({ copy, locations, withPlace = true, collections = [], collection }: { copy: CopyRow | null; locations: string[]; withPlace?: boolean } & Collections) {
+export function CopyFields({ copy, locations, withPlace = true, collections = [], collection, currency = 'USD' }: { copy: CopyRow | null; locations: string[]; withPlace?: boolean } & Collections) {
+  const foreign = copy?.paidCurrency && copy.paidAmount != null ? { amount: copy.paidAmount, currency: copy.paidCurrency } : null;
+  const fmt = (v: number, c: string) => new Intl.NumberFormat(undefined, { style: 'currency', currency: c }).format(v);
+  const currencies = [currency, ...FX_CURRENCIES.filter((c) => c !== currency)].map((c) => ({ value: c, label: c === currency ? `${c} (collection)` : c }));
   return (
     <div className="grid grid-cols-2 gap-3">
       {collections.length > 1 && (
@@ -83,8 +87,14 @@ export function CopyFields({ copy, locations, withPlace = true, collections = []
         <DatePicker name="buildDate" label="Built" defaultValue={copy?.buildDate ?? ''} />
       </label>
       <label className="block text-sm">Price paid
-        <input name="pricePaid" type="number" min={0} max={1000000} step="0.01" defaultValue={copy?.pricePaid ?? ''} className={field} />
+        <input name="pricePaid" type="number" min={0} max={1000000} step="0.01" defaultValue={foreign?.amount ?? copy?.pricePaid ?? ''} className={field} />
       </label>
+      <label className="block text-sm">Paid in
+        <Combobox name="paidCurrency" label="Paid in" defaultValue={foreign?.currency ?? currency} options={currencies} />
+      </label>
+      {foreign && copy?.pricePaid != null && (
+        <p className="col-span-2 -mt-1 text-xs text-fg-3">{fmt(foreign.amount, foreign.currency)} is {fmt(copy.pricePaid, currency)} at the ECB rate for the acquired date. Tax and shipping are in {currency}.</p>
+      )}
       <label className="block text-sm">Tax
         <input name="tax" type="number" min={0} max={1000000} step="0.01" defaultValue={copy?.tax ?? ''} className={field} />
       </label>

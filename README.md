@@ -53,7 +53,18 @@ Vercel (with a [Turso](https://turso.tech) database), Render and Railway sign pe
 | [Cloudflare Workers + D1](docs/cloudflare.md) (or the button above) | No server at all (free plan works) | The whole repo | Cloudflare Access |
 | [Vercel, Railway or Render](docs/hosting.md) (or the buttons above) | A hosted app without managing a server | The whole repo | Brickfolio accounts (Better Auth) |
 
-**[docs/install.md](docs/install.md)** has step-by-step instructions for each, including [BrickLink API keys](docs/install.md#get-your-bricklink-api-keys), [Portainer and other Docker GUIs](docs/install.md#portainer-dockge-synology-and-other-docker-guis), [updating](docs/install.md#updating) and [troubleshooting](docs/install.md#troubleshooting).
+**[docs/install.md](docs/install.md)** has step-by-step instructions for each, including [BrickLink API keys](docs/install.md#get-your-bricklink-api-keys), [Portainer and other Docker GUIs](docs/install.md#portainer-dockge-synology-and-other-docker-guis), [updating](docs/upgrading.md) and [troubleshooting](docs/troubleshooting.md).
+
+### Guides
+
+- [Coolify](docs/coolify.md): the single-file compose resource, variables, volumes and image tags
+- [Back up and restore](docs/backup-restore.md): daily backups, restoring, D1 and Turso, testing a restore
+- [Troubleshooting](docs/troubleshooting.md): sync and API messages with their causes and fixes
+- [Alerts](docs/alerts.md): every alert and channel, the JSON payload, n8n and Home Assistant
+- [Upgrading](docs/upgrading.md): each setup, pinning a version, migrations and rolling back
+- [REST API and MCP](docs/api.md): tokens, every route and every MCP tool
+- [Architecture](docs/architecture.md): how the code is laid out, for contributors
+- [FAQ](docs/faq.md): prices, privacy, hosts, Home Assistant and Grafana
 
 The Docker setups pull a ready-made image (`ghcr.io/scoobydrew83/brickfolio`, amd64 and arm64), so you only need the compose files and a `.env` on the server. Quick start on your own computer:
 
@@ -107,8 +118,8 @@ In Sheets, use **File → Download → Comma-separated values** on the Sets, His
 ## Data and backups
 
 - Docker keeps the database at `/data/app.db` in the `data` volume, and writes a copy to `/data/backups` daily (keeps `BACKUP_KEEP`, default 7).
-- Restore by stopping the app and copying a backup over `app.db`.
-- **Settings → About this server** shows the version and whether a newer release is out (a daily check of GitHub's public releases; `UPDATE_CHECK=off` turns it off). See [Updating](docs/install.md#updating).
+- Restore by stopping the app and copying a backup over `app.db`. See [docs/backup-restore.md](docs/backup-restore.md) for the steps, Cloudflare D1 and Turso.
+- **Settings → About this server** shows the version and whether a newer release is out (a daily check of GitHub's public releases; `UPDATE_CHECK=off` turns it off). See [Upgrading](docs/upgrading.md).
 - **Settings → Download all sets as CSV** gives a portable export at any time.
 - Photos for share pages and offline scanning are cached in `/data/images` (R2 on Cloudflare). It can be deleted at any time, or emptied in **Settings → Image cache**; photos are fetched again when needed.
 
@@ -122,7 +133,7 @@ curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/jso
   -d '{"setNo":"10280","name":"Flower Bouquet","condition":"Used"}' https://your-host/api/v1/sets
 ```
 
-The full description is at `/api/v1/openapi.json` (OpenAPI 3.1): sets CRUD, bulk add, lookup, barcode lookup and scanned batches (`/api/v1/barcodes`), parts lists, part-out value, minifigures, the Retirement Radar, Designer Program projects, a valuation PDF (`/api/v1/report.pdf`), wishlist, retailer offers for deal alerts (`/api/v1/prices`), sync, history, locations, store inventory, orders, import and export.
+The full description is at `/api/v1/openapi.json` (OpenAPI 3.1): sets CRUD, bulk add, lookup, barcode lookup and scanned batches (`/api/v1/barcodes`), parts lists, part-out value, minifigures, the Retirement Radar, Designer Program projects, a valuation PDF (`/api/v1/report.pdf`), wishlist, retailer offers for deal alerts (`/api/v1/prices`), sync, history, locations, store inventory, orders, import and export. [docs/api.md](docs/api.md) lists every route.
 
 ## Ask Claude (MCP)
 
@@ -132,7 +143,7 @@ The full description is at `/api/v1/openapi.json` (OpenAPI 3.1): sets CRUD, bulk
 claude mcp add --transport http brickfolio https://your-host/api/mcp --header "Authorization: Bearer $TOKEN"
 ```
 
-See [the install guide](docs/install.md#optional-ask-claude-about-your-collection-mcp) for the tools and how to reach it through Tailscale or Cloudflare Access.
+See [docs/api.md](docs/api.md#mcp) for the tools and how to reach it through Tailscale or Cloudflare Access.
 
 ## Configuration
 
@@ -165,7 +176,7 @@ lib/db/           Drizzle schema and drivers (better-sqlite3 locally, D1 on Clou
 lib/auth.ts       auth modes: none, tailscale, cloudflare-access, plus API tokens
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) and the [Code of Conduct](CODE_OF_CONDUCT.md). The visual design system and roadmap are in [docs/design.md](docs/design.md).
+[docs/architecture.md](docs/architecture.md) explains the folders, databases, sync and permissions. See [CONTRIBUTING.md](CONTRIBUTING.md) and the [Code of Conduct](CODE_OF_CONDUCT.md). The visual design system and roadmap are in [docs/design.md](docs/design.md).
 
 ## Credits
 

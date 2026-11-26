@@ -4,11 +4,28 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-11-26
+
+**Before upgrading, back up your database:** this release adds migration **0037** (two columns on `set_copies`, `ADD COLUMN` only; safe on D1). No new settings. Brickfolio now also calls `api.frankfurter.dev`, only when you save a price paid in another currency.
+
+**Coolify users:** if you still see "Image cache: EACCES: permission denied, mkdir '/app/data'", redeploy so Coolify reads the current `compose.coolify-tailscale.yml`. Adding `IMAGE_CACHE_DIR` in Coolify's Environment Variables tab alone doesn't help with the older file, which doesn't pass it to the app (the 0.21.0 notes said otherwise; corrected below).
+
+Guides for Coolify, backups, troubleshooting, alerts, upgrading, the API, the architecture and common questions; building instruction PDFs on each set's page; plain explanations when the database fails; and prices paid in another currency, converted at the ECB rate.
+
+### Added
+- **Prices paid in another currency:** next to **Price paid**, **Paid in** picks the currency you paid in (the 30 currencies the ECB publishes rates for). On save, Brickfolio converts it to your collection currency at the European Central Bank rate for the copy's acquired date (today without one; a weekend or holiday uses the last working day's rate), from frankfurter.dev (free, no key). Price paid keeps the converted amount, so cost basis and gain work as before; what you typed is kept (`paidAmount`, `paidCurrency`) and the form shows "€80.00 is $88.00 at the ECB rate". Changing the acquired date converts again. Tax and shipping stay in the collection currency. Each date and pair is fetched once and kept in settings. When no rate can be had, the save is refused with the reason, never stored unconverted. The API takes `paidCurrency` on copies (a `pricePaid` without it is in the collection currency), and the CSV export adds `paidAmount` and `paidCurrency` as its last columns. Migration 0037.
+- **Friendlier database errors:** when the database can't be opened or read, every page shows what's wrong in plain words and how to fix it (locked by another process, the data folder isn't writable, the file is missing or damaged, the disk is full, migrations haven't run, the D1 binding or the libSQL/Turso connection), above a page that offers **Retry** and the reference to look for in the server log. The header no longer breaks along with it. `/api/health` adds the kind of problem (`{"ok": false, "problem": "locked"}`), never the error itself. No migration.
+- **Guides:** `docs/coolify.md` (Coolify setup, variables, volumes and image tags), `docs/backup-restore.md` (daily backups, restoring, D1 and Turso, testing a restore), `docs/troubleshooting.md` (sync and API messages with causes and fixes, moved from docs/install.md), `docs/alerts.md` (every alert and channel, the JSON payload, n8n and Home Assistant, moved from docs/install.md), `docs/upgrading.md` (each setup, pinning a version, migrations, rolling back), `docs/api.md` (tokens, every REST route and MCP tool), `docs/architecture.md` (the code for contributors) and `docs/faq.md` (prices, privacy, hosts, Home Assistant and Grafana). README and docs/install.md link them.
+- **Building instructions on the set page:** with a Brickset key, each set's page lists LEGO's instruction PDFs (Brickset `getInstructions2`, which doesn't count against the key's daily limit). Only https links to lego.com or brickset.com are shown. Each server keeps the list for a week (an hour after a failure), and the page waits at most 4 seconds for Brickset, so a slow or missing answer just leaves the section out. No migration.
+
+### Fixed
+- **Corrected advice for the Coolify image cache error:** the 0.21.0 notes suggested adding `IMAGE_CACHE_DIR=/data/images` in Coolify's Environment Variables tab. Coolify passes only the variables a compose file lists, and the compose file before 0.21.0 didn't list it, so that did nothing. Redeploy with the current compose file instead (or add the variable under `app:` → `environment:` in the file). The 0.21.0 entries and docs/coolify.md say so now.
+
 ## [0.21.0] - 2026-11-26
 
 **Before upgrading, back up your database**, as always. This release has no database migrations (the latest is still 0036 from 0.19.0). New settings, all optional: `ALERT_EMAIL_TO`, `ALERT_TELEGRAM_BOT_TOKEN`, `ALERT_TELEGRAM_CHAT_ID`, `ALERT_PUSHOVER_TOKEN`, `ALERT_PUSHOVER_USER`, `ALERT_GOTIFY_URL`, `ALERT_GOTIFY_TOKEN` and `SYNC_ALERT` (see `.env.example` and docs/install.md → Optional: alerts).
 
-**Coolify users:** redeploy so Coolify reads the updated `compose.coolify-tailscale.yml`. If you added `IMAGE_CACHE_DIR=/data/images` as a workaround for the image cache error, you can keep it or remove it.
+**Coolify users:** redeploy so Coolify reads the updated `compose.coolify-tailscale.yml`. Setting `IMAGE_CACHE_DIR` in Coolify's Environment Variables tab doesn't fix the image cache error on its own (corrected in 0.22.0): redeploying with this compose file does.
 
 Fixes the image cache error on Coolify installs ("EACCES: permission denied, mkdir '/app/data'") and names the sets behind failed new/used price lookups. The Sets page filters take several values per group, with a Filters sheet on phones. Alerts can now go to email, Telegram, Pushover and Gotify as well as the webhook, a sync that fails or finishes with problems sends an alert, and Settings → Alerts and sync shows the channels, a test button and the last ten syncs.
 
@@ -22,7 +39,7 @@ Fixes the image cache error on Coolify installs ("EACCES: permission denied, mkd
 
 ### Fixed
 - The Coolify compose file now passes `PRICE_SWING_PCT`, `RETIRE_ALERT_DAYS`, `DESIGNER_ALERT_DAYS`, `OFFER_MAX_AGE_DAYS` and the email settings through (Coolify has no `.env` file, so they were ignored there).
-- **Coolify installs: "Image cache: EACCES: permission denied, mkdir '/app/data'" after every sync.** `compose.coolify-tailscale.yml` had fallen behind `docker-compose.yml` and left out `IMAGE_CACHE`, `IMAGE_CACHE_DIR`, `IMAGE_CACHE_WARM` and `SHARE_BASE_URL`, so photos went to `/app/data`, which the app can't write to. The file has them again, a test fails when it falls behind the other two compose files, and without `IMAGE_CACHE_DIR` the cache now sits in an `images` folder next to the database (`/data/images` on Docker) instead of `./data/images`. Redeploy in Coolify (or add `IMAGE_CACHE_DIR=/data/images` to its environment variables). No migration.
+- **Coolify installs: "Image cache: EACCES: permission denied, mkdir '/app/data'" after every sync.** `compose.coolify-tailscale.yml` had fallen behind `docker-compose.yml` and left out `IMAGE_CACHE`, `IMAGE_CACHE_DIR`, `IMAGE_CACHE_WARM` and `SHARE_BASE_URL`, so photos went to `/app/data`, which the app can't write to. The file has them again, a test fails when it falls behind the other two compose files, and without `IMAGE_CACHE_DIR` the cache now sits in an `images` folder next to the database (`/data/images` on Docker) instead of `./data/images`. Redeploy in Coolify to get the updated compose file. (Corrected in 0.22.0: adding `IMAGE_CACHE_DIR` in Coolify's Environment Variables tab alone doesn't reach the app with the older compose file.) No migration.
 - **"N new/used price lookups failed" now names the sets.** The sync message lists the first two (e.g. `10280 used: BrickLink: …`) and the server log has one line per failed lookup, with BrickLink's reason. No migration.
 
 ## [0.20.0] - 2026-11-25

@@ -27,13 +27,16 @@ const EXPORT_COLS = [
   'setNo', 'copyId', 'name', 'qty', 'status', 'location', 'condition', 'registered', 'missingPct', 'acquiredDate', 'buildDate',
   'pricePaid', 'tax', 'shipping', 'gwp', 'copyNotes', 'notes', 'blName', 'year', 'categoryId', 'imageUrl', 'pieces', 'partLots',
   'avgSold', 'minSold', 'maxSold', 'qtySold', 'estValue', 'blError', 'lastUpdated',
+  // Last, so older importers that read columns by position still line up. Export only: an import's pricePaid is in the collection currency.
+  'paidAmount', 'paidCurrency',
 ] as const;
-type CopyCol = 'copyId' | 'status' | 'location' | 'condition' | 'missingPct' | 'acquiredDate' | 'buildDate' | 'pricePaid' | 'tax' | 'shipping' | 'gwp' | 'copyNotes' | 'estValue';
+type CopyCol = 'copyId' | 'status' | 'location' | 'condition' | 'missingPct' | 'acquiredDate' | 'buildDate' | 'pricePaid' | 'tax' | 'shipping' | 'gwp' | 'copyNotes' | 'estValue' | 'paidAmount' | 'paidCurrency';
 /** One row per copy (qty is always 1). Set fields repeat on each copy's row. */
 export const setsCsv = (rows: SetRow[]) => toCsv([...EXPORT_COLS], rows.flatMap((r) => r.copies.map((c) => {
   const copy: Record<CopyCol, unknown> = {
     copyId: c.id, status: c.status, location: c.location, condition: c.condition, missingPct: c.missingPct, acquiredDate: c.acquiredDate,
     buildDate: c.buildDate, pricePaid: c.pricePaid, tax: c.tax, shipping: c.shipping, gwp: c.gwp, copyNotes: c.notes, estValue: c.estValue,
+    paidAmount: c.paidAmount ?? null, paidCurrency: c.paidCurrency ?? null,
   };
   return EXPORT_COLS.map((k) => (k === 'qty' ? 1 : k in copy ? copy[k as keyof typeof copy] : r[k as keyof SetRow]));
 })));

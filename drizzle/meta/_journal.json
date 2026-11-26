@@ -260,6 +260,13 @@
       "when": 1795352248806,
       "tag": "0036_passkey_two_factor",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "6",
+      "when": 1795703254207,
+      "tag": "0037_copy_paid_currency",
+      "breakpoints": true
     }
   ]
 }
