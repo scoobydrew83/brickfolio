@@ -1,7 +1,7 @@
 'use client';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Boxes, Heart, LayoutGrid, Puzzle, Radar, Receipt, Settings, Store, type LucideIcon } from 'lucide-react';
+import { Boxes, ChartColumn, Heart, LayoutGrid, Puzzle, Radar, Receipt, Settings, Store, type LucideIcon } from 'lucide-react';
 import { Tip } from './ui';
 
 /** Every top-level page: [href, label, icon]. Store and Orders are an admin's BrickLink business (#50). */
@@ -9,6 +9,7 @@ export const LINKS = [
   ['/', 'Sets', Boxes],
   ['/wishlist', 'Wishlist', Heart],
   ['/radar', 'Radar', Radar],
+  ['/insights', 'Insights', ChartColumn],
   ['/parts', 'Parts', Puzzle],
   ['/layouts', 'Layouts', LayoutGrid],
   ['/store', 'Store', Store],

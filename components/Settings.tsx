@@ -1,6 +1,6 @@
 'use client';
-import { useEffect, useState, useTransition } from 'react';
-import { alertsInfo, sendTestAlert, type AlertsInfo, updateStatus, clearImageCache, imageCacheStatus, type ImageCacheStatus, shareCodes, syncCommunityNow, bricksetStatus, downloadLdrawLibrary, ldrawLibraryStatus, rebrickableStatus, syncBricksetNow, syncRebrickableNow, testBricksetKey, testRebrickableKey, type BricksetStatus, type RebrickableStatus, addLocation, addCollection, renameCollection, deleteCollection, reorderCollections, createShareLink, deleteLocation, revokeShareLink, importFile, renameLocation, setCurrency, setValueSource, type Result } from '@/app/actions';
+import { useEffect, useRef, useState, useTransition } from 'react';
+import { previewImport, alertsInfo, sendTestAlert, type AlertsInfo, updateStatus, clearImageCache, imageCacheStatus, type ImageCacheStatus, shareCodes, syncCommunityNow, bricksetStatus, downloadLdrawLibrary, ldrawLibraryStatus, rebrickableStatus, syncBricksetNow, syncRebrickableNow, testBricksetKey, testRebrickableKey, type BricksetStatus, type RebrickableStatus, addLocation, addCollection, renameCollection, deleteCollection, reorderCollections, createShareLink, deleteLocation, revokeShareLink, importFile, renameLocation, setCurrency, setValueSource, type Result } from '@/app/actions';
 import { Copy } from 'lucide-react';
 import { Banner, Button, Confirm, DatePicker, Select, field, toast } from './ui';
 import { PageHeader } from './shell/PageHeader';
@@ -99,10 +99,10 @@ export default function Settings({ people, me, envAdmins, passwords, invitations
           Upload a Sets, History or Parts CSV. Columns from the original Google Sheet (&quot;Lego #&quot;, &quot;Set Name&quot;, …) work as-is:
           in Sheets use File → Download → CSV for each tab, and import Sets before Parts. Sets already here are updated by set number.
         </p>
-        <form className="flex flex-wrap gap-2" onSubmit={(e) => { e.preventDefault(); const f = e.currentTarget; const data = new FormData(f); run(() => importFile(data), 'Imported.', () => f.reset()); }}>
-          <input name="file" type="file" accept=".csv,text/csv" required className="min-w-0 max-w-full text-sm file:mr-3 file:rounded-control file:border file:border-line-strong file:bg-surface file:px-3 file:py-1.5 file:text-fg" />
-          <Button type="submit" disabled={pending}>{pending ? 'Importing…' : 'Import'}</Button>
-        </form>
+        <p className="text-sm text-fg-3">
+          A collection from <b className="font-semibold text-fg-2">Rebrickable</b> (a set list exported as CSV), <b className="font-semibold text-fg-2">Brickset</b> (My sets → Export) or <b className="font-semibold text-fg-2">BrickEconomy</b> (My collection → Export) works too: you see what it will add before anything is saved.
+        </p>
+        <ImportForm pending={pending} run={run} />
         {collections.length > 1 ? (
           <form action="/api/v1/export.csv" method="get" className="flex flex-wrap items-center gap-2 text-sm">
             <select name="collection" defaultValue="all" aria-label="Collection to export" className={`${field} mt-0 w-auto`}>
@@ -539,6 +539,53 @@ function ImageCacheSection() {
         </>
       )}
     </section>
+  );
+}
+
+type ImportSummary = NonNullable<Extract<Awaited<ReturnType<typeof previewImport>>, { ok: true }>['summary']>;
+
+/** Upload a CSV. Files from Rebrickable, Brickset and BrickEconomy are previewed first; others import straight away. */
+function ImportForm({ pending, run }: { pending: boolean; run: (fn: () => Promise<Result & { message?: string }>, okText: string, after?: (r: Result) => void) => void }) {
+  const [preview, setPreview] = useState<{ data: FormData; summary: ImportSummary } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [checking, startCheck] = useTransition();
+  const form = useRef<HTMLFormElement>(null);
+  const done = () => { setPreview(null); form.current?.reset(); };
+  const submit = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const data = new FormData(e.currentTarget);
+    setError(null);
+    startCheck(async () => {
+      const r = await previewImport(data);
+      if (!r.ok) return setError(r.error);
+      if (r.summary) return setPreview({ data, summary: r.summary });
+      run(() => importFile(data), 'Imported.', done);
+    });
+  };
+  const s = preview?.summary;
+  return (
+    <div className="space-y-3">
+      <form ref={form} className="flex flex-wrap gap-2" onSubmit={submit}>
+        <input name="file" type="file" accept=".csv,text/csv" required onChange={() => setPreview(null)} className="min-w-0 max-w-full text-sm file:mr-3 file:rounded-control file:border file:border-line-strong file:bg-surface file:px-3 file:py-1.5 file:text-fg" />
+        <Button type="submit" disabled={pending || checking}>{checking ? 'Reading…' : pending ? 'Importing…' : 'Import'}</Button>
+      </form>
+      {error && <Banner kind="error">{error}</Banner>}
+      {s && (
+        <div role="status" className="space-y-2 rounded-card border border-line bg-surface p-4 text-sm">
+          <p className="font-semibold">{s.label}: {s.copies} cop{s.copies === 1 ? 'y' : 'ies'} of {s.newSets + s.existingSets} set{s.newSets + s.existingSets === 1 ? '' : 's'}</p>
+          <ul className="list-disc space-y-0.5 pl-5 text-fg-2">
+            {s.newSets > 0 && <li>{s.newSets} new set{s.newSets === 1 ? '' : 's'}, looked up on BrickLink at the next sync.</li>}
+            {s.existingSets > 0 && <li>{s.existingSets} set{s.existingSets === 1 ? '' : 's'} you already have get{s.existingSets === 1 ? 's' : ''} more copies. Importing the same file twice adds them twice.</li>}
+            {s.format !== 'brickeconomy' && <li>{s.format === 'rebrickable' ? 'Rebrickable lists have no condition, so copies are added as Used (built).' : 'Copies without a new/used split are added as Used (built).'} You can change them after.</li>}
+            {s.skipped.length > 0 && <li>Skipping {s.skipped.length} row{s.skipped.length === 1 ? '' : 's'}: {s.skipped.slice(0, 5).map((k) => `row ${k.row} (${k.reason})`).join(', ')}{s.skipped.length > 5 ? ', …' : ''}.</li>}
+          </ul>
+          <div className="flex gap-2">
+            <Button variant="primary" loading={pending} disabled={!s.copies} onClick={() => run(() => importFile(preview!.data), 'Imported.', done)}>Import {s.copies} cop{s.copies === 1 ? 'y' : 'ies'}</Button>
+            <Button variant="ghost" onClick={done}>Cancel</Button>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 

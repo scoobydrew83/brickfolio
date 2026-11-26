@@ -29,7 +29,8 @@ import { APIError, createAuthEndpoint, createAuthMiddleware, getSessionFromCtx, 
 import { deleteSessionCookie, setSessionCookie } from 'better-auth/cookies';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { nextCookies } from 'better-auth/next-js';
-import { admin, magicLink, organization, twoFactor } from 'better-auth/plugins';
+import { admin, jwt, magicLink, organization, twoFactor } from 'better-auth/plugins';
+import { oauthProvider } from '@better-auth/oauth-provider';
 import { revokeUnprovenAccountAccess } from 'better-auth/db';
 import { apiKey } from '@better-auth/api-key';
 import { passkey } from '@better-auth/passkey';
@@ -38,7 +39,7 @@ import { ac, roles } from './auth-ac';
 import { allowed } from './auth';
 import { emailConfigured, sendAuthEmail } from './email';
 import { hashPassword, verifyPassword } from './password';
-import { authAccount, authApiKey, authInvitation, authMember, authOrganization, authPasskey, authSession, authTwoFactor, authUser, authVerification } from './db/schema';
+import { authAccount, authApiKey, authInvitation, authJwks, authMember, authOAuthAccessToken, authOAuthClient, authOAuthClientAssertion, authOAuthClientResource, authOAuthConsent, authOAuthRefreshToken, authOAuthResource, authOrganization, authPasskey, authSession, authTwoFactor, authUser, authVerification } from './db/schema';
 import type { DB } from './db/types';
 import * as perm from './service/permissions';
 import { magicLinkTwoFactor } from './magic-link-2fa';
@@ -51,7 +52,14 @@ export const authSchema = {
   user: authUser, session: authSession, account: authAccount, verification: authVerification,
   organization: authOrganization, member: authMember, invitation: authInvitation, apikey: authApiKey,
   passkey: authPasskey, twoFactor: authTwoFactor,
+  oauthClient: authOAuthClient, oauthResource: authOAuthResource, oauthClientResource: authOAuthClientResource,
+  oauthRefreshToken: authOAuthRefreshToken, oauthAccessToken: authOAuthAccessToken, oauthConsent: authOAuthConsent,
+  oauthClientAssertion: authOAuthClientAssertion, jwks: authJwks,
 };
+
+/** OAuth for MCP clients: the MCP endpoint is the one resource tokens are issued for (their audience). */
+export const MCP_SCOPES = ['mcp:read', 'mcp:write'] as const;
+export const mcpResource = (env: Record<string, string | undefined> = process.env) => `${(env.BETTER_AUTH_URL ?? '').replace(/\/+$/, '')}/api/mcp`;
 
 /**
  * Whether a new account may sign up (the first one always may). Others must prove they own the address, so sign-up
@@ -248,6 +256,8 @@ export function authOptions(db: DB) {
     appName: 'Brickfolio',
     secret: process.env.BETTER_AUTH_SECRET,
     baseURL: process.env.BETTER_AUTH_URL,
+    // The jwt plugin's own /token isn't used: OAuth access tokens come from /oauth2/token.
+    disabledPaths: ['/token'],
     database: drizzleAdapter(db as never, { provider: 'sqlite', schema: authSchema }),
     emailAndPassword: {
       enabled: true, minPasswordLength: MIN_PASSWORD, revokeSessionsOnPasswordReset: true,
@@ -408,6 +418,20 @@ export function authOptions(db: DB) {
       passkey(passkeyOptions(db)),
       // TOTP (authenticator apps) and backup codes, kept as one encrypted value per person. No SMS or email codes.
       twoFactor({ issuer: 'Brickfolio' }),
+      // OAuth 2.1 for MCP clients (Claude and others): authorization code + PKCE, dynamic registration for public
+      // clients, a consent page, and short-lived JWT access tokens bound to /api/mcp, checked there in-process
+      // (app/api/mcp/route.ts). Refresh tokens only with offline_access. The signing keys live in the jwks table.
+      jwt({ disableSettingJwtHeader: true }),
+      oauthProvider({
+        loginPage: '/sign-in', consentPage: '/oauth/consent',
+        scopes: ['openid', 'profile', 'email', 'offline_access', ...MCP_SCOPES],
+        resources: [{ identifier: mcpResource(), name: 'Brickfolio MCP' }],
+        clientRegistrationDefaultResources: [mcpResource()],
+        allowDynamicClientRegistration: true, allowUnauthenticatedClientRegistration: true,
+        clientRegistrationDefaultApplicationType: 'infer',
+        resourceSeedScope: 'process',
+        accessTokenExpiresIn: 60 * 60, // JWTs can't be revoked early, so an hour at most
+      }),
       nextCookies(), // must be last: lets server actions set the session cookie
     ],
   } satisfies BetterAuthOptions;

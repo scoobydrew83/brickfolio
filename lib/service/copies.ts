@@ -1,11 +1,11 @@
 // Copies of a set: each physical box or build, with its own status, condition, location, cost basis and value.
 // The set row (lib/service/sets.ts) holds the catalog data and the fetched prices; copies hold everything per box.
 import { collectionExists, scopeIds, targetCollection, type ReadScope } from './collections';
-import { and, eq, inArray, ne, sql } from 'drizzle-orm';
+import { and, eq, inArray, notInArray, sql } from 'drizzle-orm';
 import type { Lookup } from '../bricklink/client';
 import { setCopies, sets } from '../db/schema';
 import type { DB } from '../db/types';
-import { copyGuide, displayNo, estValue, setGuide, type CopyInput, type CopyRow, type SetRow } from '../sets';
+import { copyGuide, displayNo, isActive, estValue, setGuide, type CopyInput, type CopyRow, type SetRow } from '../sets';
 import { copiesBySet, getCurrency, getSet, lookupInto, today, type Result } from './sets';
 import { hasMissing } from './missing';
 import { partOutCopy, unPartCopy } from './lots';
@@ -68,6 +68,8 @@ export async function insertCopies(db: DB, setId: number, input: CopyInput, n: n
     setId, status, collectionId: col.id, condition: status === 'sealed' ? 'New' as const : (c.condition ?? 'Used'), missingPct: c.missingPct ?? null, location: c.location ?? null,
     acquiredDate: c.acquiredDate ?? null, buildDate: c.buildDate ?? null, pricePaid: c.gwp ? 0 : (c.pricePaid ?? null), paidAmount: c.gwp ? null : (c.paidAmount ?? null), paidCurrency: c.gwp ? null : (c.paidCurrency ?? null), tax: c.tax ?? null,
     shipping: c.shipping ?? null, gwp: c.gwp ?? false, notes: c.notes ?? null,
+    soldDate: c.soldDate ?? (status === 'sold' ? today() : null), salePrice: c.salePrice ?? null, saleFees: c.saleFees ?? null, soldVia: c.soldVia ?? null,
+    hasBox: c.hasBox ?? null, hasInstructions: c.hasInstructions ?? null, stickers: c.stickers ?? null, boughtFrom: c.boughtFrom ?? null,
   };
   const ids = await db.insert(setCopies).values(Array.from({ length: n }, () => row)).returning({ id: setCopies.id }).all();
   return ids.map((r) => r.id);
@@ -170,6 +172,7 @@ export async function editCopy(db: DB, copyId: number, input: CopyInput, lookup:
     fields.condition = 'New';
   }
   if (fields.gwp) fields.pricePaid = 0;
+  if (after.status === 'sold' && !after.soldDate) fields.soldDate = today(); // marked sold: today unless a date was given
   if (fields.collectionId !== undefined && !(await collectionExists(db, fields.collectionId))) return { ok: false, status: 400, error: `Collection ${fields.collectionId} doesn't exist.` };
   // A copy parted out becomes loose-part lots; put back together, its lots go (refused if they were changed or reserved).
   const partingOut = after.status === 'parted_out' && c.status !== 'parted_out';
@@ -197,7 +200,7 @@ export async function removeCopy(db: DB, copyId: number): Promise<Result<{ remai
   }
   await touch(db, c.setId);
   await repriceCopies(db, c.setId);
-  return { ok: true, remaining: left.filter((x) => x.status !== 'parted_out').length, setNo: c.setNo };
+  return { ok: true, remaining: left.filter(isActive).length, setNo: c.setNo };
 }
 
 const touch = (db: DB, setId: number) => db.update(sets).set({ updatedAt: nowIso() }).where(eq(sets.id, setId));
@@ -219,7 +222,7 @@ export async function ownedSummary(db: DB, nos?: string[], scope: ReadScope = 'a
   const q = db.select({ setNo: sets.setNo, name: sets.name, status: setCopies.status, condition: setCopies.condition, location: setCopies.location })
     .from(setCopies).innerJoin(sets, eq(sets.id, setCopies.setId));
   const inScope = ids ? inArray(sql`coalesce(${setCopies.collectionId}, 1)`, ids) : undefined;
-  const rows = await (nos ? q.where(and(inArray(sets.setNo, nos), ne(setCopies.status, 'parted_out'), inScope)) : q.where(and(ne(setCopies.status, 'parted_out'), inScope))).all();
+  const rows = await (nos ? q.where(and(inArray(sets.setNo, nos), notInArray(setCopies.status, ['parted_out', 'sold']), inScope)) : q.where(and(notInArray(setCopies.status, ['parted_out', 'sold']), inScope))).all();
   const out = new Map<string, { qty: number; condition: CopyRow['condition'] | null; location: string | null; name: string }>();
   for (const r of rows) {
     const o = out.get(r.setNo);

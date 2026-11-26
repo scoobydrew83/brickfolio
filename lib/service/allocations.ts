@@ -23,7 +23,7 @@ export async function ownedParts(db: DB, scope: ReadScope = 'all'): Promise<Map<
   if (ids && !ids.length) return new Map();
   const inScope = ids ? sql` and coalesce(c."collection_id", 1) in (${sql.join(ids.map((i) => sql`${i}`), sql`, `)})` : sql``;
   const rows = await db
-    .select({ partNo: setParts.partNo, colorId: setParts.colorId, n: sql<number>`sum(${setParts.qty} * (select count(*) from "set_copies" c where c."set_id" = ${sets.id} and c."status" <> 'parted_out'${inScope}))` })
+    .select({ partNo: setParts.partNo, colorId: setParts.colorId, n: sql<number>`sum(${setParts.qty} * (select count(*) from "set_copies" c where c."set_id" = ${sets.id} and c."status" not in ('parted_out', 'sold')${inScope}))` })
     .from(setParts).innerJoin(sets, eq(sets.id, setParts.setId))
     .where(and(eq(setParts.alternate, false), eq(setParts.counterpart, false), eq(setParts.mapped, true))) // Rebrickable numbers with no BrickLink match can't match a build
     .groupBy(setParts.partNo, setParts.colorId).all();

@@ -8,6 +8,7 @@ import { Check, CircleHelp, CloudUpload, Heart, Keyboard, ListChecks, Minus, Per
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import { forgetScan } from '@/app/actions';
 import { createRepeatGuard, parseBarcode, type Barcode } from '@/lib/barcode/gtin';
+import { createWedgeBuffer } from '@/lib/barcode/wedge';
 import type { BarcodeCapabilities } from '@/lib/barcode/providers';
 import type { Resolution, ScanCandidate } from '@/lib/barcode/resolve';
 import type { OcrPaths } from '@/lib/barcode/ocr';
@@ -162,6 +163,26 @@ export default function ScanView({ locations, caps, demo, series, ocr }: Props) 
     return null;
   };
 
+  // USB / Bluetooth scanners type the digits and press Enter (lib/barcode/wedge.ts): take those anywhere on the page,
+  // except while a field has focus (the field gets the keys, as typed) or in minifigure mode.
+  const typedRef = useRef(typedBarcode);
+  useEffect(() => { typedRef.current = typedBarcode; });
+  useEffect(() => {
+    if (mode === 'minifig') return;
+    const wedge = createWedgeBuffer();
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null;
+      if (e.ctrlKey || e.metaKey || e.altKey || el?.closest('input, textarea, select, [contenteditable="true"], dialog[open]')) return wedge.reset();
+      const code = wedge.key(e.key, e.timeStamp || performance.now());
+      if (!code) return;
+      e.preventDefault();
+      const error = typedRef.current(code);
+      if (error) setMessage({ kind: 'error', text: `Scanner read ${code}: ${error}` });
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [mode]);
+
   const typedSet = (no: string, then: (c: ScanCandidate) => void) => startTransition(async () => {
     const r = await net.describe(no);
     if (!r.ok) return setMessage({ kind: 'error', text: r.error });
@@ -258,6 +279,7 @@ export default function ScanView({ locations, caps, demo, series, ocr }: Props) 
           <div className="flex flex-wrap items-center gap-2">
             {mode !== 'minifig' && <Button variant="ghost" size="sm" icon={ScanText} loading={ocrState.reading} onClick={readNumber}>Read the set number</Button>}
             {mode !== 'minifig' && <Button variant="ghost" size="sm" icon={Keyboard} aria-expanded={manual} onClick={() => setManual(!manual)}>Type it</Button>}
+            {mode !== 'minifig' && <span className="hidden text-xs text-fg-3 sm:inline">A USB or Bluetooth scanner works too: just scan.</span>}
             <span className="flex-1" />
             <IconButton icon={prefs.sound ? Volume2 : VolumeX} label={prefs.sound ? 'Beep on scan: on' : 'Beep on scan: off'} aria-pressed={prefs.sound} onClick={() => savePrefs({ ...prefs, sound: !prefs.sound })} />
             <IconButton icon={Vibrate} label={prefs.vibrate ? 'Vibrate on scan: on' : 'Vibrate on scan: off'} aria-pressed={prefs.vibrate} className={prefs.vibrate ? '' : 'opacity-40'} onClick={() => savePrefs({ ...prefs, vibrate: !prefs.vibrate })} />

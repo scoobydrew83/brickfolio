@@ -1,10 +1,11 @@
 // CSV import/export. Import understands the old Google Sheet's columns ("Lego #", "Set Name", …) and this
 // app's own export, so moving from the sheet is: File → Download → CSV for each tab, then upload in Settings.
 import { and, eq, sql } from 'drizzle-orm';
+import { applyCollection, detectCollection, planCollection, type CollectionSummary } from './collection-import';
 import type { SetPart } from '../bricklink/client';
 import { history, locations, setCopies, sets } from '../db/schema';
 import type { DB } from '../db/types';
-import { CONDITIONS, STATUSES, setNo, type Condition, type CopyStatus, type SetRow } from '../sets';
+import { CONDITIONS, STATUSES, STICKERS, isActive, setNo, type Stickers, type Condition, type CopyStatus, type SetRow } from '../sets';
 import { insertCopies, listCopies, repriceCopies } from './copies';
 import { replaceParts } from './parts';
 import type { Result } from './sets';
@@ -29,14 +30,18 @@ const EXPORT_COLS = [
   'avgSold', 'minSold', 'maxSold', 'qtySold', 'estValue', 'blError', 'lastUpdated',
   // Last, so older importers that read columns by position still line up. Export only: an import's pricePaid is in the collection currency.
   'paidAmount', 'paidCurrency',
+  'soldDate', 'salePrice', 'saleFees', 'soldVia', 'hasBox', 'hasInstructions', 'stickers', 'boughtFrom',
 ] as const;
-type CopyCol = 'copyId' | 'status' | 'location' | 'condition' | 'missingPct' | 'acquiredDate' | 'buildDate' | 'pricePaid' | 'tax' | 'shipping' | 'gwp' | 'copyNotes' | 'estValue' | 'paidAmount' | 'paidCurrency';
+type CopyCol = 'copyId' | 'status' | 'location' | 'condition' | 'missingPct' | 'acquiredDate' | 'buildDate' | 'pricePaid' | 'tax' | 'shipping' | 'gwp' | 'copyNotes' | 'estValue' | 'paidAmount' | 'paidCurrency'
+  | 'soldDate' | 'salePrice' | 'saleFees' | 'soldVia' | 'hasBox' | 'hasInstructions' | 'stickers' | 'boughtFrom';
 /** One row per copy (qty is always 1). Set fields repeat on each copy's row. */
 export const setsCsv = (rows: SetRow[]) => toCsv([...EXPORT_COLS], rows.flatMap((r) => r.copies.map((c) => {
   const copy: Record<CopyCol, unknown> = {
     copyId: c.id, status: c.status, location: c.location, condition: c.condition, missingPct: c.missingPct, acquiredDate: c.acquiredDate,
     buildDate: c.buildDate, pricePaid: c.pricePaid, tax: c.tax, shipping: c.shipping, gwp: c.gwp, copyNotes: c.notes, estValue: c.estValue,
     paidAmount: c.paidAmount ?? null, paidCurrency: c.paidCurrency ?? null,
+    soldDate: c.soldDate ?? null, salePrice: c.salePrice ?? null, saleFees: c.saleFees ?? null, soldVia: c.soldVia ?? null,
+    hasBox: c.hasBox ?? null, hasInstructions: c.hasInstructions ?? null, stickers: c.stickers ?? null, boughtFrom: c.boughtFrom ?? null,
   };
   return EXPORT_COLS.map((k) => (k === 'qty' ? 1 : k in copy ? copy[k as keyof typeof copy] : r[k as keyof SetRow]));
 })));
@@ -52,6 +57,9 @@ const ALIASES: Record<string, string> = {
   pieces: 'pieces', qty: 'qty', notes: 'notes', date: 'date', sets: 'sets', copies: 'copies',
   copyid: 'copyId', status: 'status', acquireddate: 'acquiredDate', 'acquired date': 'acquiredDate', builddate: 'buildDate', 'build date': 'buildDate',
   pricepaid: 'pricePaid', 'price paid': 'pricePaid', tax: 'tax', shipping: 'shipping', gwp: 'gwp', copynotes: 'copyNotes', 'copy notes': 'copyNotes',
+  solddate: 'soldDate', 'sold date': 'soldDate', saleprice: 'salePrice', 'sale price': 'salePrice', salefees: 'saleFees', 'sale fees': 'saleFees',
+  soldvia: 'soldVia', 'sold via': 'soldVia', hasbox: 'hasBox', box: 'hasBox', hasinstructions: 'hasInstructions', instructions: 'hasInstructions',
+  stickers: 'stickers', boughtfrom: 'boughtFrom', 'bought from': 'boughtFrom',
   // Parts tab
   'set no': 'partSet', 'part no': 'partNo', partno: 'partNo', 'part name': 'partName', type: 'type', 'color id': 'colorId',
   colorid: 'colorId', extra: 'extra', alternate: 'alternate', counterpart: 'counterpart', 'match no': 'matchNo', matchno: 'matchNo',
@@ -76,9 +84,16 @@ const bool = (v: string | undefined) => /^(true|yes|1)$/i.test((v ?? '').trim())
  * Imports a Sets, History or Parts CSV (detected from the header). Existing sets are updated by set number;
  * a Parts CSV replaces the parts lists of the sets it mentions and skips sets that aren't in the collection.
  */
-export async function importCsv(db: DB, text: string): Promise<Result<{ kind: 'sets' | 'history' | 'parts'; count: number; skipped?: number }>> {
+export async function importCsv(db: DB, text: string, opts: { dryRun?: boolean; collectionId?: number } = {}): Promise<Result<{ kind: 'sets' | 'history' | 'parts' | 'collection'; count: number; skipped?: number; summary?: CollectionSummary }>> {
   const [head, ...body] = parseCsv(text.replace(/^﻿/, ''));
   if (!head) return { ok: false, status: 400, error: 'The file is empty.' };
+  // A collection exported from Rebrickable, Brickset or BrickEconomy (lib/service/collection-import.ts).
+  const format = detectCollection(head);
+  if (format) {
+    const r = await applyCollection(db, planCollection(format, head, body.map((row) => row.map((c) => unguard(c)))), opts);
+    return r.ok ? { ok: true, kind: 'collection', count: r.summary.copies, summary: r.summary } : r;
+  }
+  if (opts.dryRun) return { ok: false, status: 400, error: 'A preview is only made for Rebrickable, Brickset and BrickEconomy files.' };
   const keys = head.map((h) => ALIASES[h.trim().toLowerCase()] ?? '');
   const rows = body.map((r) => Object.fromEntries(keys.map((k, i) => [k, r[i] === undefined ? r[i] : unguard(r[i])]).filter(([k]) => k)) as Record<string, string>);
 
@@ -144,6 +159,9 @@ export async function importCsv(db: DB, text: string): Promise<Result<{ kind: 's
       const c = {
         status, condition: status === 'sealed' ? 'New' as const : (condition ?? 'Used'), location, missingPct, acquiredDate: date(r.acquiredDate), buildDate: date(r.buildDate),
         pricePaid: gwp ? 0 : money(r.pricePaid), tax: money(r.tax), shipping: money(r.shipping), gwp, notes: t(r.copyNotes),
+        soldDate: date(r.soldDate), salePrice: money(r.salePrice), saleFees: money(r.saleFees), soldVia: t(r.soldVia),
+        hasBox: t(r.hasBox) == null ? null : bool(r.hasBox), hasInstructions: t(r.hasInstructions) == null ? null : bool(r.hasInstructions),
+        stickers: (STICKERS as readonly string[]).includes(t(r.stickers) ?? '') ? (t(r.stickers) as Stickers) : null, boughtFrom: t(r.boughtFrom),
       };
       const id = n(r.copyId);
       const updated = id === null ? [] : await db.update(setCopies).set({ ...c, estValue: n(r.estValue), updatedAt: new Date().toISOString() })
@@ -156,7 +174,7 @@ export async function importCsv(db: DB, text: string): Promise<Result<{ kind: 's
       // Sheet format: `qty` copies, all with this row's condition, location and Missing % (New → sealed, as in the migration).
       const qty = Math.max(1, Math.round(n(r.qty) ?? 1));
       const c = { status: (condition === 'New' ? 'sealed' : 'built') as CopyStatus, condition: condition ?? 'Used' as const, location, missingPct };
-      const active = (await listCopies(db, setId)).filter((x) => x.status !== 'parted_out');
+      const active = (await listCopies(db, setId)).filter(isActive);
       for (const x of active.slice(0, qty)) {
         await db.update(setCopies).set({ ...c, status: x.status === 'sealed' || x.status === 'built' ? c.status : x.status, estValue: n(r.estValue) }).where(eq(setCopies.id, x.id));
       }

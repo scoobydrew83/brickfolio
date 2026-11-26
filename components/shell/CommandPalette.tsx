@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import Image from 'next/image';
 import { usePathname, useRouter } from 'next/navigation';
 import {
-  Boxes, ClipboardList, Hammer, Heart, Library, LayoutGrid, Monitor, Moon, Package, Plus, Puzzle, Radar, Receipt, RefreshCw,
+  Boxes, ChartColumn, ClipboardList, Hammer, Heart, Library, LayoutGrid, Monitor, Moon, Package, Plus, Puzzle, Radar, Receipt, RefreshCw,
   ScanBarcode, Search, Settings, Store, Sun, UserRound, Users, type LucideIcon,
 } from 'lucide-react';
 import { runSync, selectCollection } from '@/app/actions';
@@ -23,7 +23,7 @@ export const OPEN_SEARCH = 'brickfolio:search';
 export const OVERLAY_OPEN = 'dialog[open], [data-slot="sheet-content"][data-open]';
 
 const PAGE_ICON: Record<string, LucideIcon> = {
-  '/': Boxes, '/wishlist': Heart, '/radar': Radar, '/parts': Puzzle, '/layouts': LayoutGrid, '/store': Store, '/orders': Receipt,
+  '/': Boxes, '/wishlist': Heart, '/radar': Radar, '/insights': ChartColumn, '/parts': Puzzle, '/layouts': LayoutGrid, '/store': Store, '/orders': Receipt,
   '/settings': Settings, '/account': UserRound, '/minifigs': Users, '/parts/lots': Package, '/build': Hammer,
 };
 const GROUP_ICON: Record<string, LucideIcon> = { Sets: Boxes, Minifigures: Users, Wishlist: Heart, Parts: Puzzle, 'Loose parts': Package };

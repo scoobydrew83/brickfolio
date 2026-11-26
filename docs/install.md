@@ -101,9 +101,20 @@ Rebrickable doesn't share every build's parts list through its API: designers ca
 
 Each sync asks Brickset about sets it hasn't checked in 30 days, 50 sets per call and at most 10 calls, to stay well inside the key's daily limit. Retail prices are stored in your collection currency when Brickset has it (USD, GBP, CAD or EUR), otherwise in USD; the gain is only shown when the currencies match. **Settings → Brickset** shows the counts and has **Test key** and **Sync Brickset now**. Prices you could sell for still come only from BrickLink. Once other price sources are stored, **Settings → Currency → Value source** can choose which one Est. Value uses.
 
+### Moving your collection in from another tracker
+
+**Settings → Import and export** reads a collection exported from:
+- **Rebrickable:** a set list exported as CSV (`Set Number`, `Quantity`). Rebrickable has no condition, so copies are added as Used (built).
+- **Brickset:** My sets → Export. Owned sets come in, split into New (sealed) and Used copies by `QtyOwnedNew` and `QtyOwnedUsed`; wanted-only rows are skipped. Your notes go on the first copy.
+- **BrickEconomy:** My collection → Export. One row per copy brings its condition, price paid (read as your collection currency), acquired date (only when unambiguous, like `2024-03-05` or `Mar 5, 2024`) and notes; a file with an `Owned` count adds that many Used copies.
+
+You see what the file will add before anything is saved: new sets, sets you already have, copies, and rows skipped with the reason. **Import** adds copies, so importing the same file twice adds them twice. New sets are looked up on BrickLink at the next sync. The formats come from each site's documentation and from tools that read these files; if your file isn't recognised, or a column is ignored, please open an issue with its header row. The API takes the same files at `POST /api/v1/import`, with `?dryRun=1` for the preview.
+
 ### Optional: barcode scanning
 
 **Scan** (on the Sets page, the Wishlist, and the barcode icon in the header on phones) reads the UPC or EAN barcode on a LEGO box with your phone's camera and finds the set. The camera only works over HTTPS (or `localhost`), which the Tailscale and Cloudflare setups give you. Barcodes are read on the device; no picture leaves it.
+
+A **USB or Bluetooth barcode scanner** works too, on a computer or a tablet: open **Scan** and scan. Scanners that act as a keyboard (most do, often called "keyboard wedge" or HID mode) are recognised by how fast they type, so you don't need to click a field first. Set the scanner to end each scan with Enter (the usual default). While you're typing in a field, the keys go to that field instead.
 
 Brickfolio finds the set for a barcode, in this order:
 1. **Barcodes it already knows:** ones you've confirmed, and the EAN and UPC that the Brickset sync saves for sets you own or want (with `BRICKSET_API_KEY`). Brickset has no barcode search, so it can't identify a box you don't have yet.
@@ -166,7 +177,7 @@ Each send waits at most 10 seconds. Failures are reported with the provider's er
 
 ### Optional: ask Claude about your collection (MCP)
 
-Brickfolio is also an MCP server, at `/api/mcp` on your own address, so Claude (or any assistant that speaks the Model Context Protocol) can answer questions like "what's my most valuable retired set?" or "which sets retire before March?". Its tools are read-only: collection summary, set search and details, wishlist, Retirement Radar, Designer Program, minifigures, parts search, value history and barcode lookup (saved barcodes only).
+Brickfolio is also an MCP server, at `/api/mcp` on your own address, so Claude (or any assistant that speaks the Model Context Protocol) can answer questions like "what's my most valuable retired set?" or "which sets retire before March?". Its tools are read-only: collection summary, set search and details, wishlist, Retirement Radar, Designer Program, minifigures, parts search, value history and barcode lookup (saved barcodes only). Set `MCP_WRITE=on` to also let it add sets and copies, change or remove copies (including marking one sold) and change the wishlist, with the same permissions as the app; see [docs/api.md](api.md#write-tools-mcp_writeon). With Better Auth sign-in, clients can also connect with OAuth instead of a token ([docs/api.md](api.md#connect-with-oauth-better-auth-sign-in)).
 
 1. Create a token in **Settings → API tokens**.
 2. In Claude Code: `claude mcp add --transport http brickfolio https://your-host/api/mcp --header "Authorization: Bearer <token>"`. Other clients take the same URL and header.

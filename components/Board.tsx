@@ -143,7 +143,7 @@ export default function Board({ sets, history, sync, locations, currency, readAt
       <CollectionTabs />
       <PageHeader
         title="Sets"
-        badge={<span className="text-sm text-fg-3 tabular-nums">{all.count} sets · {all.copies} copies{all.partedOut ? ` · parted out: ${all.partedOut}` : ''}</span>}
+        badge={<span className="text-sm text-fg-3 tabular-nums">{all.count} sets · {all.copies} copies{all.partedOut ? ` · parted out: ${all.partedOut}` : ''}{all.sold ? ` · sold: ${all.sold}` : ''}</span>}
         actions={
           <span className="flex flex-wrap items-center gap-2">
             {priced && (
@@ -199,6 +199,11 @@ export default function Board({ sets, history, sync, locations, currency, readAt
           {all.gain !== null && (
             <p className="mt-1 max-w-sm text-sm text-fg-3">
               Cost basis {money(all.costBasis)} · <b className={all.gain >= 0 ? 'text-ok' : 'text-danger'}>{all.gain >= 0 ? '+' : '−'}{money(Math.abs(all.gain))}</b> on the copies with a price paid and a value
+            </p>
+          )}
+          {all.realised !== null && (
+            <p className="mt-1 max-w-sm text-sm text-fg-3">
+              Sold {all.sold} cop{all.sold === 1 ? 'y' : 'ies'} for {money(all.saleTotal)} after fees · <b className={all.realised >= 0 ? 'text-ok' : 'text-danger'}>{all.realised >= 0 ? '+' : '−'}{money(Math.abs(all.realised))}</b> realised
             </p>
           )}
         </div>

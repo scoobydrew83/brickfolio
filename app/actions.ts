@@ -347,13 +347,34 @@ export async function importFile(form: FormData): Promise<Result & { message?: s
   let message = '';
   const r = await act('admin', async () => {
     const res = await importCsv(await getDb(), await file.text());
-    if (res.ok) {
+    if (res.ok && res.summary) {
+      const s = res.summary;
+      message = `Imported ${s.label}: ${s.copies} cop${s.copies === 1 ? 'y' : 'ies'}, ${[s.newSets && `${s.newSets} new set${s.newSets === 1 ? '' : 's'} (looked up at the next sync)`, s.existingSets && `${s.existingSets} set${s.existingSets === 1 ? '' : 's'} you already had`].filter(Boolean).join(' and ')}.${s.skipped.length ? ` Skipped ${s.skipped.length} row${s.skipped.length === 1 ? '' : 's'}.` : ''}`;
+    } else if (res.ok) {
       message = `Imported ${res.count} ${res.kind === 'sets' ? 'sets' : res.kind === 'parts' ? 'parts' : 'history rows'}.`;
       if (res.skipped) message += ` Skipped ${res.skipped} parts of sets that aren't in the collection; import the Sets tab first.`;
     }
     return res;
   });
   return r.ok ? { ...r, message } : r;
+}
+
+/**
+ * Settings → what importing a file would do, for Rebrickable, Brickset and BrickEconomy files (nothing is saved).
+ * `summary` is null for other files, which import straight away as before.
+ */
+export async function previewImport(form: FormData): Promise<{ ok: true; summary: import('@/lib/service/collection-import').CollectionSummary | null } | { ok: false; error: string }> {
+  const file = form.get('file');
+  if (!(file instanceof File) || !file.size) return { ok: false, error: 'Choose a CSV file.' };
+  if (file.size > 5_000_000) return { ok: false, error: 'File is over 5 MB.' };
+  const a = await allowed('admin');
+  if (!a) return { ok: false, error: perm.denied('admin') };
+  const text = await file.text();
+  const { detectCollection } = await import('@/lib/service/collection-import');
+  const { parseCsv } = await import('@/lib/csv');
+  if (!detectCollection(parseCsv(text.replace(/^\uFEFF/, '').split('\n', 1)[0])[0] ?? [])) return { ok: true, summary: null };
+  const r = await importCsv(await getDb(), text, { dryRun: true });
+  return r.ok ? { ok: true, summary: r.summary ?? null } : { ok: false, error: r.error };
 }
 
 // ---- parts ----

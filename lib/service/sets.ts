@@ -29,7 +29,7 @@ import { syncCommunity } from '../barcode/community';
 import { checkForUpdate } from './updates';
 import type { ImageStore } from '../images/cache';
 import { warmImages } from './images';
-import { estValue, parseLocation, placeholderName, setGuide, totals, withCopies, type Condition, type CopyInput, type CopyRow, type HistoryRow, type QuickList, type SetInput, type SetRow } from '../sets';
+import { estValue, isActive, parseLocation, placeholderName, setGuide, totals, withCopies, type Condition, type CopyInput, type CopyRow, type HistoryRow, type QuickList, type SetInput, type SetRow } from '../sets';
 import { editCopy, insertCopies, repriceCopies } from './copies';
 import { priceSeries, recordPrice } from './prices';
 
@@ -65,6 +65,8 @@ const copyColumns = {
   missingPct: setCopies.missingPct, location: setCopies.location, acquiredDate: setCopies.acquiredDate, buildDate: setCopies.buildDate,
   pricePaid: setCopies.pricePaid, paidAmount: setCopies.paidAmount, paidCurrency: setCopies.paidCurrency, tax: setCopies.tax, shipping: setCopies.shipping, gwp: setCopies.gwp, estValue: setCopies.estValue,
   estGuide: setCopies.estGuide, notes: setCopies.notes,
+  soldDate: setCopies.soldDate, salePrice: setCopies.salePrice, saleFees: setCopies.saleFees, soldVia: setCopies.soldVia,
+  hasBox: setCopies.hasBox, hasInstructions: setCopies.hasInstructions, stickers: setCopies.stickers, boughtFrom: setCopies.boughtFrom,
   missingMarked: sql<number>`(select coalesce(sum(mp."qty"), 0) from "set_missing_parts" mp where mp."copy_id" = "set_copies"."id")`,
 };
 
@@ -327,7 +329,7 @@ export async function editSet(db: DB, input: SetInput, lookup: Lookup | null): P
   const before = await getSet(db, input.setNo);
   if (!before) return { ok: false, status: 404, error: `#${input.setNo} isn't in the collection.` };
   const { setNo: _no, qty, condition, location, missingPct, copy: _c, ...fields } = input;
-  const active = before.copies.filter((c) => c.status !== 'parted_out');
+  const active = before.copies.filter(isActive);
   const changes: CopyInput = {};
   if (condition !== undefined && (before.mixed.condition || condition !== before.condition)) changes.condition = condition;
   if (location !== undefined && (before.mixed.location || location !== before.location)) changes.location = location;
@@ -343,7 +345,7 @@ export async function editSet(db: DB, input: SetInput, lookup: Lookup | null): P
   if (qty !== undefined && qty !== active.length) {
     if (qty > active.length) {
       const src = active.at(-1) ?? before.copies.at(-1);
-      await insertCopies(db, before.id, src ? { status: src.status === 'parted_out' ? 'built' : src.status, condition: src.condition, location: src.location, missingPct: src.missingPct, collectionId: src.collectionId ?? undefined } : copyFields(input), qty - active.length);
+      await insertCopies(db, before.id, src ? { status: isActive(src) ? src.status : 'built', condition: src.condition, location: src.location, missingPct: src.missingPct, collectionId: src.collectionId ?? undefined } : copyFields(input), qty - active.length);
       await repriceCopies(db, before.id);
     } else {
       const drop = active.slice(qty).map((c) => c.id);
@@ -357,9 +359,9 @@ export async function editSet(db: DB, input: SetInput, lookup: Lookup | null): P
 export async function removeOne(db: DB, no: string): Promise<Result<{ remaining: number }>> {
   const s = await getSet(db, no);
   if (!s) return { ok: false, status: 404, error: `#${no} isn't in the collection.` };
-  const victim = s.copies.filter((c) => c.status !== 'parted_out').at(-1) ?? s.copies.at(-1);
+  const victim = s.copies.filter(isActive).at(-1) ?? s.copies.at(-1);
   if (victim) await db.delete(setCopies).where(eq(setCopies.id, victim.id));
-  const [{ left, active }] = await db.select({ left: sql<number>`count(*)`, active: sql<number>`coalesce(sum(case when ${setCopies.status} <> 'parted_out' then 1 else 0 end), 0)` })
+  const [{ left, active }] = await db.select({ left: sql<number>`count(*)`, active: sql<number>`coalesce(sum(case when ${setCopies.status} not in ('parted_out', 'sold') then 1 else 0 end), 0)` })
     .from(setCopies).where(eq(setCopies.setId, s.id)).all();
   if (!Number(left)) {
     await db.delete(sets).where(eq(sets.id, s.id));

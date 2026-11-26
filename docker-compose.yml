@@ -48,6 +48,7 @@ services:
       - SYNC_HOUR
       - BACKUP_KEEP
       - CRON_SECRET
+      - MCP_WRITE
     ports:
       - "127.0.0.1:${PORT:-3000}:3000"
     volumes:

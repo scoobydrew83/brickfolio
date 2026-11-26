@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { conditionGap, copiesSummary, copyGuide, costBasis, dailyHistory, displayNo, estValue, filterSets, groupTotals, SORT_KEYS, sortFrom, sortingOf, parseCopyInput, parseQuickList, parseSetInput, parseSetWithCopy, setGuide, setNo, totals, withCopies, type CopyRow, type SetRow } from './sets';
+import { conditionGap, realisedGain, copiesSummary, copyGuide, costBasis, dailyHistory, displayNo, estValue, filterSets, groupTotals, SORT_KEYS, sortFrom, sortingOf, parseCopyInput, parseQuickList, parseSetInput, parseSetWithCopy, setGuide, setNo, totals, withCopies, type CopyRow, type SetRow } from './sets';
 
 const LOCS = ['Out', 'Storage', 'Sell'];
 const parse = (f: Record<string, unknown>, partial = true) => parseSetInput(f, partial, LOCS);
@@ -224,5 +224,31 @@ describe('conditionGap', () => {
     expect(conditionGap(o(150), o(100, '2026-11-01', 'EUR'))).toBeNull();
     expect(conditionGap(o(150), o(100, '2026-09-15'))).toBeNull(); // 47 days apart
     expect(conditionGap(o(150), o(100, '2026-10-02'))).not.toBeNull(); // 30 days apart
+  });
+});
+
+describe('sold copies (#gap-1)', () => {
+  it('leave qty and value, and count their sale and realised gain', () => {
+    const s = row({ setNo: '1-1', copies: [
+      copy({ status: 'sealed', condition: 'New', estValue: 100, pricePaid: 60 }),
+      copy({ status: 'sold', estValue: 90, pricePaid: 50, tax: 5, salePrice: 120, saleFees: 15 }),
+      copy({ status: 'sold', estValue: 90, salePrice: 80 }), // no cost: sold, but no realised gain
+    ] });
+    expect([s.qty, s.valueTotal, s.costBasis, s.gain]).toEqual([1, 100, 60, 40]);
+    expect([s.sold, s.saleTotal, s.realised, s.partedOut]).toEqual([2, 185, 50, 0]); // 105 + 80; 105 − 55
+    const t = totals([s]);
+    expect([t.copies, t.sold, t.saleTotal, t.realised]).toEqual([1, 2, 185, 50]);
+  });
+  it('realised gain needs a sale price and a cost; a gift with purchase cost nothing', () => {
+    expect(realisedGain({ status: 'sold', salePrice: 30, saleFees: 2, gwp: true, pricePaid: null, tax: null, shipping: null })).toBe(28);
+    expect(realisedGain({ status: 'sold', salePrice: null, saleFees: null, gwp: false, pricePaid: 10, tax: null, shipping: null })).toBeNull();
+    expect(realisedGain({ status: 'built', salePrice: 30, saleFees: 0, gwp: false, pricePaid: 10, tax: null, shipping: null })).toBeNull();
+  });
+  it('parses sale fields and copy details', () => {
+    const r = parseCopyInput({ status: 'sold', soldDate: '2026-11-20', salePrice: '120.456', saleFees: '15', soldVia: 'BrickLink', hasBox: 'yes', hasInstructions: 'no', stickers: 'unapplied', boughtFrom: 'LEGO Store' }, true, []);
+    expect(r).toEqual({ ok: true, value: { status: 'sold', soldDate: '2026-11-20', salePrice: 120.46, saleFees: 15, soldVia: 'BrickLink', hasBox: true, hasInstructions: false, stickers: 'unapplied', boughtFrom: 'LEGO Store' } });
+    expect(parseCopyInput({ hasBox: '', stickers: '' }, true, [])).toEqual({ ok: true, value: { hasBox: null, stickers: null } });
+    expect(parseCopyInput({ stickers: 'peeled' }, true, []).ok).toBe(false);
+    expect(parseCopyInput({ soldDate: 'yesterday' }, true, []).ok).toBe(false);
   });
 });

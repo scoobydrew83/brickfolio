@@ -1,7 +1,7 @@
 import Image from 'next/image';
 import Link from 'next/link';
 import { Box, ExternalLink, Pencil, Puzzle, Trash2 } from 'lucide-react';
-import { copiesSummary, displayNo, num, type SetRow } from '@/lib/sets';
+import { copiesSummary, displayNo, isActive, num, type SetRow } from '@/lib/sets';
 import { retailGain, retirement } from '@/lib/retail';
 import { blLink, type Money } from './ui';
 import { Button, Callout, CONDITION_TONE, Chip, Confirm, IconButton, Tip, buttonClass, cx } from '../ui';
@@ -102,7 +102,7 @@ export function SetCard({ s, onEdit, onParts, onRemove, onRetry, pending, money,
 export function locationLabel(s: Pick<SetRow, 'location' | 'mixed' | 'copies'>): string {
   if (s.location) return s.location;
   if (!s.mixed.location) return 'No location';
-  return `${new Set(s.copies.filter((c) => c.status !== 'parted_out').map((c) => c.location ?? '')).size} locations`;
+  return `${new Set(s.copies.filter(isActive).map((c) => c.location ?? '')).size} locations`;
 }
 
 /** Remove, after a confirmation. With several copies it removes the newest one. */

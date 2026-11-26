@@ -1,6 +1,6 @@
 // MILS layouts (roadmap 9): a grid of baseplate modules, each holding set copies and builds, and what the whole layout
 // still needs as one parts list and BrickLink Wanted List. Grid maths is in lib/layouts.ts, shared with the editor.
-import { and, asc, eq, inArray, like, ne, or, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, like, ne, notInArray, or, sql } from 'drizzle-orm';
 import { partKey, toWantedListXml, type WantedItem } from '../bricklink/wanted';
 import { buildParts, builds, colors, layoutModuleItems, layoutModules, layouts, setCopies, setMissingParts, setParts, sets } from '../db/schema';
 import type { DB } from '../db/types';
@@ -332,7 +332,7 @@ export async function searchLinkables(db: DB, q = '', limit = 40, scope: number[
     copyNo: sql<number>`(select count(*) from "set_copies" c where c."set_id" = "set_copies"."set_id" and c."id" <= "set_copies"."id")`,
     copies: sql<number>`(select count(*) from "set_copies" c where c."set_id" = "set_copies"."set_id")`,
   }).from(setCopies).innerJoin(sets, eq(sets.id, setCopies.setId))
-    .where(and(ne(setCopies.status, 'parted_out'), t ? or(like(sets.name, `%${t}%`), like(sets.setNo, `%${t}%`)) : undefined,
+    .where(and(notInArray(setCopies.status, ['parted_out', 'sold']), t ? or(like(sets.name, `%${t}%`), like(sets.setNo, `%${t}%`)) : undefined,
       scope === 'all' ? undefined : scope.length ? inArray(sql`coalesce(${setCopies.collectionId}, 1)`, scope) : sql`0 = 1`))
     .orderBy(asc(sets.setNo), asc(setCopies.id)).limit(n).all();
   const buildRows = await db.select({ id: builds.id, mocNo: builds.mocNo, name: builds.name, imageUrl: builds.imageUrl, sourceSetNo: builds.sourceSetNo, kind: builds.kind }).from(builds)
@@ -400,7 +400,7 @@ export async function layoutNeeds(db: DB, layoutId: number, scope: ReadScope = '
   const buildMods = new Map<number, number[]>(), copyMods = new Map<number, number[]>();
   for (const k of links) {
     if (k.buildId != null) buildMods.set(k.buildId, [...(buildMods.get(k.buildId) ?? []), k.moduleId]);
-    else if (k.setCopyId != null && k.copyStatus !== 'parted_out' && inScope(scope, k.copyCollection)) copyMods.set(k.setCopyId, [...(copyMods.get(k.setCopyId) ?? []), k.moduleId]);
+    else if (k.setCopyId != null && k.copyStatus !== 'parted_out' && k.copyStatus !== 'sold' && inScope(scope, k.copyCollection)) copyMods.set(k.setCopyId, [...(copyMods.get(k.setCopyId) ?? []), k.moduleId]);
   }
   const { freeLots, reservedBy } = await availability(db);
 

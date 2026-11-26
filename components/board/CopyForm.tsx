@@ -1,4 +1,5 @@
-import { CONDITIONS, STATUSES, STATUS_LABEL, type CopyRow } from '@/lib/sets';
+import { useState } from 'react';
+import { CONDITIONS, STATUSES, STATUS_LABEL, STICKERS, STICKERS_LABEL, type CopyRow } from '@/lib/sets';
 import { Button, Combobox, DatePicker, Dialog, field } from '../ui';
 import { FX_CURRENCIES } from '@/lib/currencies';
 import { LocationPicker } from '../LocationPicker';
@@ -42,6 +43,8 @@ export function CopyForm({ copy, title, locations, pending, onClose, onSubmit, c
 export function CopyFields({ copy, locations, withPlace = true, collections = [], collection, currency = 'USD' }: { copy: CopyRow | null; locations: string[]; withPlace?: boolean } & Collections) {
   const foreign = copy?.paidCurrency && copy.paidAmount != null ? { amount: copy.paidAmount, currency: copy.paidCurrency } : null;
   const fmt = (v: number, c: string) => new Intl.NumberFormat(undefined, { style: 'currency', currency: c }).format(v);
+  const [status, setStatus] = useState<string>(copy?.status ?? '');
+  const yesNo = (v: boolean | null | undefined) => (v == null ? '' : v ? 'yes' : 'no');
   const currencies = [currency, ...FX_CURRENCIES.filter((c) => c !== currency)].map((c) => ({ value: c, label: c === currency ? `${c} (collection)` : c }));
   return (
     <div className="grid grid-cols-2 gap-3">
@@ -53,7 +56,7 @@ export function CopyFields({ copy, locations, withPlace = true, collections = []
         </label>
       )}
       <label className="block text-sm">Status
-        <select name="status" defaultValue={copy?.status ?? ''} className={field}>
+        <select name="status" value={status} onChange={(e) => setStatus(e.target.value)} className={field}>
           {!copy && <option value="">From condition</option>}
           {STATUSES.map((s) => <option key={s} value={s}>{STATUS_LABEL[s]}</option>)}
         </select>
@@ -105,6 +108,43 @@ export function CopyFields({ copy, locations, withPlace = true, collections = []
         <input name="gwp" type="checkbox" defaultChecked={copy?.gwp ?? false} className="size-4" />
         Gift with purchase (cost 0)
       </label>
+      <label className="block text-sm">Box
+        <select name="hasBox" defaultValue={yesNo(copy?.hasBox)} className={field}>
+          <option value="">Not recorded</option><option value="yes">Has the box</option><option value="no">No box</option>
+        </select>
+      </label>
+      <label className="block text-sm">Instructions
+        <select name="hasInstructions" defaultValue={yesNo(copy?.hasInstructions)} className={field}>
+          <option value="">Not recorded</option><option value="yes">Has them</option><option value="no">Missing</option>
+        </select>
+      </label>
+      <label className="block text-sm">Stickers
+        <select name="stickers" defaultValue={copy?.stickers ?? ''} className={field}>
+          <option value="">Not recorded</option>
+          {STICKERS.map((k) => <option key={k} value={k}>{STICKERS_LABEL[k]}</option>)}
+        </select>
+      </label>
+      <label className="block text-sm">Bought from
+        <input name="boughtFrom" maxLength={120} defaultValue={copy?.boughtFrom ?? ''} placeholder="Shop or seller" className={field} />
+      </label>
+      {status === 'sold' && (
+        <fieldset className="col-span-2 grid grid-cols-2 gap-3 rounded-control border border-line p-3">
+          <legend className="px-1 text-sm font-semibold">Sale</legend>
+          <label className="block text-sm">Sold on
+            <DatePicker name="soldDate" label="Sold on" defaultValue={copy?.soldDate ?? ''} />
+          </label>
+          <label className="block text-sm">Sold via
+            <input name="soldVia" maxLength={120} defaultValue={copy?.soldVia ?? ''} placeholder="BrickLink, eBay…" className={field} />
+          </label>
+          <label className="block text-sm">Sale price ({currency})
+            <input name="salePrice" type="number" min={0} max={1000000} step="0.01" defaultValue={copy?.salePrice ?? ''} className={field} />
+          </label>
+          <label className="block text-sm">Fees and postage
+            <input name="saleFees" type="number" min={0} max={1000000} step="0.01" defaultValue={copy?.saleFees ?? ''} className={field} />
+          </label>
+          <p className="col-span-2 text-xs text-fg-3">Sold copies leave the collection’s count and value. Realised gain is the sale price less fees, less what the copy cost. Without a date, today is used.</p>
+        </fieldset>
+      )}
       <p className="col-span-2 text-xs text-fg-3">Sealed copies are priced at the new sold price; built and Partial copies at the used price.</p>
     </div>
   );

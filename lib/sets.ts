@@ -8,10 +8,14 @@ export type Condition = (typeof CONDITIONS)[number];
 /** Default storage locations for a new database. Users edit the list in Settings. */
 export const DEFAULT_LOCATIONS = ['Display', 'Storage', 'Sell'] as const;
 export const REGISTERED = ['Y', 'No QR'] as const;
-/** What a physical copy is: still sealed, built, being built, or taken apart (parted out copies aren't counted). */
-export const STATUSES = ['sealed', 'built', 'in_progress', 'parted_out'] as const;
+/** What a physical copy is: still sealed, built, being built, taken apart, or sold. Parted out and sold copies aren't counted. */
+export const STATUSES = ['sealed', 'built', 'in_progress', 'parted_out', 'sold'] as const;
 export type CopyStatus = (typeof STATUSES)[number];
-export const STATUS_LABEL: Record<CopyStatus, string> = { sealed: 'Sealed', built: 'Built', in_progress: 'In progress', parted_out: 'Parted out' };
+export const STATUS_LABEL: Record<CopyStatus, string> = { sealed: 'Sealed', built: 'Built', in_progress: 'In progress', parted_out: 'Parted out', sold: 'Sold' };
+/** Stickers on a copy: put on, still on the sheet, or the set has none. */
+export const STICKERS = ['applied', 'unapplied', 'none'] as const;
+export type Stickers = (typeof STICKERS)[number];
+export const STICKERS_LABEL: Record<Stickers, string> = { applied: 'Applied', unapplied: 'Not applied', none: 'No stickers' };
 
 /** One physical copy of a set. Money is in the collection currency. */
 export type CopyRow = {
@@ -34,6 +38,15 @@ export type CopyRow = {
   estValue: number | null;
   estGuide: 'N' | 'U' | null; // the price guide estValue came from
   notes: string | null;
+  /** Sold copies: date, price, fees and where (in the collection currency). */
+  soldDate?: string | null;
+  salePrice?: number | null;
+  saleFees?: number | null;
+  soldVia?: string | null;
+  hasBox?: boolean | null;
+  hasInstructions?: boolean | null;
+  stickers?: Stickers | null;
+  boughtFrom?: string | null;
   missingMarked?: number; // pieces marked missing on this copy; when > 0, its Missing % is computed from them
 };
 
@@ -54,6 +67,14 @@ export type CopyInput = {
   shipping?: number | null;
   gwp?: boolean;
   notes?: string | null;
+  soldDate?: string | null;
+  salePrice?: number | null;
+  saleFees?: number | null;
+  soldVia?: string | null;
+  hasBox?: boolean | null;
+  hasInstructions?: boolean | null;
+  stickers?: Stickers | null;
+  boughtFrom?: string | null;
   /** The collection the copy is in (#49); new copies without one go to the default collection. */
   collectionId?: number;
 };
@@ -95,6 +116,9 @@ export type SetRow = {
   costCovered: number; // how many copies have a cost basis
   gain: number | null; // value − cost basis, over the covered copies
   partedOut: number; // copies parted out (not in qty or value)
+  sold: number; // copies sold (not in qty or value)
+  saleTotal: number | null; // what the sold copies fetched, less fees
+  realised: number | null; // sale total − cost basis, over the sold copies with both
   // From Rebrickable when REBRICKABLE_API_KEY is set; null until matched
   theme?: string | null; // top-level theme, e.g. Icons
   subtheme?: string | null; // e.g. Botanical Collection
@@ -260,19 +284,36 @@ export function parseCopyInput(
       value.missingPct = m;
     }
   }
-  for (const [k, label] of [['acquiredDate', 'Acquired date'], ['buildDate', 'Build date']] as const) {
+  for (const [k, label] of [['acquiredDate', 'Acquired date'], ['buildDate', 'Build date'], ['soldDate', 'Sold date']] as const) {
     const v = str(k);
     if (v === undefined) continue;
     if (v && !isDate(v)) return { ok: false, error: `${label} must be a date like 2026-11-04` };
     value[k] = v || null;
   }
-  for (const [k, label] of [['pricePaid', 'Price paid'], ['tax', 'Tax'], ['shipping', 'Shipping']] as const) {
+  for (const [k, label] of [['pricePaid', 'Price paid'], ['tax', 'Tax'], ['shipping', 'Shipping'], ['salePrice', 'Sale price'], ['saleFees', 'Sale fees']] as const) {
     const v = str(k);
     if (v === undefined) continue;
     if (v === '') { value[k] = null; continue; }
     const n = Number(v);
     if (!Number.isFinite(n) || n < 0 || n > MONEY_MAX) return { ok: false, error: `${label} must be 0–1,000,000` };
     value[k] = Math.round(n * 100) / 100;
+  }
+  for (const [k, label] of [['soldVia', 'Sold via'], ['boughtFrom', 'Bought from']] as const) {
+    const v = str(k);
+    if (v === undefined) continue;
+    if (v.length > 120) return { ok: false, error: `${label} is too long` };
+    value[k] = v || null;
+  }
+  // Box and instructions: yes / no / blank (not recorded). A form sends 'yes' / 'no' / ''; the API true / false / null.
+  for (const k of ['hasBox', 'hasInstructions'] as const) {
+    if (!(k in form)) continue;
+    const v = form[k];
+    value[k] = v === null || v === '' || v === undefined ? null : truthy(v);
+  }
+  const stickers = str('stickers');
+  if (stickers !== undefined) {
+    if (stickers && !(STICKERS as readonly string[]).includes(stickers)) return { ok: false, error: `Stickers must be one of: ${STICKERS.join(', ')}` };
+    value.stickers = (stickers || null) as Stickers | null;
   }
   const cur = str('paidCurrency');
   if (cur !== undefined) {
@@ -295,8 +336,18 @@ export function parseCopyInput(
   return { ok: true, value };
 }
 
-/** Copies that count: everything except parted out. */
-export const isActive = (c: Pick<CopyRow, 'status'>) => c.status !== 'parted_out';
+/** Copies that count (in qty, value, cost and gain): everything except parted out and sold. */
+export const isActive = (c: Pick<CopyRow, 'status'>) => c.status !== 'parted_out' && c.status !== 'sold';
+
+/** What a sold copy brought in: sale price less fees, or null without a sale price. */
+export const saleNet = (c: Pick<CopyRow, 'salePrice' | 'saleFees'>): number | null => (c.salePrice == null ? null : Math.round((num(c.salePrice) - num(c.saleFees)) * 100) / 100);
+
+/** Realised gain on a sold copy: what it brought in less what it cost, or null when either is unknown. */
+export function realisedGain(c: Pick<CopyRow, 'status' | 'salePrice' | 'saleFees' | 'gwp' | 'pricePaid' | 'tax' | 'shipping'>): number | null {
+  if (c.status !== 'sold') return null;
+  const net = saleNet(c), cost = costBasis(c);
+  return net == null || cost == null ? null : Math.round((net - cost) * 100) / 100;
+}
 
 /** BrickLink guide for a copy: new sold prices when sealed or New, used otherwise. */
 export const copyGuide = (c: Pick<CopyRow, 'status' | 'condition'>): 'N' | 'U' => (c.status === 'sealed' || c.condition === 'New' ? 'N' : 'U');
@@ -318,9 +369,9 @@ export function setGuide(copies: Pick<CopyRow, 'status' | 'condition'>[]): 'N' |
 const round2 = (v: number) => Math.round(v * 100) / 100;
 
 /** A set row with its derived fields (qty, shared condition/location/Missing %, value, cost, gain) worked out from `copies`. */
-export function withCopies<T extends Omit<SetRow, 'copies' | 'mixed' | 'valueTotal' | 'costBasis' | 'costCovered' | 'gain' | 'partedOut' | 'qty' | 'condition' | 'location' | 'missingPct' | 'estValue'>>(
+export function withCopies<T extends Omit<SetRow, 'copies' | 'mixed' | 'valueTotal' | 'costBasis' | 'costCovered' | 'gain' | 'partedOut' | 'sold' | 'saleTotal' | 'realised' | 'qty' | 'condition' | 'location' | 'missingPct' | 'estValue'>>(
   base: T, copies: CopyRow[],
-): T & Pick<SetRow, 'copies' | 'mixed' | 'valueTotal' | 'costBasis' | 'costCovered' | 'gain' | 'partedOut' | 'qty' | 'condition' | 'location' | 'missingPct' | 'estValue'> {
+): T & Pick<SetRow, 'copies' | 'mixed' | 'valueTotal' | 'costBasis' | 'costCovered' | 'gain' | 'partedOut' | 'sold' | 'saleTotal' | 'realised' | 'qty' | 'condition' | 'location' | 'missingPct' | 'estValue'> {
   const act = copies.filter(isActive);
   const shared = <K extends 'condition' | 'location' | 'missingPct'>(k: K) => {
     const vals = new Set(act.map((c) => c[k] ?? null));
@@ -332,11 +383,16 @@ export function withCopies<T extends Omit<SetRow, 'copies' | 'mixed' | 'valueTot
   const covered = act.filter((c) => costBasis(c) != null);
   const cost = covered.length ? round2(covered.reduce((t, c) => t + num(costBasis(c)), 0)) : null;
   // Only when every copy with a cost also has a value: a copy without one isn't worth 0.
+  const sold = copies.filter((c) => c.status === 'sold');
+  const sales = sold.filter((c) => saleNet(c) != null);
+  const realised = sold.filter((c) => realisedGain(c) != null);
   const gain = covered.length && covered.every((c) => c.estValue != null) ? round2(covered.reduce((t, c) => t + num(c.estValue) - num(costBasis(c)), 0)) : null;
   return {
     ...base, copies, qty: act.length, condition: cond.value as Condition | null, location: loc.value as string | null, missingPct: miss.value as number | null,
     mixed: { condition: cond.mixed, location: loc.mixed }, estValue: valueTotal === null ? null : round2(valueTotal / valued.length),
-    valueTotal, costBasis: cost, costCovered: covered.length, gain, partedOut: copies.length - act.length,
+    valueTotal, costBasis: cost, costCovered: covered.length, gain, partedOut: copies.filter((c) => c.status === 'parted_out').length,
+    sold: sold.length, saleTotal: sales.length ? round2(sales.reduce((t, c) => t + num(saleNet(c)), 0)) : null,
+    realised: realised.length ? round2(realised.reduce((t, c) => t + num(realisedGain(c)), 0)) : null,
   };
 }
 
@@ -448,6 +504,9 @@ export function totals(sets: SetRow[]) {
     costBasis: covered.length ? covered.reduce((t, s) => t + num(s.costBasis), 0) : null,
     gain: covered.length ? covered.reduce((t, s) => t + num(s.gain), 0) : null,
     partedOut: sets.reduce((t, s) => t + s.partedOut, 0),
+    sold: sets.reduce((t, s) => t + (s.sold ?? 0), 0),
+    saleTotal: sets.some((s) => s.saleTotal != null) ? round2(sets.reduce((t, s) => t + num(s.saleTotal), 0)) : null,
+    realised: sets.some((s) => s.realised != null) ? round2(sets.reduce((t, s) => t + num(s.realised), 0)) : null,
   };
 }
 

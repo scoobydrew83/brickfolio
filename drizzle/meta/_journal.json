@@ -267,6 +267,20 @@
       "when": 1795703254207,
       "tag": "0037_copy_paid_currency",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "6",
+      "when": 1795721926581,
+      "tag": "0038_copy_sale_details",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "6",
+      "when": 1795724004211,
+      "tag": "0039_oauth_provider",
+      "breakpoints": true
     }
   ]
 }

@@ -139,3 +139,19 @@ describe('prices paid in another currency', () => {
     expect((await get()).copies).toHaveLength(1);
   });
 });
+
+describe('selling a copy', () => {
+  it('marks it sold (today unless dated), drops it from qty and owned counts, and keeps its sale', async () => {
+    await svc.addSet(db, { setNo: '10280-1', name: 'Flower Bouquet', condition: 'Used' }, { lookup });
+    const r = await addCopy(db, '10280-1', { status: 'built', pricePaid: 40, hasBox: true, stickers: 'none', boughtFrom: 'LEGO Store' });
+    if (!r.ok) throw new Error(r.error);
+    expect((await get()).qty).toBe(2);
+    const e = await editCopy(db, r.copyId, { status: 'sold', salePrice: 70, saleFees: 8, soldVia: 'BrickLink' });
+    if (!e.ok) throw new Error(e.error);
+    const s = await get();
+    const c = s.copies.find((x) => x.id === r.copyId)!;
+    expect(c).toMatchObject({ status: 'sold', soldDate: svc.today(), salePrice: 70, saleFees: 8, soldVia: 'BrickLink', hasBox: true, stickers: 'none', boughtFrom: 'LEGO Store' });
+    expect([s.qty, s.sold, s.saleTotal, s.realised]).toEqual([1, 1, 62, 22]);
+    expect((await ownedSummary(db, ['10280-1'])).get('10280-1')?.qty).toBe(1);
+  });
+});

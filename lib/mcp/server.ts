@@ -1,5 +1,6 @@
 // A Model Context Protocol server for Brickfolio, so Claude and other assistants can answer questions about the
-// collection. Streamable HTTP transport, stateless, JSON responses (no server-sent events); every tool is read-only.
+// collection. Streamable HTTP transport, stateless, JSON responses (no server-sent events). Tools are read-only,
+// plus the write tools in write-tools.ts when MCP_WRITE=on.
 // Spec: https://modelcontextprotocol.io/specification. Served at /api/mcp (app/api/mcp/route.ts).
 import pkg from '../../package.json';
 import { APP_NAME } from '../brand';
@@ -22,6 +23,7 @@ import { resolveBarcode } from '../barcode/resolve';
 import { resolveFigCode } from '../barcode/figcodes';
 import { collectionCounts, listCollections, type ReadScope } from '../service/collections';
 import { clampScope, readable, type Access } from '../service/permissions';
+import { WRITE_TOOLS, mcpWriteOn } from './write-tools';
 
 export const PROTOCOL_VERSIONS = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'] as const;
 const VERSION = pkg.version;
@@ -39,7 +41,7 @@ const brief = (s: SetRow) => {
   const n = (st: string) => s.copies.filter((c) => c.status === st).length;
   return {
     setNo: displayNo(s.setNo), name: s.name, year: s.year, theme: s.subtheme ? `${s.theme} / ${s.subtheme}` : s.theme ?? null,
-    qty: s.qty, copies: { sealed: n('sealed'), built: n('built'), inProgress: n('in_progress'), partedOut: n('parted_out') },
+    qty: s.qty, copies: { sealed: n('sealed'), built: n('built'), inProgress: n('in_progress'), partedOut: n('parted_out'), sold: n('sold') },
     condition: s.condition, missingPct: s.missingPct, location: s.location, estValueEach: r2(s.estValue),
     estValueTotal: r2(s.valueTotal), costBasis: r2(s.costBasis), gain: r2(s.gain), retail: s.retailPrice ?? null, retailCurrency: s.retailCurrency ?? null,
     retirement: retirement(s), pieces: s.pieces,
@@ -83,7 +85,7 @@ export const TOOLS: Tool[] = [
       const group = (k: 'location' | 'condition' | 'theme') => groupTotals(sets, k).map((g) => ({ [k]: g.label, sets: g.count, copies: g.copies, estValue: r2(g.estValue) }));
       return {
         currency, lastSync: sync?.finishedAt ?? null,
-        sets: { count: t.count, copies: t.copies, partedOut: t.partedOut, pieces: t.pieces, estValue: r2(t.estValue), costBasis: r2(t.costBasis), gain: r2(t.gain), notFoundOnBrickLink: t.errors },
+        sets: { count: t.count, copies: t.copies, partedOut: t.partedOut, sold: t.sold, saleTotal: r2(t.saleTotal), realisedGain: r2(t.realised), pieces: t.pieces, estValue: r2(t.estValue), costBasis: r2(t.costBasis), gain: r2(t.gain), notFoundOnBrickLink: t.errors },
         minifigures: { count: f.count, copies: f.copies, estValue: r2(f.estValue), unpriced: f.unpriced },
         totalEstValue: r2(t.estValue + f.estValue),
         history: d.length > 1 ? { from: d[0].date, fromValue: d[0].estValue, to: d[d.length - 1].date, toValue: d[d.length - 1].estValue } : null,
@@ -127,7 +129,7 @@ export const TOOLS: Tool[] = [
       const [prices, po, unpriced, missing, guides] = await Promise.all([priceHistory(db, s.setNo), partout(db, s.id, guideCondition(s), currency), unpricedLots(db, s.id, guideCondition(s), currency), listMissing(db, s.id, pickCopy(s, null, false)?.id ?? null), brickLinkGuides(db, 'set', s.setNo, currency)]);
       return {
         currency, ...brief(s), notes: s.notes,
-        copyList: s.copies.map((c) => ({ id: c.id, status: c.status, condition: c.condition, location: c.location, missingPct: c.missingPct, acquired: c.acquiredDate, built: c.buildDate, costBasis: costBasis(c), giftWithPurchase: c.gwp, estValue: r2(c.estValue), pricedFrom: c.estGuide && c.estGuide !== copyGuide(c) ? (c.estGuide === 'U' ? 'used sales' : 'new sales') : null, notes: c.notes })),
+        copyList: s.copies.map((c) => ({ id: c.id, status: c.status, condition: c.condition, location: c.location, missingPct: c.missingPct, acquired: c.acquiredDate, built: c.buildDate, costBasis: costBasis(c), giftWithPurchase: c.gwp, estValue: r2(c.estValue), paidCurrency: c.paidCurrency ?? null, paidAmount: c.paidAmount ?? null, sold: c.status === 'sold' ? { date: c.soldDate ?? null, price: c.salePrice ?? null, fees: c.saleFees ?? null, via: c.soldVia ?? null } : null, hasBox: c.hasBox ?? null, hasInstructions: c.hasInstructions ?? null, stickers: c.stickers ?? null, boughtFrom: c.boughtFrom ?? null, pricedFrom: c.estGuide && c.estGuide !== copyGuide(c) ? (c.estGuide === 'U' ? 'used sales' : 'new sales') : null, notes: c.notes })),
         bricklink: { avgSold: s.avgSold, minSold: s.minSold, maxSold: s.maxSold, sales: s.qtySold, lookedUp: s.lastUpdated, error: s.blError },
         newVsUsed: conditionGap(guides.N, guides.U),
         priceHistory: prices.slice(-12).map((p) => ({ date: p.date, avgSold: p.avgSold })),
@@ -263,7 +265,7 @@ export const TOOLS: Tool[] = [
   },
 ];
 
-const INSTRUCTIONS = `${APP_NAME} is a self-hosted tracker for one person's brick-set collection. Values are BrickLink average sold prices (in the collection currency), retail prices and retirement dates come from Brickset, themes from Rebrickable. Every tool is read-only. Say where a number comes from when you quote it, and remember values are market estimates, not appraisals.`;
+const INSTRUCTIONS = `${APP_NAME} is a self-hosted tracker for one person's brick-set collection. Values are BrickLink average sold prices (in the collection currency), retail prices and retirement dates come from Brickset, themes from Rebrickable. With MCP_WRITE=on the server also has tools that add sets and copies, change or remove copies (including marking one sold) and change the wishlist; confirm with the person before using them. Otherwise every tool is read-only. Say where a number comes from when you quote it, and remember values are market estimates, not appraisals.`;
 
 type Rpc = { jsonrpc?: string; id?: string | number | null; method?: string; params?: Json };
 type RpcOut = { jsonrpc: '2.0'; id: string | number | null; result?: unknown; error?: { code: number; message: string } };
@@ -272,7 +274,9 @@ const fail = (id: Rpc['id'], code: number, message: string): RpcOut => ({ jsonrp
 
 /** Handles one JSON-RPC message. Returns null for notifications (no reply). */
 /** `access`: the caller's (#50); everything when not given (tests, AUTH_MODE=none callers that pass none). */
-export async function handleRpc(db: DB, msg: Rpc, access: Access = { login: 'local', admin: true, roles: new Map() }): Promise<RpcOut | null> {
+/** `write: false` (an OAuth token without the mcp:write scope) leaves the write tools out even with MCP_WRITE=on. */
+export async function handleRpc(db: DB, msg: Rpc, access: Access = { login: 'local', admin: true, roles: new Map() }, opts: { write?: boolean } = {}): Promise<RpcOut | null> {
+  const writes = mcpWriteOn() && opts.write !== false;
   if (!msg || typeof msg !== 'object' || msg.jsonrpc !== '2.0' || typeof msg.method !== 'string') return fail(msg?.id, -32600, 'Invalid request');
   if (msg.id === undefined || msg.id === null) return null; // notification, e.g. notifications/initialized
   const { id, method, params = {} } = msg;
@@ -294,10 +298,15 @@ export async function handleRpc(db: DB, msg: Rpc, access: Access = { login: 'loc
     case 'tools/list':
       return {
         jsonrpc: '2.0', id,
-        result: { tools: TOOLS.map(({ name, title, description, inputSchema }) => ({ name, title, description, inputSchema, annotations: { title, readOnlyHint: true, openWorldHint: false } })) },
+        result: {
+          tools: [
+            ...TOOLS.map(({ name, title, description, inputSchema }) => ({ name, title, description, inputSchema, annotations: { title, readOnlyHint: true, openWorldHint: false } })),
+            ...(writes ? WRITE_TOOLS.map(({ name, title, description, inputSchema, destructive }) => ({ name, title, description, inputSchema, annotations: { title, readOnlyHint: false, destructiveHint: !!destructive, idempotentHint: false, openWorldHint: false } })) : []),
+          ],
+        },
       };
     case 'tools/call': {
-      const tool = TOOLS.find((t) => t.name === params.name);
+      const tool = TOOLS.find((t) => t.name === params.name) ?? (writes ? WRITE_TOOLS.find((t) => t.name === params.name) : undefined);
       if (!tool) return fail(id, -32602, `Unknown tool: ${String(params.name)}`);
       try {
         const data = await tool.run(db, (params.arguments && typeof params.arguments === 'object' ? params.arguments : {}) as Json, access);

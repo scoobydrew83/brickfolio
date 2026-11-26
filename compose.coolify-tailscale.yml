@@ -82,6 +82,7 @@ services:
       - SYNC_HOUR
       - BACKUP_KEEP
       - CRON_SECRET
+      - MCP_WRITE
     volumes:
       - data:/data
       - image-cache:/app/.next/cache/images

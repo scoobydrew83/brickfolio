@@ -43,6 +43,8 @@ export function SignInForm({ canReset = false, canEmailLink = false, providers =
     else if (r.error) say(r.error.message ?? 'That didn’t work.');
     // With two-factor on, a password sign-in stops here: twoFactorClient has gone to /sign-in/two-factor.
     else if (r.data && 'twoFactorRedirect' in r.data && r.data.twoFactorRedirect) return;
+    // Signing in for an MCP client (OAuth): Better Auth answers with where the authorization continues.
+    else if (r.data && 'url' in r.data && typeof r.data.url === 'string' && r.data.url) window.location.assign(r.data.url);
     else { router.replace('/'); router.refresh(); }
   });
 

@@ -12,7 +12,7 @@ import { partKey } from '@/lib/bricklink/wanted';
 import type { PartRow } from '@/lib/service/parts';
 import type { ValueSources } from '@/lib/service/prices';
 import type { Instruction } from '@/lib/brickset/client';
-import { copiesSummary, copyGuide, costBasis, displayNo, num, setGuide, STATUS_LABEL, type ConditionGap, type CopyRow, type SetRow } from '@/lib/sets';
+import { copiesSummary, copyGuide, costBasis, displayNo, isActive, num, realisedGain, setGuide, STATUS_LABEL, STICKERS_LABEL, type ConditionGap, type CopyRow, type SetRow } from '@/lib/sets';
 import { ModelViewer } from './ModelViewer';
 import { PartList, PartsSource } from './board/PartsDialog';
 import { locationLabel, RemoveButton, RetireChip } from './board/SetCard';
@@ -351,23 +351,28 @@ function CopiesSection({ s, money, pending, label, onAdd, onEdit, onRemove, coll
       <Callout className="mt-2 divide-y divide-line">
         {s.copies.map((c) => {
           const cost = costBasis(c);
-          const gain = cost != null && c.estValue != null ? Math.round((c.estValue - cost) * 100) / 100 : null;
+          const sold = c.status === 'sold';
+          const gain = sold ? realisedGain(c) : cost != null && c.estValue != null ? Math.round((c.estValue - cost) * 100) / 100 : null;
+          const counted = isActive(c);
+          const details = [c.hasBox != null && (c.hasBox ? 'box' : 'no box'), c.hasInstructions != null && (c.hasInstructions ? 'instructions' : 'no instructions'), c.stickers && `stickers: ${STICKERS_LABEL[c.stickers].toLowerCase()}`, c.boughtFrom && `from ${c.boughtFrom}`].filter(Boolean);
           const fallback = c.estGuide && c.estGuide !== copyGuide(c);
           return (
-            <div key={c.id} className={cx('px-3 py-2 text-sm', c.status === 'parted_out' && 'opacity-70')}>
+            <div key={c.id} className={cx('px-3 py-2 text-sm', !counted && 'opacity-70')}>
               <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                 <span className="font-semibold">{label(c)}</span>
-                <Chip tone={c.status === 'sealed' ? 'ok' : c.status === 'parted_out' ? 'neutral' : 'info'}>{STATUS_LABEL[c.status]}</Chip>
+                <Chip tone={c.status === 'sealed' ? 'ok' : c.status === 'sold' ? 'primary' : c.status === 'parted_out' ? 'neutral' : 'info'}>{STATUS_LABEL[c.status]}</Chip>
                 <Chip tone={CONDITION_TONE[c.condition] ?? 'neutral'}>{c.condition}</Chip>
                 {c.missingPct ? <span className="text-xs font-semibold text-warn">{c.missingPct}% missing</span> : null}
                 {c.gwp && <Chip tone="primary">Gift with purchase</Chip>}
-                <span className="ml-auto text-right font-bold tabular-nums">{c.status === 'parted_out' ? 'not counted' : money(c.estValue)}</span>
+                <span className="ml-auto text-right font-bold tabular-nums">{sold ? (c.salePrice != null ? `sold ${money(c.salePrice)}` : 'sold') : !counted ? 'not counted' : money(c.estValue)}</span>
               </div>
               <p className="mt-0.5 text-xs text-fg-3">
-                {[collectionName?.(c.collectionId ?? 1), c.location ?? 'No location', c.acquiredDate && `acquired ${c.acquiredDate}`, c.buildDate && `built ${c.buildDate}`, cost != null && `cost ${money(cost)}`].filter(Boolean).join(' · ')}
+                {[collectionName?.(c.collectionId ?? 1), c.location ?? 'No location', c.acquiredDate && `acquired ${c.acquiredDate}`, c.buildDate && `built ${c.buildDate}`, cost != null && `cost ${money(cost)}`, sold && c.soldDate && `sold ${c.soldDate}`, sold && c.soldVia && `via ${c.soldVia}`, sold && c.saleFees != null && `fees ${money(c.saleFees)}`].filter(Boolean).join(' · ')}
                 {gain !== null && <> · <b className={gain >= 0 ? 'text-ok' : 'text-danger'}>{gain >= 0 ? '+' : '−'}{money(Math.abs(gain))}</b></>}
-                {fallback && <> · priced from {c.estGuide === 'U' ? 'used' : 'new'} sales</>}
+                {sold && gain !== null && ' realised'}
+                {fallback && !sold && <> · priced from {c.estGuide === 'U' ? 'used' : 'new'} sales</>}
               </p>
+              {details.length > 0 && <p className="mt-0.5 text-xs text-fg-3">{details.join(' · ')}</p>}
               {c.notes && <p className="mt-0.5 whitespace-pre-line text-xs text-fg-2">{c.notes}</p>}
               {canCopy(c) && <div className="mt-1 flex gap-1">
                 <Button variant="ghost" size="sm" icon={Pencil} disabled={pending} onClick={() => onEdit(c)}>Edit</Button>

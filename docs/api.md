@@ -150,7 +150,7 @@ Paths are under `/api/v1`. `:setNo` takes `10280` or `10280-1`; `:figNo` takes a
 | GET | `/orders` | BrickLink orders (`?direction=in` sold, `out` bought), newest first |
 | GET | `/images/:kind/:no` | A set's or minifigure's photo, from the image cache |
 | GET | `/export.csv` | Every set (or one collection's) as CSV |
-| POST | `/import` | Import a Sets, History or Parts CSV (`text/csv`) |
+| POST | `/import` | Import a Sets, History or Parts CSV, or a Rebrickable, Brickset or BrickEconomy collection (`text/csv`); `?dryRun=1` previews a collection file without saving |
 | GET | `/report.pdf` | The valuation report as a PDF (`?owner=`, `?photos=1`, `?collection=`) |
 | GET, POST | `/share-links` | Share links (never the link itself), or create one (the link is returned once) |
 | DELETE | `/share-links/:id` | Revoke a share link |
@@ -169,7 +169,7 @@ Outside `/api/v1`, `GET /api/health` answers `{"ok":true}` when the database ope
 
 ## MCP
 
-`/api/mcp` is an MCP server (Streamable HTTP) with the same API tokens. Its tools only read: they never change anything. They answer only from the collections the token's owner can see.
+`/api/mcp` is an MCP server (Streamable HTTP) with the same API tokens. Its tools only read, unless you turn on the write tools (below). They answer only from the collections the token's owner can see.
 
 ### Connect
 
@@ -183,6 +183,17 @@ Outside `/api/v1`, `GET /api/health` answers `{"ok":true}` when the database ope
    Other clients take the same URL and header.
 
 The client has to reach your server, as for the REST API: on Tailscale, run it on a device in your tailnet; behind Cloudflare Access, add a service token or bypass rule for `/api/mcp`.
+
+### Connect with OAuth (Better Auth sign-in)
+
+With `AUTH_MODE=better-auth` and `BETTER_AUTH_URL` set, MCP clients can sign in themselves instead of using an API token: add the server with just its address, for example `claude mcp add --transport http brickfolio https://your-host/api/mcp`, and the client opens a browser to sign in to Brickfolio and approve it.
+
+- The client finds out how from `/.well-known/oauth-protected-resource/api/mcp` and `/.well-known/oauth-authorization-server/api/auth` (OAuth 2.1: authorization code with PKCE, dynamic client registration for public clients).
+- **Allow access to Brickfolio?** (`/oauth/consent`) names the client and what it asks for. It gets your role and sees only your collections, as in the app.
+- Scopes: `mcp:read` (needed for any tool), `mcp:write` (the write tools, and only with `MCP_WRITE=on`), `offline_access` (a refresh token, so it stays connected).
+- Access tokens are signed JWTs for `/api/mcp` only, valid for an hour; the client refreshes them. Someone taken out of `ALLOWED_USERS`, banned or no longer verified is refused at once.
+- In the other sign-in modes, use an API token as above. On Tailscale or behind Cloudflare Access, the client still has to reach the server.
+- Known limits: with two-factor sign-in on, the authorization doesn't resume after the code step; start the connection again from the client (you're signed in by then).
 
 ### Tools
 
@@ -204,3 +215,18 @@ Tools that take `collection` accept a collection name or id; left out, they answ
 | `value_history` | Daily totals (estimated value, sets, copies, pieces), oldest first | `days` (1–3650, default 90), `collection` |
 | `lookup_barcode` | Which set a UPC or EAN belongs to, from saved barcodes only (never asks an outside service), and whether you own or want it | `barcode` (required) |
 | `lookup_minifig_code` | Which Collectible Minifigure a box code belongs to, and whether you own it | `code` (required) |
+
+### Write tools (`MCP_WRITE=on`)
+
+With `MCP_WRITE=on` on the server, the assistant can also change the collection. They're off by default; turn them on only for assistants you trust, and expect a client to ask you before each call (they're marked `readOnlyHint: false`, and the removals `destructiveHint: true`). They check permissions like the app: adding needs a collection you can add to, changing a copy needs write access to its collection, and the wishlist needs the `shared` role. They refuse in demo mode.
+
+| Tool | What it does | Arguments |
+|---|---|---|
+| `add_set` | Adds a set with one or more copies; looked up on BrickLink now when the server has keys, else at the next sync | `setNo` (required), `name`, `qty`, copy fields, `collection` |
+| `add_copy` | Adds a copy to a set already in the collection | `setNo` (required), copy fields, `collection` |
+| `edit_copy` | Changes a copy, including marking it sold | `copyId` (required, from `get_set` → `copyList`), copy fields |
+| `remove_copy` | Deletes a copy (the set goes with its last one) | `copyId` (required) |
+| `add_wish` | Puts a set on the wishlist | `setNo` (required), `target`, `condition` (New, Used), `notes` |
+| `remove_wish` | Takes a set off the wishlist | `setNo` (required) |
+
+Copy fields: `status` (sealed, built, in_progress, parted_out, sold), `condition`, `location`, `missingPct`, `acquiredDate`, `buildDate`, `pricePaid`, `paidCurrency`, `tax`, `shipping`, `gwp`, `soldDate`, `salePrice`, `saleFees`, `soldVia`, `hasBox`, `hasInstructions`, `stickers` (applied, unapplied, none), `boughtFrom`, `notes`.

@@ -32,6 +32,7 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  // Not static files, image optimization, icons, the health check or the REST API.
-  matcher: ['/((?!_next/static|_next/image|favicon.ico|icon|apple-icon|manifest.webmanifest|api/).*)'],
+  // Not static files, image optimization, icons, the health check, the REST API, or the OAuth discovery documents
+  // MCP clients read before signing in (/.well-known/oauth-*).
+  matcher: ['/((?!_next/static|_next/image|favicon.ico|icon|apple-icon|manifest.webmanifest|api/|\\.well-known/oauth-).*)'],
 };
